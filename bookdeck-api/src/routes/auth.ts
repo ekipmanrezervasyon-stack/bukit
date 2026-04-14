@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { consumeOtp, getOtp, setOtp } from "../modules/auth/otp-store.js";
 import { createSessionToken, verifySessionToken } from "../modules/auth/session.js";
+import { sendOtpEmail } from "../modules/auth/otp-mail.js";
 
 const EmailSchema = z.string().email().max(190).transform((v) => v.trim().toLowerCase());
 const OtpCodeSchema = z.string().regex(/^\d{6}$/);
@@ -25,10 +26,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
     const email = parsed.data.email;
     const code = String(Math.floor(100000 + Math.random() * 900000));
+    if (env.OTP_DEV_BYPASS !== "true") {
+      try {
+        await sendOtpEmail(email, code, env.OTP_CODE_TTL_MINUTES);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        req.log.error({ err: e, email }, "otp email send failed");
+        return reply.code(500).send({ ok: false, error: message });
+      }
+    }
     const ttlMs = env.OTP_CODE_TTL_MINUTES * 60_000;
     setOtp(email, code, ttlMs);
 
-    // TODO: integrate mail provider. For now return code in dev bypass mode.
     return {
       ok: true,
       email,

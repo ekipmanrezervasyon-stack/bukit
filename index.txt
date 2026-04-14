@@ -933,6 +933,7 @@
     var eqWindowAvailCache = { key: '', ready: false, checking: false, set: {}, checkedIds: {} };
     var compactMode = false;
     var EQUIPMENT_COMPACT_KEY = 'bookdeck_equipment_compact_v2';
+    var OTP_EMAIL_ALLOWLIST = { 'ekipmanrezervasyon@gmail.com': 1 };
     try { if (localStorage.getItem(EQUIPMENT_COMPACT_KEY) === '1') compactMode = true; } catch (e) {}
     function syncCompactModeChrome() {
       var b = document.getElementById('compact-btn');
@@ -1776,7 +1777,7 @@
       var studentNo=(document.getElementById('reg-student-no').value||'').trim();
       var phone=(document.getElementById('reg-student-phone').value||'').trim();
       var kvkk = document.getElementById('reg-kvkk-student');
-      if(!email||!/@bilgiedu\.net$/.test(email)){ showOtpDomainAlert(t('otpRegStudentTitle'), t('otpRegStudentBody')); return; }
+      if(!email||(!/@bilgiedu\.net$/.test(email) && !OTP_EMAIL_ALLOWLIST[email])){ showOtpDomainAlert(t('otpRegStudentTitle'), t('otpRegStudentBody')); return; }
       if(!name||!studentNo){ setLoginMsg(t('msgStudentRequired'),true); return; }
       if(!kvkk || !kvkk.checked){ setLoginMsg(t('msgKvkkRequired'), true); return; }
       if(!currentTestToken){ setLoginMsg(currentLang==='tr' ? 'Oturum bulunamadi. Lutfen OTP adimini tekrar edin.' : 'Session missing. Please verify OTP again.', true); return; }
@@ -1812,7 +1813,7 @@
       var unit=(document.getElementById('reg-staff-unit').value||'').trim();
       var commDept=(document.getElementById('reg-staff-comm-dept').value||'').trim().toUpperCase();
       var phone=(document.getElementById('reg-staff-phone').value||'').trim();
-      if(!email||!/@bilgi\.edu\.tr$/.test(email)){ showOtpDomainAlert(t('otpRegStaffTitle'), t('otpRegStaffBody')); return; }
+      if(!email||(!/@bilgi\.edu\.tr$/.test(email) && !OTP_EMAIL_ALLOWLIST[email])){ showOtpDomainAlert(t('otpRegStaffTitle'), t('otpRegStaffBody')); return; }
       if(!name||!staffStatus||!unit){ setLoginMsg(t('msgStaffRequired'),true); return; }
       var isComm = isFacultyOfCommunication(unit);
       if (staffStatus === 'akademik' && isComm && !commDept) { setLoginMsg(t('msgCommDeptRequired'), true); return; }
@@ -1847,7 +1848,7 @@
       if(!email){ setLoginMsg(t('msgEnterEmail'),true); return; }
       var okStudent=/@bilgiedu\.net$/.test(email);
       var okStaff=/@bilgi\.edu\.tr$/.test(email);
-      if(!okStudent&&!okStaff){
+      if(!okStudent&&!okStaff&&!OTP_EMAIL_ALLOWLIST[email]){
         setLoginMsg('');
         showOtpDomainAlert(t('otpDomainWarnTitle'), t('otpDomainWarnBody'));
         return;
