@@ -4122,38 +4122,43 @@
       if(tbody)tbody.innerHTML='<tr><td colspan="5" class="p-6 text-center text-blue-500 text-xs animate-pulse">Loading…</td></tr>';
       if(loansEl)loansEl.innerHTML='<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
       if(penEl)penEl.innerHTML='<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
-      google.script.run.withSuccessHandler(function(ex){
-        applyDashboardBlockState(ex);
-        var loans=(ex&&ex.loans)||[];
-        var penalties=(ex&&ex.penalties)||[];
-        if(ex&&ex.error){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">'+(ex.error)+'</p>';}
-        else if(loansEl){
-          if(!loans.length){loansEl.innerHTML='<p class="text-gray-400 text-sm">No checked-out equipment on your account.</p>';}
-          else{
-            loansEl.innerHTML='<ul class="space-y-3">' + loans.map(function(L){
-              var warn=L.overdue?'<span class="text-red-600 font-black ml-1" title="Overdue">⚠</span>':'';
-              var timePart=formatRemainMs(L.msLeft);
-              var ext='';
-              if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
-                ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
-              }
-              return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
-            }).join('')+'</ul>';
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run.withSuccessHandler(function(ex){
+          applyDashboardBlockState(ex);
+          var loans=(ex&&ex.loans)||[];
+          var penalties=(ex&&ex.penalties)||[];
+          if(ex&&ex.error){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">'+(ex.error)+'</p>';}
+          else if(loansEl){
+            if(!loans.length){loansEl.innerHTML='<p class="text-gray-400 text-sm">No checked-out equipment on your account.</p>';}
+            else{
+              loansEl.innerHTML='<ul class="space-y-3">' + loans.map(function(L){
+                var warn=L.overdue?'<span class="text-red-600 font-black ml-1" title="Overdue">⚠</span>':'';
+                var timePart=formatRemainMs(L.msLeft);
+                var ext='';
+                if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
+                  ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
+                }
+                return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
+              }).join('')+'</ul>';
+            }
           }
-        }
-        if(penEl){
-          var activePen=(penalties||[]).filter(function(p){return p.active;});
-          if(!activePen.length){
-            penEl.innerHTML='<p class="text-emerald-800 font-semibold text-sm md:text-base leading-relaxed">👏 Thank you for returning equipment on time — you have no penalties on your account. Keep it up!</p>';
-          }else{
-            penEl.innerHTML=activePen.map(function(p){
-              var rem='';
-              if(p.remainingMs!=null&&!isNaN(p.remainingMs)) rem='<p class="text-[10px] text-amber-800 mt-1 font-bold">Time left: '+formatPenaltyRemainMs(p.remainingMs)+'</p>';
-              return '<div class="border border-amber-200 rounded-xl p-3 mb-2 bg-amber-50/80"><p class="font-black text-gray-900">'+escHtml(p.stageLabel)+'</p><p class="text-xs text-gray-700 mt-1">'+escHtml(p.reason||'')+'</p><p class="text-[10px] text-gray-500 mt-1">'+escHtml(p.banned_at||'')+'</p>'+rem+'</div>';
-            }).join('');
+          if(penEl){
+            var activePen=(penalties||[]).filter(function(p){return p.active;});
+            if(!activePen.length){
+              penEl.innerHTML='<p class="text-emerald-800 font-semibold text-sm md:text-base leading-relaxed">👏 Thank you for returning equipment on time — you have no penalties on your account. Keep it up!</p>';
+            }else{
+              penEl.innerHTML=activePen.map(function(p){
+                var rem='';
+                if(p.remainingMs!=null&&!isNaN(p.remainingMs)) rem='<p class="text-[10px] text-amber-800 mt-1 font-bold">Time left: '+formatPenaltyRemainMs(p.remainingMs)+'</p>';
+                return '<div class="border border-amber-200 rounded-xl p-3 mb-2 bg-amber-50/80"><p class="font-black text-gray-900">'+escHtml(p.stageLabel)+'</p><p class="text-xs text-gray-700 mt-1">'+escHtml(p.reason||'')+'</p><p class="text-[10px] text-gray-500 mt-1">'+escHtml(p.banned_at||'')+'</p>'+rem+'</div>';
+              }).join('');
+            }
           }
-        }
-      }).withFailureHandler(function(){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">Could not load loans.</p>';if(penEl)penEl.innerHTML='<p class="text-red-500 text-xs">Could not load penalties.</p>';}).getUserDashboardExtras(currentTestToken);
+        }).withFailureHandler(function(){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">Could not load loans.</p>';if(penEl)penEl.innerHTML='<p class="text-red-500 text-xs">Could not load penalties.</p>';}).getUserDashboardExtras(currentTestToken);
+      } else {
+        if(loansEl)loansEl.innerHTML='<p class="text-gray-400 text-sm">Loan summary is unavailable in this deployment.</p>';
+        if(penEl)penEl.innerHTML='<p class="text-gray-400 text-sm">Penalty summary is unavailable in this deployment.</p>';
+      }
 
       apiRequest('/me/bookings', { method: 'GET' }).then(function(payload){
         var data = (payload && payload.data) ? payload.data : [];
