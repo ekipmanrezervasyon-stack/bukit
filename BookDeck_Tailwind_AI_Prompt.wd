@@ -1,0 +1,164 @@
+# BookDeck UI Replication Prompt (Tailwind)
+
+Use this prompt with any code-generation AI to recreate the same visual system and page architecture for both user and admin UIs.
+
+## Copy-Paste Prompt
+
+You are a senior frontend engineer. Rebuild a web app UI using Tailwind CSS that matches the following design system and layout behavior exactly (or as close as possible).
+
+### 1) Global stack
+- Framework-agnostic HTML/JS (plain or React is fine).
+- Tailwind CSS CDN style usage.
+- Font family: `Inter` (weights 300/400/500/600/700/900).
+- Overall visual language: clean, high-contrast, utility-first, rounded cards, subtle shadows.
+- Color core:
+  - Primary red: `#e30613`
+  - Text dark: `#111827` / gray scales (`gray-900..gray-400`)
+  - Surface: `white`, background `gray-50`
+- Motion:
+  - Small fade-in transitions for sections.
+  - Hover lift/shadow on key cards.
+  - Spinner for loading overlays.
+
+### 2) Shared design tokens (Tailwind utility style)
+- Containers:
+  - `rounded-2xl` / `rounded-3xl`
+  - `border border-gray-100/200`
+  - `shadow-sm` (cards), `shadow-lg` (primary CTAs), `shadow-2xl` (modals)
+- Inputs:
+  - `bg-gray-50 border border-gray-200 rounded-xl|rounded-2xl`
+  - `text-sm font-bold`
+  - `focus:border-[#e30613] outline-none`
+- Buttons:
+  - Primary: `bg-[#e30613] text-white font-bold hover:bg-red-700`
+  - Secondary dark: `bg-gray-900 text-white hover:bg-black`
+  - Tertiary: light gray with border.
+- Labels:
+  - Admin form labels mostly `text-[10px] font-black uppercase tracking-widest text-gray-400`
+- Sticky/top bars:
+  - White background, gray bottom border, subtle shadow.
+
+### 3) User App (`index`) structure
+
+#### 3.1 Login overlay
+- Fullscreen fixed overlay (`fixed inset-0 z-[100] bg-white`).
+- Centered auth card width around `max-w-md`.
+- Brand lockup: BUKit with red `BUK`, dark `it`.
+- OTP flow:
+  1) email entry
+  2) code verify
+  3) optional registration sub-steps (student/staff)
+- CTA buttons full-width, rounded-xl, red primary.
+- Success/error modals with backdrop blur and strong colored header.
+
+#### 3.2 Top navigation
+- Sticky top nav (`sticky top-0 z-[45]`) white surface.
+- Left: BUKit/Istanbul Bilgi brand treatment.
+- Right: links + compact language toggle + admin link badge + sign-out pill button.
+- Admin link in red text/border pill.
+
+#### 3.3 Home hero + action cards
+- Hero heading with mixed color line:
+  - `Book it.` in red
+  - `Create it.` in dark
+- 4-card grid:
+  - Equipment
+  - Studio
+  - My bookings
+  - Ticket (conditionally shown)
+- Cards: `bg-white rounded-2xl border shadow-md hover:shadow-lg`, image on top, CTA button at bottom.
+
+#### 3.4 Equipment booking panel
+- Large white panel `rounded-2xl shadow-sm border`.
+- Date/time controls in responsive grid.
+- Category filter bar:
+  - Mobile sticky sub-bar near top
+  - Red active category chip
+  - Search input + compact mode toggle button
+- Equipment list appears as stacked groups/cards, with availability states and cart actions.
+
+#### 3.5 Studio area
+- Studio cards in single-column responsive stack.
+- Embedded/native weekly calendar area with clear busy/free/closed states.
+- Form sections for studio booking dates, times, purpose, request type, optional PDF lock logic.
+
+### 4) Admin App (`admin`) structure
+
+#### 4.1 Shell layout
+- Full-height app: `body h-screen overflow-hidden`.
+- Header (fixed height 64px-ish):
+  - Left: logo + red "admin" label
+  - Right: user info + "Üye görünümü" + logout buttons
+- Main split:
+  - Left sidebar fixed width (`w-56 sm:w-64`)
+  - Right main workspace scroll container
+
+#### 4.2 Sidebar
+- Vertical nav list with emoji-leading labels.
+- Active item style:
+  - light red background
+  - red text
+  - right border accent `4px #e30613`
+- Pending item has red animated badge.
+- Some menu entries visually grouped with `border-t border-gray-100`.
+
+#### 4.3 Admin pages look
+- Each page uses `bg-gray-50`, generous padding (`p-6`/`p-8`), white cards.
+- Common pages:
+  - Traffic (deliver/returns)
+  - Quick checkout (left list + right cart panel)
+  - Pending approvals
+  - Inventory
+  - Studio calendar/reservation
+  - History / reports / tickets / penalties
+- Typography:
+  - Section titles usually `text-xl font-black`.
+  - Meta text very small uppercase gray.
+
+#### 4.4 Studio admin calendar
+- Studio selector grid chips/cards.
+- Calendar wrapper:
+  - `bg-white rounded-3xl border shadow-sm`
+  - Header row with studio icon/name + prev/next week controls
+  - Scrollable calendar body
+- Busy cell tone: rose/red background.
+- Free cell tone: emerald background.
+- Selected cell ring accent red.
+- Busy cell click opens modal with edit/delete actions.
+
+#### 4.5 Modals and toasts
+- Modal backdrop: `fixed inset-0 bg-black/50 backdrop-blur-[1px]`.
+- Modal card: white, rounded-2xl, shadow-2xl, border-gray-100.
+- Toast stack: bottom-right fixed, short-lived success/error variants.
+
+### 5) Responsive behavior
+- Mobile-first.
+- Keep form inputs >=16px on small devices to prevent iOS zoom.
+- Sidebar stays scrollable (`overflow-y-auto`) while header remains fixed.
+- Main content sections independently scrollable.
+- Important sticky regions:
+  - User top nav
+  - Some filter bars on mobile
+
+### 6) Micro-interactions
+- Smooth section fade-in.
+- Card hover lift.
+- Loading skeleton/spinner placeholders.
+- Disabled/loading CTA states for async actions.
+- Badge pulse for pending count.
+
+### 7) Deliverables
+- Build two pages:
+  1) `user-app` page
+  2) `admin-app` page
+- Include reusable component mapping:
+  - TopNav, Sidebar, Card, InputField, PrimaryButton, SecondaryButton, Modal, Toast, CalendarGrid, StatusBadge.
+- Ensure class naming and utility density resembles a handcrafted Tailwind production app (not minimal demo).
+
+### 8) Must-match visual cues
+- Frequent use of `font-black`.
+- Red accent `#e30613` for primary actions/highlights.
+- Rounded corners (`xl/2xl/3xl`) everywhere.
+- White cards on gray-50 canvas.
+- Dense yet readable admin console + polished user-facing booking UI.
+

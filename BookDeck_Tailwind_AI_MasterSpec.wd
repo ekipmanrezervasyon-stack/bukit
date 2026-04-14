@@ -1,0 +1,361 @@
+# BookDeck Full AI Rebuild Pack (User + Admin)
+
+Bu dosya, tek seferde bir AI'ye verip BookDeck'in hem kullanıcı hem admin arayüzünü aynı görsel dilde yeniden üretmek için hazırlanmış tam pakettir.
+
+---
+
+## 1) MASTER SYSTEM PROMPT (Doğrudan kopyala-yapıştır)
+
+You are a principal frontend engineer and design-system implementer.
+Recreate a production-grade web UI with Tailwind CSS that visually and structurally matches the BookDeck app described below.
+Do not build a generic dashboard. Match the exact brand tone, spacing rhythm, typography weight, rounded geometry, and section composition.
+
+You must output:
+1) User app UI
+2) Admin app UI
+3) Reusable component library
+4) Shared design tokens and style contract
+5) Screen-level layout implementations
+6) Interaction states (loading/empty/error/success)
+7) Accessibility-ready markup
+
+Prioritize:
+- High-fidelity Tailwind utility composition
+- Dense but readable admin console
+- Modern polished user booking surface
+- Mobile-first responsiveness
+- Exact red accent behavior
+
+---
+
+## 2) Visual DNA (Non-negotiable)
+
+- Primary brand red: `#e30613`
+- Primary dark text: `#111827` (`gray-900`)
+- App canvas: `bg-gray-50`
+- Surface cards: white + subtle border + soft shadow
+- Typography: Inter
+- Weight hierarchy:
+  - headers/buttons/chips often `font-black`
+  - body `font-medium`/`font-semibold`
+- Geometry:
+  - inputs/buttons/cards mostly `rounded-xl`, `rounded-2xl`, `rounded-3xl`
+- Motion:
+  - short fade-in
+  - hover shadow-lift on cards
+  - pulse badge
+
+---
+
+## 3) Tailwind Style Contract
+
+### 3.1 Layout primitives
+- Main wrapper: `min-h-screen bg-gray-50 text-gray-900`
+- Section card:
+  - `bg-white border border-gray-100 rounded-2xl shadow-sm`
+- Elevated card:
+  - `bg-white border border-gray-100 rounded-2xl shadow-md hover:shadow-lg transition-shadow`
+- Modal:
+  - Backdrop: `fixed inset-0 bg-black/50 backdrop-blur-[1px] z-[100]`
+  - Panel: `bg-white rounded-2xl border border-gray-100 shadow-2xl`
+
+### 3.2 Inputs
+- Base input:
+  - `w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-[#e30613]`
+- Admin strict input:
+  - `w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold outline-none focus:border-[#e30613] transition`
+
+### 3.3 Buttons
+- Primary red:
+  - `bg-[#e30613] text-white font-bold hover:bg-red-700 transition`
+- Dark action:
+  - `bg-gray-900 text-white font-bold hover:bg-black transition`
+- Soft tertiary:
+  - `bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition`
+
+### 3.4 Typographic hierarchy
+- Hero: `text-2xl md:text-4xl lg:text-[2.75rem] font-black tracking-tight`
+- Section title: `text-xl font-black text-gray-900`
+- Label micro: `text-[10px] font-black uppercase tracking-widest text-gray-400`
+- Helper text: `text-xs text-gray-500`
+
+---
+
+## 4) Information Architecture
+
+## 4.1 User App screens
+1. Login Overlay (OTP)
+2. Reserve Home / Hero
+3. Equipment Booking
+4. Studio Booking
+5. My Bookings
+6. Ticket (conditional)
+7. Mobile Bottom Nav
+
+## 4.2 Admin App screens
+1. Traffic (deliver/returns)
+2. Quick Checkout
+3. Pending approvals
+4. Inventory
+5. Studio calendar + reservation form
+6. Forward reservation
+7. Overdue
+8. Penalties
+9. Users
+10. History
+11. Tickets
+12. Bize Ulaşın
+13. Reports (super)
+14. Special Access (super)
+15. IIW
+
+---
+
+## 5) User App Detailed Spec
+
+### 5.1 Login overlay
+- Full-page lock: `fixed inset-0 bg-white z-[100]`
+- Contains:
+  - session restore loader
+  - OTP email step
+  - OTP verify step
+  - optional registration step
+- CTAs:
+  - full width
+  - red primary
+  - rounded-xl
+- include success and error modals:
+  - error: red header + exclamation
+  - success: green header + check mark
+
+### 5.2 Top navbar
+- Sticky white nav with border + subtle shadow.
+- Left: logo with red fragments (`BUK` red, remainder dark).
+- Right cluster:
+  - nav links (desktop)
+  - language toggle chip
+  - admin pill link (red outline text)
+  - sign-out pill dark
+
+### 5.3 Reserve hero + action cards
+- Central headline:
+  - red phrase + dark phrase in one line
+- Four cards (responsive grid):
+  - Equipment
+  - Studio
+  - Bookings
+  - Ticket (can be hidden)
+- Card recipe:
+  - `bg-white rounded-2xl border border-gray-100 shadow-md hover:shadow-lg`
+  - image top
+  - title + description
+  - CTA bottom
+
+### 5.4 Equipment booking panel
+- Large white panel with date-time controls and category filters.
+- Sticky filter bar on mobile.
+- Active category uses red background.
+- Search box with icon left.
+- Compact mode toggle icon button.
+- Purpose textarea required after date selection.
+- Equipment list:
+  - grouped cards
+  - availability badges
+  - add/remove/cart state visuals
+
+### 5.5 Studio booking panel
+- Studio cards list + native weekly calendar.
+- Calendar has free/busy/closed states.
+- Booking form includes:
+  - start/end date+time
+  - request type select
+  - project name counter
+  - optional PDF field lock logic
+- warning banners:
+  - range warning (amber)
+  - busy warning (red thick border/ring)
+
+### 5.6 Mobile bottom nav
+- fixed bottom bar
+- icon + tiny text labels
+- ticket icon optionally hidden
+
+---
+
+## 6) Admin App Detailed Spec
+
+### 6.1 Shell
+- Header fixed top (`h-16`) with white background.
+- Sidebar fixed width (`w-56 sm:w-64`) and scrollable nav.
+- Main area fills remaining width, each page scrolls independently.
+
+### 6.2 Sidebar
+- Buttons are full-width row items, emoji-led text.
+- Active state:
+  - light red background
+  - red text
+  - right accent bar
+- Pending badge red pulse.
+- some items separated by top border.
+
+### 6.3 Inventory page
+- Left: searchable equipment grid.
+- Right: detail panel.
+- Clean split with border.
+
+### 6.4 Quick checkout page
+- Left list of equipment.
+- Right cart panel with:
+  - user resolve input
+  - display name
+  - purpose
+  - return date/time
+  - huge red CTA
+
+### 6.5 Pending page
+- title + search + refresh.
+- duplicate warning banner (red box).
+- card list area.
+
+### 6.6 Traffic page
+- date selector + refresh + search.
+- two-column responsive card grid.
+- action rows for checkout/checkin/extend/cancel/transfer.
+
+### 6.7 Studio admin page
+- studio selector card grid
+- weekly calendar wrapper:
+  - rounded-3xl white card
+  - header with icon, name, week controls
+  - scrollable table body
+- event click opens modal (edit/delete choices)
+- reservation create form in large white rounded card
+
+### 6.8 Utility pages
+- History: table card layout.
+- Reports: KPI cards + progress visuals.
+- Tickets/Bize: list cards with action buttons.
+
+---
+
+## 7) Component Dictionary (Build these exact)
+
+1. `BrandLogo`
+2. `TopNavUser`
+3. `BottomNavMobile`
+4. `SidebarAdmin`
+5. `SectionCard`
+6. `ActionCard`
+7. `PrimaryButton`
+8. `SecondaryButton`
+9. `InputField`
+10. `SelectField`
+11. `TextAreaField`
+12. `BadgeStatus`
+13. `ToastStack`
+14. `ModalDialog`
+15. `WeeklyCalendarGrid`
+16. `StudioSelectorCard`
+17. `DataTableCard`
+18. `SplitPane`
+19. `LoadingOverlay`
+20. `WarningBanner`
+
+For each component expose props for:
+- variant
+- disabled/loading
+- compact mode
+- icon slot
+
+---
+
+## 8) State Model (Must implement)
+
+### 8.1 Global states
+- `authState`: `checking | unauthenticated | authenticated`
+- `roleState`: `student | instructor | technician | iiw_instructor | iiw_admin | super_admin`
+- `uiLang`: `tr | en`
+- `networkState`: `idle | loading | error`
+
+### 8.2 User app local states
+- `activeTab`
+- `equipmentCategory`
+- `equipmentSearch`
+- `equipmentCart`
+- `studioSelection`
+- `studioWeekCursor`
+- `bookingWarnings`
+
+### 8.3 Admin app local states
+- `activeAdminPage`
+- `pendingCount`
+- `adminStudioWeekStart`
+- `adminStudioSelectedSlot`
+- `trafficFilterDate`
+- `quickCheckoutCart`
+
+---
+
+## 9) Responsive Rules
+
+- Mobile-first breakpoints: `sm`, `md`, `lg`, `xl`.
+- Inputs on small screens must stay >=16px font.
+- Sidebar remains scrollable while header fixed.
+- Main content keeps `min-h-0` where needed to prevent overflow bugs.
+- Sticky utility bars only where useful (nav/filter).
+
+---
+
+## 10) Accessibility Rules
+
+- All icon-only buttons need `aria-label`.
+- Modals: `role="dialog"` + `aria-modal="true"`.
+- Keyboard focus visible (ring with red tint).
+- Color contrast for primary CTA text always WCAG-compliant.
+- Use semantic headings and form labels.
+
+---
+
+## 11) Interaction Rules
+
+- Any async button gets loading/disabled state.
+- Avoid duplicate in-flight requests for same data block.
+- Show inline error state for failed fetch.
+- Show empty states with actionable hint text.
+- Keep toast feedback for success/error short and clear.
+
+---
+
+## 12) Build Output Requirements
+
+Return:
+1. `UserApp` page implementation
+2. `AdminApp` page implementation
+3. `components/*` set
+4. `styles/tokens` or utility contract
+5. `mockData.ts` with realistic fixture data
+6. `README` explaining component map and page composition
+
+Do not output pseudocode. Output concrete UI code.
+
+---
+
+## 13) Acceptance Checklist (Done when all true)
+
+- [ ] Brand red usage matches primary actions and highlights.
+- [ ] User app has OTP overlay and reserve-home card grid.
+- [ ] Admin shell has fixed header + left sidebar + multi-page views.
+- [ ] Studio weekly calendar exists in both user and admin contexts.
+- [ ] Buttons/inputs/cards follow rounded + border + shadow system.
+- [ ] `font-black` emphasis appears in headers and key labels.
+- [ ] Mobile and desktop both visually coherent.
+- [ ] Modal, toast, loading, empty, error states present.
+
+---
+
+## 14) Optional “Strict Match” Add-on Prompt
+
+If the model supports screenshot-to-code or iterative refinement, append:
+
+"After first pass, run a second pass to increase visual density and tighten spacing to match a mature production Tailwind app: smaller meta typography, stronger uppercase micro-labels, more explicit borders, and controlled card shadows. Keep red accents constrained to primary interactions and semantic warnings."
+

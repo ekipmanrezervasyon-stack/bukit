@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BUKit Admin</title>
+</head>
+<body>
+  <script>
+    (function () {
+      fetch("./admin.txt", { cache: "no-store" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("Failed to load admin.txt");
+          return res.text();
+        })
+        .then(function (html) {
+          document.open();
+          document.write(html);
+          document.close();
+        })
+        .catch(function (err) {
+          document.body.innerHTML = "<pre style=\"font-family: sans-serif; padding: 20px; color: #b91c1c;\">Admin page load error: " +
+            String((err && err.message) || err) + "</pre>";
+        });
+    })();
+  </script>
+</body>
+</html>

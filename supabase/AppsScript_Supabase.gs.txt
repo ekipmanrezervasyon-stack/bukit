@@ -1,0 +1,87 @@
+// ── Supabase REST (PostgREST) — Apps Script'e .gs olarak ekleyin ─────────
+// Script Properties:
+//   SUPABASE_URL = https://xxxxxxxx.supabase.co  (sonda / yok)
+//   SUPABASE_SERVICE_ROLE_KEY = eyJ... (service_role — asla istemciye vermeyin)
+//
+// Supabase Dashboard → Settings → API
+
+function supabaseGetConfig_() {
+  var p = PropertiesService.getScriptProperties();
+  var base = String(p.getProperty('SUPABASE_URL') || '').replace(/\/$/, '');
+  var key = String(p.getProperty('SUPABASE_SERVICE_ROLE_KEY') || '').trim();
+  if (!base || !key) throw new Error('Supabase: SUPABASE_URL ve SUPABASE_SERVICE_ROLE_KEY Script Properties içinde tanımlı olmalı.');
+  return { base: base, key: key };
+}
+
+/**
+ * PostgREST çağrısı.
+ * @param {string} method GET|POST|PATCH|DELETE
+ * @param {string} table Örn. studio_reservations
+ * @param {Object} opt query (örn. '?id=eq.SRES_1'), body (object|array), prefer (örn. 'return=representation')
+ */
+function supabaseRest_(method, table, opt) {
+  opt = opt || {};
+  var c = supabaseGetConfig_();
+  var q = opt.query ? (String(opt.query).indexOf('?') === 0 ? opt.query : '?' + opt.query) : '';
+  var url = c.base + '/rest/v1/' + table + q;
+  var headers = {
+    apikey: c.key,
+    Authorization: 'Bearer ' + c.key,
+    'Content-Type': 'application/json'
+  };
+  if (opt.prefer) headers.Prefer = opt.prefer;
+  var fetchOpt = { method: method, headers: headers, muteHttpExceptions: true };
+  if (opt.body != null && method !== 'GET' && method !== 'HEAD') {
+    fetchOpt.payload = JSON.stringify(opt.body);
+  }
+  var resp = UrlFetchApp.fetch(url, fetchOpt);
+  var code = resp.getResponseCode();
+  var text = resp.getContentText() || '';
+  if (code >= 400) throw new Error('Supabase HTTP ' + code + ': ' + text);
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return text;
+  }
+}
+
+/** Tek satır: id = eq */
+function supabaseRow_(table, idCol, idVal) {
+  var rows = supabaseRest_('GET', table, {
+    query: idCol + '=eq.' + encodeURIComponent(idVal)
+  });
+  return rows && rows.length ? rows[0] : null;
+}
+
+/** INSERT (tek veya çok satır) */
+function supabaseInsert_(table, rowOrRows) {
+  return supabaseRest_('POST', table, {
+    body: rowOrRows,
+    prefer: 'return=representation'
+  });
+}
+
+/** PATCH filtre: ?id=eq.xxx */
+function supabaseUpdate_(table, idCol, idVal, patch) {
+  return supabaseRest_('PATCH', table, {
+    query: idCol + '=eq.' + encodeURIComponent(idVal),
+    body: patch,
+    prefer: 'return=representation'
+  });
+}
+
+/** DELETE filtre */
+function supabaseDelete_(table, idCol, idVal) {
+  return supabaseRest_('DELETE', table, {
+    query: idCol + '=eq.' + encodeURIComponent(idVal)
+  });
+}
+
+/**
+ * Örnek: stüdyo rezervasyonunu güncelle (Sheet yerine).
+ * Tarih alanlarını ISO 8601 string veya Postgres'in kabul ettiği formatta gönderin.
+ */
+function exampleStudioReservationPatchFromSheets_(reservationId, fields) {
+  return supabaseUpdate_('studio_reservations', 'id', reservationId, fields);
+}

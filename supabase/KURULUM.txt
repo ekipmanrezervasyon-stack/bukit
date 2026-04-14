@@ -1,0 +1,43 @@
+BookDeck + Supabase + Apps Script
+=================================
+
+1) Supabase projesi oluşturun (supabase.com).
+
+2) SQL Editor’de migrations/001_bookdeck_initial.sql dosyasının tamamını çalıştırın.
+
+3) Google Apps Script → Proje Ayarları → Script özellikleri:
+   SUPABASE_URL        = https://<project-ref>.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY = (Settings → API → service_role secret)
+
+   UYARI: service_role anahtarı tüm RLS’yi bypass eder. Sadece sunucu tarafında (Apps Script)
+   tutun; HTML şablonlarına veya tarayıcıya koymayın.
+
+4) AppsScript_Supabase.gs.txt içeriğini projeye yeni bir .gs dosyası olarak ekleyin.
+
+5) Veri taşıma: Sheet’leri CSV export → Supabase Table Editor ile import VEYA
+   Apps Script ile satır satır supabaseInsert_ çağıran geçici bir migration fonksiyonu yazın.
+   Tarih sütunlarında timezone: mümkünse UTC ISO string kullanın.
+
+6) Uygulama kodu: getSheet / addRow / setRow kullanan her fonksiyonu aşamalı olarak
+   supabaseRest_ / supabaseInsert_ / supabaseUpdate_ ile değiştirin. İlk aşamada
+   sadece studio_reservations veya sadece okuma-yazma tek tablo ile pilot yapılabilir.
+
+─── Sheet + Supabase birlikte (geçiş dönemi) ─────────────────
+- Sheet her zaman doğruluk kaynağıdır; liste ve iş kuralları Sheet’ten okunur.
+- code.gs içinde trySupabaseMirrorStudioRow_: Sheet’e başarılı yazımdan SONRA
+  (create / approve / reject / cancel / anahtar teslim / iade) Supabase’e upsert dener.
+- Açmak için Script Properties:
+    SUPABASE_MIRROR = true
+    SUPABASE_URL = https://xxxxx.supabase.co
+    SUPABASE_SERVICE_ROLE_KEY = (service_role)
+- Kapatmak için: SUPABASE_MIRROR silin veya false yapın → yalnız Sheet çalışır.
+- Supabase hata verirse kullanıcıya hata gösterilmez; yalnız Logger’a yazılır.
+- Eski Sheet satırlarını Supabase’e almak için bir kerelik CSV import veya
+  Apps Script ile toObjs + trySupabaseMirrorStudioRow_ döngüsü kullanılabilir.
+
+PostgREST filtre örnekleri (query parametresi):
+  ?status=eq.approved
+  ?user_id=eq.USR_123&order=created_at.desc
+  ?select=*&limit=50
+
+Tablo adları SQL dosyasındaki ile aynı olmalı (snake_case).

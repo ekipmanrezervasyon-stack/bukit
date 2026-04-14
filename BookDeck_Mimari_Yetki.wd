@@ -1,0 +1,319 @@
+# BookDeck Mimarisi, Kurallari ve Yetki Matrisi
+
+Bu dokuman `index.txt`, `admin.txt` ve `code.gs.txt` dosyalarindaki mevcut yapinin teknik ozetidir.
+
+## 1) Genel Mimari
+
+- Platform: Google Apps Script (tek Web App deployment).
+- Frontend:
+  - `index.txt`: kullanici arayuzu (ogrenci/personel, OTP login, rezervasyon akislari).
+  - `admin.txt`: admin arayuzu (envanter, rezervasyon, trafik, studio, raporlar).
+- Backend:
+  - `code.gs.txt`: tum API, is kurallari, yetki kontrolu, veri katmani.
+- Ana girisler:
+  - `doGet(e)`: HTML sunumu (`index`, `admin`, `app`) + mode/token kontrolleri.
+  - `doPost(e)`: JSON API routing; artik OTP session token ile `resolveCurrentUser` kullanir.
+
+## 2) Veri Kaynaklari
+
+- Birincil veri katmani: Google Sheets (`SHEETS` sabiti):
+  - `Personel`, `Öğrenciler`, `Sayfa1` (envanter), `Rezervasyonlar`, `Stüdyo Rezervasyonları`, `Mekanlar`, `Yasaklılar`, `Destek Talepleri`, vb.
+- Opsiyonel katman: Supabase (bayraklara bagli)
+  - Okuma/yazma/mirror davranisi Script Properties ile kontrol edilir.
+- Takvim entegrasyonu:
+  - Google Calendar aktif (`STUDIO_CALENDAR_EMBEDS` + `GOOGLE_STUDIO_SYNC_ENABLED`).
+  - Outlook tarafi kodda devre disi olacak sekilde sert kapatilmistir.
+
+## 3) Kimlik Dogrulama ve Oturum
+
+### 3.1 OTP Akisi (aktif)
+- `authSendOtp` -> e-posta OTP kodu olusturur (rate-limit + cache).
+- `authVerifyOtp` -> kodu dogrular, session token olusturur.
+- `authGetSession` -> token'dan session user cozer.
+- `authLogout` -> session token temizler.
+- `resolveCurrentUser` -> backend'in temel kimlik cozumleyicisidir.
+
+### 3.2 SSO/MS durumu
+- Microsoft SSO login akisi artik kullanilmiyor.
+- `verifyMicrosoftToken` fonksiyonu emekli (kullanim disi).
+- Legacy temizlik bridge'leri:
+  - `disableOutlookStudioInfraBridge(testToken)` -> `OUTLOOK_*` ve `MS_*` properties temizligi.
+  - `clearLegacySsoDataBridge(testToken)` -> yukaridaki + `Users` tablosunda `ms_oid` alanlarini temizleme.
+
+## 4) Rol Modeli
+
+`ROLES`:
+- `super_admin`
+- `technician`
+- `iiw_instructor`
+- `iiw_admin`
+- `instructor`
+- `student`
+
+Yardimci kontroller:
+- `isAppAdminRole_`: `super_admin | technician | iiw_instructor`
+- `isIiwAdminRole_`: sadece `iiw_admin`
+- `canAccessAdminWeb_`: app admin + iiw_admin
+
+## 5) Backend Routing ve Yetki Mantigi
+
+Ana router: `routeAction(action, payload, user)`.
+
+Yetki wrapper'i:
+- `req(user, roles, fn)` -> `user.role` listede degilse `Access denied`.
+
+### 5.1 Modul bazli yetki matrisi (ozet)
+
+- `auth.*`
+  - `auth.getProfile`: login olan herkes
+  - `auth.listUsers/upsert/delete/updateRole`: `super_admin`
+- `inventory.*`
+  - `list/get/validateCart`: login olanlar
+  - `create/update/checkout/checkin/uploadPhoto`: `super_admin | technician | iiw_instructor`
+  - `delete`: `super_admin`
+- `rooms.*`
+  - `list/get`: login olanlar
+  - `create/delete`: `super_admin`
+  - `update`: `super_admin | technician | iiw_instructor`
+- `reservations.*` (ekipman)
+  - `list/get/create/cancel/checkAvail/checkSlot/getCalendar`: login olanlar
+  - `approve/reject`: `super_admin | technician | iiw_instructor`
+- `studio.reservations.*`
+  - `list/create/cancel/myReservations`: login olanlar (studio erisim kurali ayrica kontrol edilir)
+  - `approve/reject`: `super_admin | technician | iiw_instructor`
+- `assignments.*`
+  - `create/update`: `super_admin | technician | iiw_instructor | instructor`
+  - `approve`: `super_admin | instructor`
+  - `complete`: sahibi ogrenci veya admin
+  - `delete`: `super_admin`
+- `reports.*`
+  - inventory/reservation/overdue: admin roller
+  - assignment stats: `super_admin | instructor`
+- `restrictions.*`
+  - list/apply/ban: `super_admin | technician | iiw_instructor`
+  - unban: `super_admin`
+- `admin.*` config/audit/init: cogu `super_admin`
+- `tickets.*`
+  - create/myTickets: login olanlar
+  - list/approve/reject: `super_admin | technician | iiw_instructor`
+
+Not: Admin panel bridge fonksiyonlarinda ek olarak `requireAdminWebUser_` veya `_requireSuperAdminToken_` kontrolu vardir.
+
+## 6) UI Mimarisi
+
+### 6.1 `index.txt` (Kullanici UI)
+- OTP login ekrani + oturum geri yukleme.
+- Sekme/akislar:
+  - Ekipman katalogu + sepet + checkout
+  - Studio secimi + studio takvim gorunumu + rezervasyon olusturma
+  - My bookings
+  - Ticket/contact formlari
+- Sunucu ile haberlesme:
+  - Agirlikla `google.script.run` bridge cagri modeli.
+- Client tarafinda:
+  - Dil, tarih/saat dogrulama, tatil ve slot yardimcilari, modal/toast state yonetimi.
+
+### 6.2 `admin.txt` (Admin UI)
+- Token kaynaklari: URL `at` parametresi + local/session storage.
+- Ana moduller:
+  - Pending talepler (approve/reject/partial)
+  - Trafik (checkout/checkin/extend/transfer/cancel)
+  - Envanter detay ve meta guncelleme
+  - Studio admin takvimi (haftalik grid, event edit/delete/create)
+  - Forward rezervasyon
+  - Overdue, penalties, tickets, bize ulasin, raporlar
+- Polling:
+  - `checkNewReservations` arka planda yavaslatildi (60sn) + hidden tab guard.
+
+## 7) Is Kurallari (Core)
+
+### 7.1 Ekipman kurallari
+- Seviye bazli erisim: `LEVEL_ACCESS` ve ekipman seviyesi esitlestirme.
+- Cart validasyonu:
+  - item status `AVAILABLE` olma kontrolu
+  - kategori bazli max adet
+  - ayni model icin max adet (`Ekipman Seviyesi MAX:N`).
+- Rezervasyon olusturma:
+  - ban kontrolu
+  - aktif rezervasyon var mi
+  - kullanicida hali hazirda ekipman var mi
+  - zaman araligi ve slot kapasite kontrolleri.
+
+### 7.2 Studio kurallari
+- Studio erisim seviyesi kontrolu (`canUserAccessStudio`).
+- Zaman araligi validasyonu, hafta sonu/mesai kurallari, ayni kullanicinin cakisma kontrolu.
+- Anahtar uygunluk kontrolu (`studioFindAvailableKey`, `studioCheckKeyBusy`).
+- Admin direct olusum akisi ve otomatik approved senaryolari.
+
+### 7.3 Yasak/ceza kurallari
+- Gecikme ve no-show kaynakli yaptirimlar.
+- Trigger tabanli otomasyon:
+  - overdue kontrolu
+  - pickup no-show auto-cancel
+  - studio no-show auto-cancel.
+
+## 8) Supabase Bayraklari ve Davranis
+
+Temel bayraklar (Script Properties):
+- `SUPABASE_READ_ENABLED`
+- `SUPABASE_MIRROR`
+- `SUPABASE_ALLOW_EMPTY`
+- `SUPABASE_STRICT_READ`
+- `SUPABASE_PRIMARY_WRITE`
+- `SUPABASE_ONLY_EQUIPMENT_RESERVATIONS`
+- `SUPABASE_ONLY_STUDIO_RESERVATIONS`
+
+Davranis:
+- Bayraklar acik oldugunda belirli akislarda Supabase one cikar.
+- Bazi envanter/read kisimlari halen Sheet fallback veya Sheet source kullanabilir.
+- Studio reservation source icin cache katmani eklidir (`studio_reservations_supabase_v1`).
+
+## 9) Takvim ve Senkronizasyon
+
+- Google Studio sync:
+  - `syncGoogleCalendarIntoStudio_`
+  - `syncGoogleCalendarsToStudiosBridge`
+  - `triggerGoogleStudioSyncPolling`
+- Studio rezervasyon update/delete olaylarinda external calendar sync:
+  - `_safeSyncStudioReservationExternalCalendar_`
+- Outlook senkron kodu mevcut ama deploy davranisinda kapatilmis durumdadir.
+
+## 10) Operasyonel Kurallar / Konvansiyonlar
+
+- Audit kaydi yaygin: `audit(action, actorId, targetId, old, new)`.
+- Bildirim akislari:
+  - in-app notifications
+  - e-posta bildirimleri (OTP, karar mailleri, vb).
+- Caching:
+  - ScriptCache ile inventory/equipment/studio listeleri ve user lookup optimize edilir.
+- Triggerlar:
+  - periyodik bakim/senkron/guncelleme isleri zaman tabanli tetiklenir.
+
+## 11) Bilinen Sinirlar / Dikkat Noktalari
+
+- `index/admin` tarafinda cok sayida `google.script.run` cagrisi var; UI tarafi polling ve tekrarli istekler kotayi etkiler.
+- Supabase + Sheet hibrit modelde veri kaynagi secimi fonksiyon bazinda degisir; degisiklik yaparken source-of-truth netlestirilmelidir.
+- Yetki kontrolleri hem router seviyesinde (`req`) hem bridge seviyesinde (`requireAdminWebUser_`) oldugu icin yeni endpointlerde iki katman da korunmalidir.
+
+## 12) Hizli Referans (Dosya Sorumluluklari)
+
+- `code.gs.txt`
+  - backend API, auth/session, yetki, is kurallari, veri erisimi, triggerlar, sync.
+- `index.txt`
+  - son kullanici arayuzu, OTP onboarding/login, rezervasyon UX.
+- `admin.txt`
+  - operasyonel panel, admin is akislari, studio takvim yonetimi, raporlar.
+
+## 13) Endpoint-by-Endpoint
+
+Bu bolumde endpoint terimi 2 katman icin kullanilir:
+- HTTP/WebApp endpoint (`doGet`, `doPost`)
+- `doPost` icindeki `action` endpointleri (`routeAction`)
+
+### 13.1 HTTP/WebApp endpointleri
+
+| Katman | Endpoint | Giris | Cikis | Yetki |
+|---|---|---|---|---|
+| HTTP GET | `doGet(e)` | `page`, `at/token`, `validationToken`, `ping` | `index/admin/app` HTML veya text | `page=admin` icin token/session role kontrolu |
+| HTTP POST | `doPost(e)` | `{ token, action, payload }` | `{ success, data/error }` JSON | `resolveCurrentUser(token)` zorunlu |
+| Webhook POST | `doPost(e?msgraph=1)` | MS webhook body | webhook ack JSON | legacy akistir, Outlook sync devre disi |
+
+### 13.2 `routeAction` action endpointleri
+
+Rol kisaltmalari:
+- `SA`: super_admin
+- `TC`: technician
+- `IIW`: iiw_instructor
+- `IN`: instructor
+- `AUTH`: login olmus herhangi bir kullanici
+
+| Action | Handler | Yetki |
+|---|---|---|
+| `auth.getProfile` | `authGetProfile` | AUTH |
+| `auth.listUsers` | `authListUsers` | SA |
+| `auth.upsertUser` | `authUpsertUser` | SA |
+| `auth.deleteUser` | `authDeleteUser` | SA |
+| `auth.updateRole` | `authUpdateRole` | SA |
+| `inventory.list` | `inventoryList` | AUTH |
+| `inventory.get` | `inventoryGet` | AUTH |
+| `inventory.create` | `inventoryCreate` | SA/TC/IIW |
+| `inventory.update` | `inventoryUpdate` | SA/TC/IIW |
+| `inventory.delete` | `inventoryDelete` | SA |
+| `inventory.checkout` | `inventoryCheckout` | SA/TC/IIW |
+| `inventory.checkin` | `inventoryCheckin` | SA/TC/IIW |
+| `inventory.uploadPhoto` | `inventoryUploadPhoto` | SA/TC/IIW |
+| `inventory.validateCart` | `inventoryValidateCart` | AUTH |
+| `rooms.list` | `roomsList` | AUTH |
+| `rooms.get` | `roomsGet` | AUTH |
+| `rooms.create` | `roomsCreate` | SA |
+| `rooms.update` | `roomsUpdate` | SA/TC/IIW |
+| `rooms.delete` | `roomsDelete` | SA |
+| `reservations.list` | `reservationsList` | AUTH |
+| `reservations.get` | `reservationsGet` | AUTH |
+| `reservations.create` | `reservationsCreate` | AUTH |
+| `reservations.approve` | `reservationsApprove` | SA/TC/IIW |
+| `reservations.reject` | `reservationsReject` | SA/TC/IIW |
+| `reservations.cancel` | `reservationsCancel` | AUTH (sahiplik kontrolu icte) |
+| `reservations.checkAvail` | `reservationsCheckAvailability` | AUTH |
+| `reservations.getCalendar` | `reservationsGetCalendar` | AUTH |
+| `reservations.checkSlot` | `reservationsCheckSlot` | AUTH |
+| `dashboard.stats` | `dashboardStats` | AUTH |
+| `assignments.list` | `assignmentsList` | AUTH (role bazli filtre icte) |
+| `assignments.get` | `assignmentsGet` | AUTH |
+| `assignments.create` | `assignmentsCreate` | SA/TC/IIW/IN |
+| `assignments.update` | `assignmentsUpdate` | SA/TC/IIW/IN |
+| `assignments.approve` | `assignmentsApprove` | SA/IN |
+| `assignments.complete` | `assignmentsComplete` | AUTH (sahip/admin kontrolu icte) |
+| `assignments.delete` | `assignmentsDelete` | SA |
+| `notifications.list` | `notificationsList` | AUTH |
+| `notifications.markRead` | `notificationsMarkRead` | AUTH |
+| `reports.inventorySummary` | `reportsInventorySummary` | SA/TC/IIW |
+| `reports.reservationStats` | `reportsReservationStats` | SA/TC/IIW |
+| `reports.assignmentStats` | `reportsAssignmentStats` | SA/IN |
+| `reports.overdueItems` | `reportsOverdueItems` | SA/TC/IIW |
+| `admin.getConfig` | `adminGetConfig` | SA |
+| `admin.setConfig` | `adminSetConfig` | SA |
+| `admin.getAuditLog` | `adminGetAuditLog` | SA |
+| `admin.getBize` | `adminGetBize` | SA/TC/IIW |
+| `admin.markBizeRead` | `adminMarkBizeRead` | SA/TC/IIW |
+| `admin.getGecmis` | `adminGetGecmis` | SA |
+| `admin.initSheets` | `adminInitSheets` | SA |
+| `studio.list` | `studiosListForUser` | AUTH |
+| `studio.reservations.list` | `studioReservationsList` | AUTH |
+| `studio.reservations.create` | `studioReservationsCreate` | AUTH |
+| `studio.reservations.approve` | `studioReservationsApprove` | SA/TC/IIW |
+| `studio.reservations.reject` | `studioReservationsReject` | SA/TC/IIW |
+| `studio.reservations.cancel` | `studioReservationsCancel` | AUTH (sahiplik kontrolu icte) |
+| `studio.myReservations` | `studioReservationsList(user scoped)` | AUTH |
+| `restrictions.listBans` | `restrictionsListBans` | SA/TC/IIW |
+| `restrictions.banUser` | `restrictionsBanUser` | SA/TC/IIW |
+| `restrictions.unbanUser` | `restrictionsUnbanUser` | SA |
+| `restrictions.checkBan` | `restrictionsCheckBan` | AUTH |
+| `restrictions.applyDelay` | `restrictionsApplyDelay` | SA/TC/IIW |
+| `restrictions.getUserHistory` | `restrictionsGetUserHistory` | SA/TC/IIW |
+| `restrictions.myLevel` | inline return | AUTH |
+| `auth.submitStudentNo` | `authSubmitStudentNo` | AUTH |
+| `auth.checkOnboarding` | `authCheckOnboarding` | AUTH |
+| `auth.submitStaffInfo` | `authSubmitStaffInfo` | AUTH |
+| `auth.getUnits` | `getUnitsData` | AUTH |
+| `tickets.create` | `ticketsCreate` | AUTH |
+| `tickets.list` | `ticketsList` | SA/TC/IIW |
+| `tickets.approve` | `ticketsApprove` | SA/TC/IIW |
+| `tickets.reject` | `ticketsReject` | SA/TC/IIW |
+| `tickets.myTickets` | `ticketsMyList` | AUTH |
+
+### 13.3 `google.script.run` bridge endpointleri (index/admin)
+
+Not: Bunlar dogrudan `routeAction` degil, web UI'nin server function cagrilaridir.
+
+| UI | Bridge ornekleri |
+|---|---|
+| `index.txt` | `authGetSession`, `authLogout`, `authSendOtp`, `authVerifyOtp`, `getEquipmentData`, `getStudiosListForUi`, `getStudioWeeklyGridBridge`, `checkStudioCalendarBridge`, `reservationsCreateBridge`, `studioReservationsCreateBridge`, `getMyBookingsBridge`, `cancelReservationBridge`, `contactCreateBridge`, `ticketCreateBridge` |
+| `admin.txt` | `checkAdminAccessBridge`, `getPendingCount`, `getPendingRequests`, `processRequest`, `getTrafficData`, `adminProcessPartialCheckout`, `adminProcessPartialCheckin`, `adminCreateStudioReservation`, `adminUpdateStudioReservation`, `adminDeleteStudioReservation`, `getAdminStudioWeeklyGrid`, `getAdminReservationHistory`, `syncGoogleCalendarsToStudiosBridge`, `adminTicketsListBridge`, `adminTicketApproveBridge`, `adminTicketRejectBridge`, `getAdminReportsSummaryBridge`, `adminSpecialAccessUpsertBridge` |
+
+### 13.4 Hata davranisi
+
+- Bilinmeyen action -> `Unknown action: <action>`
+- Role disi erisim -> `Access denied.`
+- Admin bridge'lerde yaygin cevap: `{ error: 'Yetkisiz.' }`
+
