@@ -147,7 +147,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const [eqItemsRes, studiosRes] = await Promise.all([
       eqIds.length
-        ? supabaseAdmin.from("equipment_items").select("id,name,equipment_code").in("id", eqIds)
+        ? supabaseAdmin.from("equipment_items").select("id,name").in("id", eqIds)
         : Promise.resolve({ data: [], error: null }),
       studioIds.length
         ? supabaseAdmin.from("studios").select("id,name").in("id", studioIds)
@@ -157,7 +157,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (studiosRes.error) return reply.code(500).send({ ok: false, error: studiosRes.error.message });
 
     const eqNameById = new Map(
-      (eqItemsRes.data ?? []).map((r) => [String(r.id || ""), String(r.name || r.equipment_code || r.id || "")])
+      (eqItemsRes.data ?? []).map((r) => [String(r.id || ""), String(r.name || r.id || "")])
     );
     const studioNameById = new Map((studiosRes.data ?? []).map((r) => [String(r.id || ""), String(r.name || r.id || "")]));
 
