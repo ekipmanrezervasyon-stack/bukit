@@ -351,7 +351,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const overlap = await supabaseAdmin
       .from("equipment_reservations")
-      .select("id")
+      .select("id,status,requester_profile_id,requester_email,start_at,end_at")
       .eq("equipment_item_id", equipment_item_id)
       .in("status", ["pending", "approved", "checked_out"])
       .lt("start_at", end_at)
@@ -359,6 +359,32 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .limit(1);
     if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
     if ((overlap.data ?? []).length > 0) {
+      const existing = overlap.data?.[0] as
+        | {
+            id?: string;
+            status?: string;
+            requester_profile_id?: string;
+            requester_email?: string;
+            start_at?: string;
+            end_at?: string;
+          }
+        | undefined;
+      const sameUserById = String(existing?.requester_profile_id || "") === String(profile.id || "");
+      const sameUserByEmail =
+        String(existing?.requester_email || "").toLowerCase() === String(profile.email || "").toLowerCase();
+      if (sameUserById || sameUserByEmail) {
+        return {
+          ok: true,
+          duplicate: true,
+          data: {
+            id: String(existing?.id || ""),
+            status: String(existing?.status || "pending"),
+            equipment_item_id,
+            start_at: String(existing?.start_at || start_at),
+            end_at: String(existing?.end_at || end_at)
+          }
+        };
+      }
       return reply.code(409).send({ ok: false, error: "Equipment has conflicting reservation." });
     }
 
