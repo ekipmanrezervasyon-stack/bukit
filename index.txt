@@ -171,13 +171,6 @@
       window.__hideInstantSplash = hideInstantSplash;
     })();
   </script>
-  <div id="admin-hint-banner" class="bg-amber-50 border-b border-amber-200 text-amber-950 px-3 py-2.5 text-[11px] md:text-sm text-center leading-snug relative z-[95]">
-    <strong>Admin:</strong>
-    <span class="hidden md:inline">Bu adres kullanıcı web uygulaması. Önce OTP ile giriş yapın, sonra sağ üstteki <strong>Admin</strong> linkiyle ayrı admin uygulamasına geçin (jeton <code class="text-[10px] bg-amber-100/90 px-1 rounded">at=</code> ile taşınır).</span>
-    <span class="md:hidden">Bu sayfa kullanıcı içindir. Girişten sonra sağ üst <strong>Admin</strong> linkini kullanın.</span>
-    <button type="button" onclick="var b=document.getElementById('admin-hint-banner'); if(b) b.remove();" class="ml-1 md:ml-2 font-bold text-[#e30613] underline">Kapat</button>
-  </div>
-
   <!-- ═══════════════════════════════════════ -->
   <!-- LOGIN OVERLAY -->
   <!-- ═══════════════════════════════════════ -->
