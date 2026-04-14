@@ -3863,23 +3863,27 @@
       var grid=document.getElementById('studio-grid');
       relocateStudioBookingPanel_('');
       grid.innerHTML='<p class="text-blue-500 p-4 animate-pulse text-sm">'+(currentLang==='tr'?'Studyolar getiriliyor...':'Fetching studios...')+'</p>';
-      google.script.run.withSuccessHandler(function(data){
+      apiRequest('/studios', { method: 'GET' }).then(function(payload){
+        var data = (payload && payload.data) ? payload.data : [];
         studiosLoadCache = data || [];
         if(!data||!data.length){grid.innerHTML='<p class="text-gray-400 p-4 text-sm">'+(currentLang==='tr'?'Hesabiniz icin uygun studyo yok.':'No studios available for your account.')+'</p>';return;}
         grid.innerHTML='';
         data.forEach(function(s){
-          var fi=s.image||'https://via.placeholder.com/1200x600?text=Studio';
+          var sid = String(s.id || '').trim().toUpperCase();
+          var fi=s.image||s.photo_url||'https://via.placeholder.com/1200x600?text=Studio';
           if(fi.includes('via.placeholder.com')){
             var _cardImg={GREEN:'https://www.bilgi.edu.tr/media/uploads/2021/08/17/studyolarimiz3.jpg',RED:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/red_studyo_1.jpg',PODCAST:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/radyovesaire.jpg',DUBBING:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/dublaj_ses_kurgu_studyosu.jpg',BLUE:'https://www.bilgi.edu.tr/media/uploads/2017/10/30/play-space.png'};
-            if(_cardImg[s.id])fi=_cardImg[s.id];
+            if(_cardImg[sid])fi=_cardImg[sid];
           }
           var tapHint = currentLang==='tr' ? 'Takvim ve rezervasyon paneli için dokunun' : 'Tap for calendar and booking panel';
-          var calInner = '<div id="native-studio-cal-'+escAttr(s.id)+'" class="w-full min-h-[240px] max-h-[min(72vh,640px)] overflow-y-auto overflow-x-auto overscroll-contain p-2 md:p-3 bg-white rounded-lg border border-gray-100">' +
+          var calInner = '<div id="native-studio-cal-'+escAttr(sid)+'" class="w-full min-h-[240px] max-h-[min(72vh,640px)] overflow-y-auto overflow-x-auto overscroll-contain p-2 md:p-3 bg-white rounded-lg border border-gray-100">' +
             '<div class="text-xs text-gray-400 animate-pulse">' + (currentLang==='tr' ? 'Takvim yükleniyor…' : 'Loading calendar…') + '</div></div>';
-          grid.innerHTML+='<div class="bg-white rounded-xl md:rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition"><div class="studio-card-header flex flex-row min-h-[96px] md:min-h-[160px] cursor-pointer group" role="button" tabindex="0" data-studio-id="'+escAttr(s.id)+'" data-studio-name="'+escAttr(s.name)+'"><div class="w-1/3 md:w-1/4 bg-gray-200 relative flex-shrink-0"><img src="'+fi+'" alt="" onerror="this.onerror=null;this.src=\'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80\';" class="w-full h-full object-cover min-h-[96px] md:min-h-[160px]"></div><div class="w-2/3 md:w-3/4 p-3 md:p-5 flex flex-col justify-center min-w-0"><h3 class="font-bold text-sm md:text-xl text-gray-800 group-hover:text-[#e30613] transition">'+escHtml(s.name)+'</h3><p class="text-[9px] md:text-xs text-gray-500 mt-0.5 md:mt-1 line-clamp-2">'+(s.desc?escHtml(s.desc):'')+'</p><span class="mt-1 md:mt-2 text-[#e30613] text-[10px] md:text-xs font-bold opacity-80 group-hover:opacity-100">'+tapHint+'</span></div></div><div id="cal-container-'+escAttr(s.id)+'" class="hidden border-t border-gray-100 bg-white relative p-1.5 md:p-3">'+calInner+'</div></div>';
+          grid.innerHTML+='<div class="bg-white rounded-xl md:rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition"><div class="studio-card-header flex flex-row min-h-[96px] md:min-h-[160px] cursor-pointer group" role="button" tabindex="0" data-studio-id="'+escAttr(sid)+'" data-studio-name="'+escAttr(String(s.name||sid))+'"><div class="w-1/3 md:w-1/4 bg-gray-200 relative flex-shrink-0"><img src="'+fi+'" alt="" onerror="this.onerror=null;this.src=\'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80\';" class="w-full h-full object-cover min-h-[96px] md:min-h-[160px]"></div><div class="w-2/3 md:w-3/4 p-3 md:p-5 flex flex-col justify-center min-w-0"><h3 class="font-bold text-sm md:text-xl text-gray-800 group-hover:text-[#e30613] transition">'+escHtml(String(s.name||sid))+'</h3><p class="text-[9px] md:text-xs text-gray-500 mt-0.5 md:mt-1 line-clamp-2">'+(s.desc?escHtml(s.desc):'')+'</p><span class="mt-1 md:mt-2 text-[#e30613] text-[10px] md:text-xs font-bold opacity-80 group-hover:opacity-100">'+tapHint+'</span></div></div><div id="cal-container-'+escAttr(sid)+'" class="hidden border-t border-gray-100 bg-white relative p-1.5 md:p-3">'+calInner+'</div></div>';
         });
         if (activeStudioId) relocateStudioBookingPanel_(activeStudioId);
-      }).withFailureHandler(function(err){grid.innerHTML='<p class="text-red-500 p-4 text-sm">'+(currentLang==='tr'?'Hata':'Error')+': '+(err.message||'')+'</p>';}).getStudioData(currentTestToken);
+      }).catch(function(err){
+        grid.innerHTML='<p class="text-red-500 p-4 text-sm">'+(currentLang==='tr'?'Hata':'Error')+': '+((err&&err.message)||'')+'</p>';
+      });
     }
     function relocateStudioBookingPanel_(studioId){
       var panel=document.getElementById('studio-booking-panel');
