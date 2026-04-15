@@ -915,6 +915,38 @@
           method: 'POST',
           body: { task_id: String(taskId || ''), student_email: String(studentEmail || '').toLowerCase(), hours: Number(hours) }
         });
+      },
+      adminUserLookup: function(query) {
+        return adminApiRequest('/admin/lookup-user', {
+          method: 'POST',
+          body: { query: String(query || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { error: (res && res.error) || 'Lookup failed.', matches: [] };
+          if (res.note === 'not_found') return { matches: [] };
+          var profile = {
+            name: String(res.name || '').trim(),
+            email: String(res.email || '').trim(),
+            student_no: String(res.studentId || '').trim(),
+            id: String(res.studentId || '').trim(),
+            role: '',
+            level: String(res.level || ''),
+            department: '',
+            phone: ''
+          };
+          return {
+            matches: [{
+              profile: profile,
+              studentIdDisplay: profile.student_no,
+              userTypeLabel: profile.level ? ('Seviye ' + profile.level) : '',
+              equipmentHistory: [],
+              pendingEquipmentApprovals: [],
+              pendingStudioApprovals: [],
+              equipmentRecent15d: [],
+              loansOnHand: [],
+              responsibleForEquipment: []
+            }]
+          };
+        });
       }
     };
     if (typeof window.google === 'undefined') window.google = {};
