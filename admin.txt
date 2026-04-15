@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-  <title>BİLGİ | BOOKDECK ADMIN</title>
+  <title>BİLGİ | BUKIT ADMIN</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
   <style>
@@ -39,7 +39,7 @@
 
   <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-50 flex-shrink-0">
     <div class="flex items-center gap-3 min-w-0">
-      <span class="text-xl font-black tracking-tight uppercase">Bookdeck <span class="text-[#e30613]">admin</span></span>
+      <span class="text-xl font-black tracking-tight uppercase">BUKit <span class="text-[#e30613]">admin</span></span>
     </div>
     <div class="flex items-center gap-2 sm:gap-3">
       <div class="text-right">
@@ -675,6 +675,19 @@
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   }
 
+  function isUuidLike_(v) {
+    var s = String(v || '').trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+  }
+
+  function publicEquipmentId_(code, id) {
+    var c = String(code || '').trim();
+    var i = String(id || '').trim();
+    if (c && !isUuidLike_(c)) return c.toUpperCase();
+    if (i && !isUuidLike_(i)) return i.toUpperCase();
+    return '';
+  }
+
   function adminApiRequest(path, opts) {
     if (!API_BASE) return Promise.reject(new Error('API base tanımlı değil. URL sonuna ?api_base=https://... ekleyin.'));
     var token = String(currentAuthToken || '').trim();
@@ -1036,7 +1049,7 @@
     if (!list) return;
     var q = qEl ? String(qEl.value || '').toLowerCase().trim() : '';
     var filtered = (studioEquipPool || []).filter(function(it) {
-      var blob = (String(it.name || '') + ' ' + String(it.id || '') + ' ' + String(it.type || '')).toLowerCase();
+      var blob = (String(it.name || '') + ' ' + String(it.code || it.id || '') + ' ' + String(it.type || '')).toLowerCase();
       return !q || blob.indexOf(q) >= 0;
     });
     list.innerHTML = '';
@@ -1046,7 +1059,7 @@
       var checked = studioEquipSelected[id] === true;
       list.innerHTML += '<label class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-2 text-xs cursor-pointer">' +
         '<input type="checkbox" class="sr-eq-cb w-4 h-4" data-eqid="' + escAttr(id) + '"' + (checked ? ' checked' : '') + '>' +
-        '<div class="min-w-0"><p class="font-bold text-gray-800 truncate">' + escAdm(it.name || id) + '</p><p class="text-[10px] text-gray-400 font-mono">' + escAdm(id) + (it.type ? (' · ' + escAdm(it.type)) : '') + '</p></div>' +
+        '<div class="min-w-0"><p class="font-bold text-gray-800 truncate">' + escAdm(it.name || id) + '</p><p class="text-[10px] text-gray-400 font-mono">' + escAdm(publicEquipmentId_(it.code, id)) + (it.type ? (' · ' + escAdm(it.type)) : '') + '</p></div>' +
         '</label>';
     });
     if (!list.innerHTML) list.innerHTML = '<p class="text-[10px] text-gray-400 p-2">Ekipman bulunamadı.</p>';
@@ -1362,6 +1375,8 @@
         if (srWithEquip && srWithEquip.checked) loadStudioEquipmentAvailability();
       });
     });
+    // Stüdyo sekmesine hiç geçilmemiş olsa bile placeholder'da takılı kalmasın.
+    loadAdminStudios();
     var weekPrevBtn = document.getElementById('admin-week-prev');
     if (weekPrevBtn) weekPrevBtn.addEventListener('click', function() {
       adminStudioWeekStartIso = shiftWeekIso_(adminStudioWeekStartIso, -1);
@@ -1713,7 +1728,7 @@
     reqPromise.then(function(data) {
       var isAvailable = (data.status === 'AVAILABLE' || String(data.statusEnglish || '').toLowerCase() === 'available');
       var historyHtml = data.history && data.history.length ? data.history.map(function(h) { return '<div class="py-2 border-b border-gray-50 flex justify-between"><div><p class="text-[11px] font-bold">' + escAdm(h.user) + '</p><p class="text-[9px] text-gray-400">' + escAdm(h.date) + '</p></div><span class="text-[9px] font-bold ' + (String(h.status).includes('Approve') ? 'text-green-600' : 'text-red-600') + '">' + escAdm(h.status) + '</span></div>'; }).join('') : '<p class="text-xs text-gray-400">Kayıt yok.</p>';
-      var currentUserHtml = data.currentUser ? '<div class="mt-3 pt-3 border-t border-gray-100"><p class="text-[10px] font-black text-gray-500 uppercase">Şu an / son çıkış</p><p class="text-xs font-bold">👤 ' + escAdm(data.currentUser.name) + '</p><p class="text-[10px] font-mono">' + escAdm(data.currentUser.id) + '</p><p class="text-xs font-black text-[#e30613] mt-1">Planlanan iade: ' + escAdm(data.currentUser.returnDate) + '</p></div>' : '';
+      var currentUserHtml = data.currentUser ? '<div class="mt-3 pt-3 border-t border-gray-100"><p class="text-[10px] font-black text-gray-500 uppercase">Şu an / son çıkış</p><p class="text-xs font-bold">👤 ' + escAdm(data.currentUser.name) + '</p><p class="text-xs font-black text-[#e30613] mt-1">Planlanan iade: ' + escAdm(data.currentUser.returnDate) + '</p></div>' : '';
       var prevHtml = data.previousUser && data.previousUser.name ? '<div class="mt-2 text-[10px] text-gray-600"><span class="font-black">Önceki:</span> ' + escAdm(data.previousUser.name) + ' · ' + escAdm(data.previousUser.date) + ' · ' + escAdm(data.previousUser.status) + '</div>' : '';
       var locLine = '<p class="text-[10px] mt-2"><span class="font-black text-gray-500">Konum:</span> ' + escAdm(data.locationPhysical || data.location || '-') + '</p>';
       var respLine = '<p class="text-[10px]"><span class="font-black text-gray-500">Sorumlu:</span> ' + escAdm(data.responsiblePhysical || '-') + '</p>';
@@ -1811,7 +1826,7 @@
       var isAvailable = (item.status === 'AVAILABLE');
       var eid = String(item.id || '').replace(/'/g, "\\'");
       var tyQc = item.type ? '<p class="text-[9px] text-gray-500 mt-0.5">' + escAdm(item.type) + '</p>' : '';
-      list.innerHTML += '<div onclick="' + (isAvailable ? "addToQCCart('" + eid + "')" : '') + '" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm ' + (isAvailable ? 'cursor-pointer hover:border-[#e30613]' : 'opacity-40') + ' transition"><div class="flex justify-between items-start mb-2"><h3 class="text-xs font-bold ' + (isAvailable ? 'text-gray-800' : 'text-gray-500') + ' pr-2 leading-tight">' + escAdm(item.name) + '</h3>' + (item.isStudioKey ? '<span class="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded">ANAHTAR</span>' : '') + '</div><p class="text-[9px] text-gray-400 font-mono">' + escAdm(item.code || item.id) + '</p>' + tyQc + '</div>';
+      list.innerHTML += '<div onclick="' + (isAvailable ? "addToQCCart('" + eid + "')" : '') + '" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm ' + (isAvailable ? 'cursor-pointer hover:border-[#e30613]' : 'opacity-40') + ' transition"><div class="flex justify-between items-start mb-2"><h3 class="text-xs font-bold ' + (isAvailable ? 'text-gray-800' : 'text-gray-500') + ' pr-2 leading-tight">' + escAdm(item.name) + '</h3>' + (item.isStudioKey ? '<span class="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded">ANAHTAR</span>' : '') + '</div><p class="text-[9px] text-gray-400 font-mono">' + escAdm(publicEquipmentId_(item.code, item.id)) + '</p>' + tyQc + '</div>';
     });
   }
 
@@ -1823,7 +1838,7 @@
     container.innerHTML = qcCart.length ? '' : '<p class="text-center text-gray-400 text-xs mt-10 italic">Sepet boş</p>';
     qcCart.forEach(function(id) {
       var item = allEq.find(function(i) { return i.id === id; });
-      if (item) container.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><div class="min-w-0"><p class="text-[11px] font-bold truncate text-gray-800">' + item.name + '</p><p class="text-[9px] font-mono text-gray-400">' + (item.code || item.id) + '</p></div><button onclick="removeFromQCCart(\'' + String(id).replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold text-lg px-2">×</button></div>';
+      if (item) container.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><div class="min-w-0"><p class="text-[11px] font-bold truncate text-gray-800">' + item.name + '</p><p class="text-[9px] font-mono text-gray-400">' + publicEquipmentId_(item.code, item.id) + '</p></div><button onclick="removeFromQCCart(\'' + String(id).replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold text-lg px-2">×</button></div>';
     });
   }
 
@@ -2016,7 +2031,7 @@
       var itemsHtml = mergedItems.map(function(item) {
         var vid = String(item.eqId || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
         var typeLn = item.eqType ? '<span class="text-[10px] text-gray-500 block mt-0.5">' + escAdm(item.eqType) + '</span>' : '';
-        return '<label class="flex items-center gap-4 text-xs bg-white/90 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50"><input type="checkbox" checked class="w-5 h-5 rounded text-[#e30613]" data-res="' + ridAttr + '" value="' + vid + '"><div class="flex-1"><span class="font-bold text-gray-800 text-sm block">' + escAdm(item.name) + '</span><span class="text-[10px] text-gray-400 font-mono">' + escAdm(item.eqId) + '</span>' + typeLn + '</div></label>';
+        return '<label class="flex items-center gap-4 text-xs bg-white/90 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50"><input type="checkbox" checked class="w-5 h-5 rounded text-[#e30613]" data-res="' + ridAttr + '" value="' + vid + '"><div class="flex-1"><span class="font-bold text-gray-800 text-sm block">' + escAdm(item.name) + '</span><span class="text-[10px] text-gray-400 font-mono">' + escAdm(item.eqCode || item.eqId) + '</span>' + typeLn + '</div></label>';
       }).join('');
       var schedBlock = '';
       if (res.handoverLabel || res.returnLabel) {
@@ -2219,7 +2234,7 @@
         if (!id || existing[id.toUpperCase()]) return false;
         var st = String(it.status || '').toUpperCase();
         if (!(st === 'AVAILABLE' || st === 'MÜSAİT' || st === 'UYGUN')) return false;
-        var blob = (String(it.name || '') + ' ' + id + ' ' + String(it.type || it.type_desc || '')).toLowerCase();
+        var blob = (String(it.name || '') + ' ' + String(it.code || id) + ' ' + String(it.type || it.type_desc || '')).toLowerCase();
         return blob.indexOf(needle) >= 0;
       }).slice(0, 12);
       if (!rows.length) {
@@ -2234,7 +2249,7 @@
         var nmJs = nm.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         var condGuess = trafficNormalizeConditionOut_(it.conditionOut || it.condition || it.condition_in || it.conditionIn || it.lastCondition || '');
         return '<button type="button" onclick="trafficAddExtraItem(\'' + ridJs + '\',\'' + idJs + '\',\'' + nmJs + '\',\'' + condGuess + '\')" class="w-full text-left bg-white border border-gray-200 rounded-lg px-2 py-1.5 hover:border-[#e30613]">' +
-          '<p class="text-[10px] font-semibold text-gray-800 truncate">' + escAdm(nm) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(id) + '</p></button>';
+          '<p class="text-[10px] font-semibold text-gray-800 truncate">' + escAdm(nm) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(it.code || id) + '</p></button>';
       }).join('');
     });
   }
@@ -2403,7 +2418,15 @@
 
   // ═══ STÜDYO TAKVİMİ ═══
   function loadAdminStudios() {
-    fetch(API_BASE + '/studios', { method: 'GET' }).then(function(res) {
+    var container = document.getElementById('admin-studio-selector');
+    if (container) container.innerHTML = '<div class="col-span-full text-center text-gray-400 animate-pulse py-4 text-xs">Stüdyolar yükleniyor...</div>';
+    var ctl = null;
+    var tm = null;
+    try {
+      ctl = new AbortController();
+      tm = setTimeout(function() { try { ctl.abort(); } catch (_eAbort) {} }, 12000);
+    } catch (_eCtl) {}
+    fetch(API_BASE + '/studios', { method: 'GET', signal: ctl ? ctl.signal : undefined }).then(function(res) {
       return res.text().then(function(txt) {
         var data = {};
         try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
@@ -2411,6 +2434,7 @@
         return (data && data.data) ? data.data : [];
       });
     }).then(function(studios) {
+      if (tm) clearTimeout(tm);
       var container = document.getElementById('admin-studio-selector');
       if (!container) return;
       if (!studios || !studios.length) { container.innerHTML = '<p class="text-gray-400 col-span-full text-center py-4">Stüdyo bulunamadı.</p>'; return; }
@@ -2424,6 +2448,7 @@
         container.innerHTML += '<div onclick="selectAdminStudio(\'' + sidJs + '\', \'' + snameJs + '\')" class="cursor-pointer rounded-2xl border-2 ' + activeClass + ' p-4 text-center transition-all"><span class="text-2xl block mb-2">' + calData.icon + '</span><h4 class="font-black text-xs text-gray-900">' + escAdm(s.name) + '</h4>' + (isActive ? '<span class="text-[8px] font-bold text-[#e30613] uppercase mt-1 block">Seçili</span>' : '') + '</div>';
       });
     }).catch(function(err) {
+      if (tm) clearTimeout(tm);
       var container = document.getElementById('admin-studio-selector');
       if (container) container.innerHTML = '<p class="text-red-500 col-span-full text-center py-4">' + escAdm((err && err.message) || 'Stüdyo listesi alınamadı.') + '</p>';
     });
@@ -2974,7 +2999,7 @@
       return (i.name && i.name.toLowerCase().includes(q)) || (code && code.includes(q)) || (ty && ty.includes(q));
     }).forEach(function(item) {
       var tyFe = item.type ? '<p class="text-[9px] text-gray-500 mt-0.5">' + escAdm(item.type) + '</p>' : '';
-      list.innerHTML += '<div onclick="addToForwardCart(\'' + item.id.replace(/'/g, "\\'") + '\')" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition"><h3 class="text-xs font-bold text-gray-800">' + escAdm(item.name) + '</h3><p class="text-[9px] font-mono text-gray-400">' + escAdm(item.code || item.id) + '</p>' + tyFe + '</div>';
+      list.innerHTML += '<div onclick="addToForwardCart(\'' + item.id.replace(/'/g, "\\'") + '\')" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition"><h3 class="text-xs font-bold text-gray-800">' + escAdm(item.name) + '</h3><p class="text-[9px] font-mono text-gray-400">' + escAdm(publicEquipmentId_(item.code, item.id)) + '</p>' + tyFe + '</div>';
     });
     if (!list.innerHTML) {
       list.innerHTML = '<p class="text-center text-gray-400 text-xs mt-8">Bu filtrede ekipman bulunamadı.</p>';
@@ -2988,7 +3013,7 @@
     el.innerHTML = forwardCart.length ? '' : '<p class="text-center text-gray-400 text-xs mt-6">Sepet boş</p>';
     forwardCart.forEach(function(id) {
       var item = allEq.find(function(i) { return i.id === id; });
-      if (item) el.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200"><div class="min-w-0"><p class="text-[11px] font-bold truncate">' + escAdm(item.name) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(item.code || id) + '</p></div><button type="button" onclick="removeFromForwardCart(\'' + id.replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold px-2">×</button></div>';
+      if (item) el.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200"><div class="min-w-0"><p class="text-[11px] font-bold truncate">' + escAdm(item.name) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(publicEquipmentId_(item.code, id)) + '</p></div><button type="button" onclick="removeFromForwardCart(\'' + id.replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold px-2">×</button></div>';
     });
   }
   function submitForwardReservation() {

@@ -2082,7 +2082,7 @@
     // HELPERS
     // ═══════════════════════════════════════
     function getBaseCategory(item){
-      var haystack=(item.category+' '+item.id).toLowerCase();
+      var haystack=(item.category+' '+(item.displayId || item.id || '')).toLowerCase();
       for(var key in catMap){ if(catMap[key].some(function(w){return haystack.includes(w);})) return key; }
       return 'Other';
     }
@@ -3211,7 +3211,7 @@
       ensureRangeAvailabilityPrecheck_();
       var rangeReady = !hasRange || (eqWindowAvailCache.ready && eqWindowAvailCache.key === rangeKey);
       equipmentGroupsByKey={};
-      if(st!==''){var tk=st.split(/\s+/).filter(Boolean);fi=fi.filter(function(item){var stt=(Array.isArray(item.availableIds)&&item.availableIds.length>0)?'available':'in use';var h=(String(item.name||'')+' '+String(item.typeLabel||'')+' '+String(item.category||'')+' '+String(item.id||'')+' '+stt).toLowerCase();return tk.every(function(t){return h.includes(t);});});}
+      if(st!==''){var tk=st.split(/\s+/).filter(Boolean);fi=fi.filter(function(item){var stt=(Array.isArray(item.availableIds)&&item.availableIds.length>0)?'available':'in use';var h=(String(item.name||'')+' '+String(item.typeLabel||'')+' '+String(item.category||'')+' '+String(item.displayId||item.id||'')+' '+stt).toLowerCase();return tk.every(function(t){return h.includes(t);});});}
       fi=fi.slice().sort(function(a,b){
         if(st!==''){
           var aa=(Array.isArray(a.availableIds)&&a.availableIds.length>0)||String(a.status||'').toLowerCase()==='available';
@@ -3496,11 +3496,11 @@
         return (Array.isArray(item.availableIds) && item.availableIds.length > 0) || item.status === 'Available';
       };
       var trips = allEquipmentData.filter(function(item) {
-        var n = (item.name + ' ' + (item.category || '') + ' ' + (item.id || '')).toLowerCase();
+        var n = (item.name + ' ' + (item.category || '') + ' ' + (item.displayId || item.id || '')).toLowerCase();
         return getBaseCategory(item) === 'Grip' && isAvail(item) && (n.indexOf('tripod') >= 0 || n.indexOf('ayak') >= 0 || n.indexOf('stand') >= 0);
       }).slice(0, 6);
       var lavs = allEquipmentData.filter(function(item) {
-        var n = (item.name + ' ' + (item.category || '') + ' ' + (item.id || '')).toLowerCase();
+        var n = (item.name + ' ' + (item.category || '') + ' ' + (item.displayId || item.id || '')).toLowerCase();
         return getBaseCategory(item) === 'Sound' && isAvail(item) && (n.indexOf('yaka') >= 0 || n.indexOf('lavalier') >= 0 || n.indexOf('lav') >= 0 || n.indexOf('lapel') >= 0 || n.indexOf('wireless') >= 0);
       }).slice(0, 6);
       var range = selectedReservationRangeIso();
