@@ -4101,6 +4101,9 @@
 
     window.toggleStudioSelection=function(id,name,studioKey){
       hideStudioCalendarWarning();
+      if(!currentTestToken){
+        currentTestToken = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || '';
+      }
       activeStudioId=id;
       activeStudioKey=String(studioKey || '').trim().toUpperCase();
       if(!activeStudioKey){
@@ -4124,7 +4127,7 @@
         relocateStudioBookingPanel_(id);
         setTimeout(function(){calEl.scrollIntoView({behavior:'smooth',block:'center'});},80);
         var nativeWrap=document.getElementById('native-studio-cal-'+id);
-        if(nativeWrap&&currentTestToken){renderNativeStudioWeekCalendar(id,nativeWrap);}
+        if(nativeWrap){renderNativeStudioWeekCalendar(id,nativeWrap);}
       }
       checkGreenWeekend();
       scheduleStudioCalendarCheck();
@@ -4243,7 +4246,14 @@
         });
     }
     function renderNativeStudioWeekCalendar(studioId,container){
-      if(!container||!currentTestToken) return;
+      if(!container) return;
+      if(!currentTestToken){
+        currentTestToken = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || '';
+      }
+      if(!currentTestToken){
+        container.innerHTML='<div class="text-xs text-red-600">'+(currentLang==='tr'?'Takvim için giriş gerekli.':'Sign in required for calendar.')+'</div>';
+        return;
+      }
       if(!nativeStudioWeekStartIso) nativeStudioWeekStartIso=mondayIsoFrom_(new Date());
       container.innerHTML='<div class="text-xs text-gray-400 animate-pulse">'+(currentLang==='tr'?'Takvim yükleniyor…':'Loading calendar…')+'</div>';
       var loadGridPromise;
