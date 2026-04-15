@@ -1263,6 +1263,27 @@
     }
   }
 
+  function getAdminToken_() {
+    var t = String(currentAuthToken || '').trim();
+    if (t) return t;
+    try {
+      var u = new URL(window.location.href);
+      t = String(u.searchParams.get('at') || u.searchParams.get('token') || '').trim();
+    } catch (_eUrl) { t = ''; }
+    if (!t) {
+      try { t = String(localStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eLs) { t = ''; }
+    }
+    if (!t) {
+      try { t = String(sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eSs) { t = ''; }
+    }
+    if (t) currentAuthToken = t;
+    return t;
+  }
+
+  function ensureAdminToken_() {
+    return !!getAdminToken_();
+  }
+
 // ═══ STÜDYO TAKVİM VERİLERİ ═══
   var STUDIO_CALENDARS = {
     'GREEN':   { icon: '🟢', calId: '6b1248a08f65098d73f62263382ed64f7d616887e36ce3d244e8a0169c3236ef@group.calendar.google.com', color: '%230B8043' }, // Yeşil
@@ -1852,7 +1873,7 @@
     var out = document.getElementById('inv-avail-result');
     if (!id || !s || !e || !out) return;
     if (!s.value || !e.value) { out.textContent = 'Başlangıç ve bitiş seçin.'; out.className = 'text-[10px] mt-2 text-red-600'; return; }
-    if (!currentAuthToken) { out.textContent = 'Oturum jetonu gerekli.'; return; }
+    if (!ensureAdminToken_()) { out.textContent = 'Oturum jetonu gerekli.'; return; }
     out.textContent = 'Kontrol…';
     google.script.run.withSuccessHandler(function(r) {
       if (r.error) { out.textContent = r.error; out.className = 'text-[10px] mt-2 text-red-600'; return; }
@@ -3313,7 +3334,7 @@
   function loadAdminTicketsList() {
     var box = document.getElementById('tickets-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     adminApiRequest('/admin/tickets').then(function(res) {
       var list = res.list || [];
@@ -3346,7 +3367,7 @@
     });
   }
   function adminTicketAct(ticketNo, act) {
-    if (!currentAuthToken) return;
+    if (!ensureAdminToken_()) return;
     if (act === 'reject') {
       openAdminUiDialog({
         title: 'Ticket Reddet',
@@ -3394,7 +3415,7 @@
   function loadAdminBizeList() {
     var box = document.getElementById('bize-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     adminApiRequest('/admin/contact-messages').then(function(res) {
       var list = res.list || [];
@@ -3426,7 +3447,7 @@
   function loadAdminReports() {
     var box = document.getElementById('reports-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     google.script.run.withSuccessHandler(function(r) {
       if (r.error) { box.innerHTML = '<p class="text-red-600">' + escAdm(r.error) + '</p>'; return; }
@@ -3495,7 +3516,7 @@
   }
 
   function runGoogleStudioSyncNow() {
-    if (!currentAuthToken) { showToast('Oturum jetonu gerekli.', 'error'); return; }
+    if (!ensureAdminToken_()) { showToast('Oturum jetonu gerekli.', 'error'); return; }
     showToast('Google takvim senkronu başlatıldı…');
     google.script.run.withSuccessHandler(function(res) {
       if (res && res.error) { showToast(res.error, 'error'); return; }
@@ -3530,7 +3551,7 @@
   function loadAdminSpecialEquipmentOptions() {
     var sel = document.getElementById('sea-equipment');
     if (!sel) return;
-    if (!currentAuthToken) { sel.innerHTML = '<option value="">Oturum gerekli</option>'; return; }
+    if (!ensureAdminToken_()) { sel.innerHTML = '<option value="">Oturum gerekli</option>'; return; }
     sel.innerHTML = '<option value="">Yükleniyor…</option>';
     google.script.run.withSuccessHandler(function(res) {
       if (res && res.error) { sel.innerHTML = '<option value="">Hata: ' + escAdm(res.error) + '</option>'; return; }
@@ -3635,7 +3656,7 @@
   function loadAdminSpecialAccessList() {
     var box = document.getElementById('special-access-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     google.script.run.withSuccessHandler(function(res) {
       if (res && res.error) { box.innerHTML = '<p class="text-red-600">' + escAdm(res.error) + '</p>'; return; }
@@ -3668,7 +3689,7 @@
   function loadAdminSpecialEquipmentAccessList() {
     var box = document.getElementById('special-equipment-access-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     google.script.run.withSuccessHandler(function(optRes) {
       var optList = (optRes && optRes.list) ? optRes.list : [];
@@ -3717,7 +3738,7 @@
   function loadIIWAdmin() {
     var box = document.getElementById('iiw-admin-container');
     if (!box) return;
-    if (!currentAuthToken) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
+    if (!ensureAdminToken_()) { box.innerHTML = '<p class="text-red-600 text-sm">Oturum jetonu gerekli.</p>'; return; }
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     google.script.run.withSuccessHandler(function(r) {
       if (r.error) { box.innerHTML = '<p class="text-red-600">' + escAdm(r.error) + '</p>'; return; }
