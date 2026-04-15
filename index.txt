@@ -1048,6 +1048,7 @@
     var equipmentGroupsByKey = {};
     var equipmentGroupSelection = {};
     var activeStudioId = null;
+    var activeStudioKey = '';
     var studiosLoadCache = [];
     var studioCalCheckTimer = null;
     var studioCalCheckSeq = 0;
@@ -1056,6 +1057,36 @@
     var lastStudioCalBusyResult = false;
     var STUDIO_CALENDAR_BUSY_MSG_EN = 'The time range you selected is not available for this studio reservation.';
     var STUDIO_CALENDAR_BUSY_MSG_TR = 'Bu başlangıç (ve ön kontrol bitişi) için stüdyo takvimi dolu. Lütfen başka saat seçin; bitiş alanlarını doldurmadan da uyarı alırsınız.';
+    function resolveStudioCanonicalKey_(row){
+      var r = row || {};
+      var candidates = [r.studio_key, r.code, r.studio_code, r.name, r.id, r.studio_id];
+      var map = [
+        { key: 'GREEN', tokens: ['GREEN', 'YESIL', 'YEŞIL', 'YEŞİL'] },
+        { key: 'RED', tokens: ['RED', 'KIRMIZI'] },
+        { key: 'BLUE', tokens: ['BLUE', 'MAVI', 'MAVİ'] },
+        { key: 'PODCAST', tokens: ['PODCAST'] },
+        { key: 'DUBBING', tokens: ['DUBBING', 'DUBLAJ'] }
+      ];
+      for (var i = 0; i < candidates.length; i++) {
+        var raw = String(candidates[i] || '').trim().toUpperCase();
+        if (!raw) continue;
+        for (var j = 0; j < map.length; j++) {
+          for (var k = 0; k < map[j].tokens.length; k++) {
+            if (raw === map[j].tokens[k] || raw.indexOf(map[j].tokens[k]) >= 0) return map[j].key;
+          }
+        }
+      }
+      return '';
+    }
+    function getStudioMetaById_(studioId){
+      var sid = String(studioId || '').trim();
+      if (!sid) return null;
+      for (var i = 0; i < studiosLoadCache.length; i++) {
+        var s = studiosLoadCache[i] || {};
+        if (String(s.id || '').trim() === sid) return s;
+      }
+      return null;
+    }
     var allEquipmentData = [];
     var eqWindowAvailCache = { key: '', ready: false, checking: false, set: {}, checkedIds: {} };
     var compactMode = false;
@@ -1566,8 +1597,9 @@
           if (!head) return;
           e.preventDefault();
           var sid = head.getAttribute('data-studio-id');
+          var skey = head.getAttribute('data-studio-key') || '';
           var sname = head.getAttribute('data-studio-name') || '';
-          if (sid) toggleStudioSelection(sid, sname);
+          if (sid) toggleStudioSelection(sid, sname, skey);
         });
       }
       var csl = document.getElementById('cam-suggestions-list');
@@ -2416,7 +2448,7 @@
     function checkGreenWeekend(){
       var v=document.getElementById('studio-start-date').value;
       var div=document.getElementById('green-weekend-pickup');
-      if(activeStudioId==='GREEN'&&v){var d=new Date(v);if(d.getDay()===0||d.getDay()===6){div.classList.remove('hidden');scheduleStudioCalendarCheck();return;}}
+      if(activeStudioKey==='GREEN'&&v){var d=new Date(v);if(d.getDay()===0||d.getDay()===6){div.classList.remove('hidden');scheduleStudioCalendarCheck();return;}}
       div.classList.add('hidden');
       scheduleStudioCalendarCheck();
     }
@@ -4028,7 +4060,8 @@
         if(!data||!data.length){grid.innerHTML='<p class="text-gray-400 p-4 text-sm">'+(currentLang==='tr'?'Hesabiniz icin uygun studyo yok.':'No studios available for your account.')+'</p>';return;}
         grid.innerHTML='';
         data.forEach(function(s){
-          var sid = String(s.id || '').trim().toUpperCase();
+          var studioDbId = String(s.id || '').trim();
+          var sid = resolveStudioCanonicalKey_(s) || String(studioDbId || '').trim().toUpperCase();
           var fi=s.image||s.photo_url||'https://via.placeholder.com/1200x600?text=Studio';
           if(fi.includes('via.placeholder.com')){
             var _cardImg={GREEN:'https://www.bilgi.edu.tr/media/uploads/2021/08/17/studyolarimiz3.jpg',RED:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/red_studyo_1.jpg',PODCAST:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/radyovesaire.jpg',DUBBING:'https://www.bilgi.edu.tr/media/uploads/2018/07/19/dublaj_ses_kurgu_studyosu.jpg',BLUE:'https://www.bilgi.edu.tr/media/uploads/2017/10/30/play-space.png'};
@@ -4037,7 +4070,7 @@
           var tapHint = currentLang==='tr' ? 'Takvim ve rezervasyon paneli için dokunun' : 'Tap for calendar and booking panel';
           var calInner = '<div id="native-studio-cal-'+escAttr(sid)+'" class="w-full min-h-[240px] max-h-[min(72vh,640px)] overflow-y-auto overflow-x-auto overscroll-contain p-2 md:p-3 bg-white rounded-lg border border-gray-100">' +
             '<div class="text-xs text-gray-400 animate-pulse">' + (currentLang==='tr' ? 'Takvim yükleniyor…' : 'Loading calendar…') + '</div></div>';
-          grid.innerHTML+='<div class="bg-white rounded-xl md:rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition"><div class="studio-card-header flex flex-row min-h-[96px] md:min-h-[160px] cursor-pointer group" role="button" tabindex="0" data-studio-id="'+escAttr(sid)+'" data-studio-name="'+escAttr(String(s.name||sid))+'"><div class="w-1/3 md:w-1/4 bg-gray-200 relative flex-shrink-0"><img src="'+fi+'" alt="" onerror="this.onerror=null;this.src=\'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80\';" class="w-full h-full object-cover min-h-[96px] md:min-h-[160px]"></div><div class="w-2/3 md:w-3/4 p-3 md:p-5 flex flex-col justify-center min-w-0"><h3 class="font-bold text-sm md:text-xl text-gray-800 group-hover:text-[#e30613] transition">'+escHtml(String(s.name||sid))+'</h3><p class="text-[9px] md:text-xs text-gray-500 mt-0.5 md:mt-1 line-clamp-2">'+(s.desc?escHtml(s.desc):'')+'</p><span class="mt-1 md:mt-2 text-[#e30613] text-[10px] md:text-xs font-bold opacity-80 group-hover:opacity-100">'+tapHint+'</span></div></div><div id="cal-container-'+escAttr(sid)+'" class="hidden border-t border-gray-100 bg-white relative p-1.5 md:p-3">'+calInner+'</div></div>';
+          grid.innerHTML+='<div class="bg-white rounded-xl md:rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition"><div class="studio-card-header flex flex-row min-h-[96px] md:min-h-[160px] cursor-pointer group" role="button" tabindex="0" data-studio-id="'+escAttr(studioDbId)+'" data-studio-key="'+escAttr(sid)+'" data-studio-name="'+escAttr(String(s.name||sid))+'"><div class="w-1/3 md:w-1/4 bg-gray-200 relative flex-shrink-0"><img src="'+fi+'" alt="" onerror="this.onerror=null;this.src=\'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80\';" class="w-full h-full object-cover min-h-[96px] md:min-h-[160px]"></div><div class="w-2/3 md:w-3/4 p-3 md:p-5 flex flex-col justify-center min-w-0"><h3 class="font-bold text-sm md:text-xl text-gray-800 group-hover:text-[#e30613] transition">'+escHtml(String(s.name||sid))+'</h3><p class="text-[9px] md:text-xs text-gray-500 mt-0.5 md:mt-1 line-clamp-2">'+(s.desc?escHtml(s.desc):'')+'</p><span class="mt-1 md:mt-2 text-[#e30613] text-[10px] md:text-xs font-bold opacity-80 group-hover:opacity-100">'+tapHint+'</span></div></div><div id="cal-container-'+escAttr(studioDbId)+'" class="hidden border-t border-gray-100 bg-white relative p-1.5 md:p-3">'+calInner+'</div></div>';
         });
         if (activeStudioId) relocateStudioBookingPanel_(activeStudioId);
       }).catch(function(err){
@@ -4061,14 +4094,19 @@
     function updateStudioPdfRequirementUi() {
       var label = document.getElementById('studio-pdf-label');
       if (!label) return;
-      var sid = String(activeStudioId || '').trim().toUpperCase();
+      var sid = String(activeStudioKey || activeStudioId || '').trim().toUpperCase();
       var optional = (sid === 'PODCAST' || sid === 'DUBBING');
       label.textContent = optional ? 'Project PDF Drive Link (Optional)' : 'Project PDF Drive Link (Required)';
     }
 
-    window.toggleStudioSelection=function(id,name){
+    window.toggleStudioSelection=function(id,name,studioKey){
       hideStudioCalendarWarning();
       activeStudioId=id;
+      activeStudioKey=String(studioKey || '').trim().toUpperCase();
+      if(!activeStudioKey){
+        var sm=getStudioMetaById_(id);
+        activeStudioKey=resolveStudioCanonicalKey_(sm||{}) || String(id||'').trim().toUpperCase();
+      }
       updateStudioPdfRequirementUi();
       document.getElementById('selected-studio-name').innerText=name;
       document.getElementById('selected-studio-name').classList.remove('text-gray-300');
@@ -4166,8 +4204,12 @@
           }
           var cells = {};
           var cellBusyStart = {};
+          var studioMeta = getStudioMetaById_(studioId);
+          var studioKey = resolveStudioCanonicalKey_(studioMeta || {}) || String(studioId || '').trim().toUpperCase();
+          var weekendOk = !!(studioMeta && studioMeta.weekendOk);
+          if (studioKey === 'GREEN') weekendOk = true;
           days.forEach(function(d){
-            var isClosedDay = (d.dow === 0) || safeIsPublicHoliday(new Date(d.iso + 'T00:00:00'));
+            var isClosedDay = safeIsPublicHoliday(new Date(d.iso + 'T00:00:00')) || (!weekendOk && d.dow === 0);
             slots.forEach(function(s){
               var key = d.iso + '|' + s.mins;
               cells[key] = isClosedDay ? 'closed' : 'free';
@@ -4292,7 +4334,7 @@
       var reqTypeEl=document.getElementById('studio-request-type');
       var reqType=reqTypeEl?String(reqTypeEl.value||'').trim():'';
       if(!reqType){showAlert(t('modalError'),currentLang==='tr'?'Talep türü seçin.':'Select a request type.',true);return;}
-      var studioIdNorm = String(activeStudioId || '').trim().toUpperCase();
+      var studioIdNorm = String(activeStudioKey || activeStudioId || '').trim().toUpperCase();
       var isPdfOptionalStudio = (studioIdNorm === 'PODCAST' || studioIdNorm === 'DUBBING');
       if(!isPdfOptionalStudio && !pdfUrl){showAlert(t('modalError'),"PDF Drive link required.",true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
