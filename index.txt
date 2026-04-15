@@ -333,7 +333,6 @@
           <button id="lang-en-btn" type="button" onclick="setLanguage('en')" class="px-2 py-1 rounded-full bg-gray-900 text-white">EN</button>
           <button id="lang-tr-btn" type="button" onclick="setLanguage('tr')" class="px-2 py-1 rounded-full text-gray-600">TR</button>
         </div>
-        <a id="nav-admin-panel-link" href="#" class="hidden text-[10px] font-black text-[#e30613] hover:underline px-2 py-1 border border-red-100 rounded-full">Admin</a>
         <div class="w-px h-5 bg-gray-300 mx-2"></div>
         <button type="button" id="navbar-signout-btn" onclick="confirmSwitchUser()" class="bg-gray-900 text-white px-4 py-2 rounded-full font-bold text-[10px] uppercase shadow-sm hover:bg-gray-800 transition flex items-center gap-2" title="Sign out">
           <span id="navbar-user-name" class="truncate max-w-[120px]">Profile</span>
@@ -1019,11 +1018,6 @@
         method: 'GET',
         headers: { 'Authorization': 'Bearer ' + t }
       });
-    }
-    function buildAdminAppUrl_(token) {
-      var base = String(ADMIN_APP_BASE || USER_APP_BASE || '').split('#')[0];
-      var sep = base.indexOf('?') >= 0 ? '&' : '?';
-      return base + sep + 'page=admin' + (token ? ('&at=' + encodeURIComponent(token)) : '');
     }
     var bookingLimits = { equipmentMaxDays: 2, studioMaxDaySpan: 1, canExtendActiveLoan: false, extendMaxTotalDaysFromPickup: 4, isAdmin: false, equipmentCategoryOutCounts: { Cam: 0, Ops: 0, Sound: 0, Light: 0, Grip: 0, Other: 0 } };
     function isBookDeckAdminRole(role) {
@@ -1823,12 +1817,6 @@
         }
         validateEquipmentBookingRange(); validateStudioBookingRange();
       }).getBookingLimits(currentTestToken);
-      var qpView = '';
-      try { qpView = new URLSearchParams(window.location.search).get('view') || ''; } catch (e1) {}
-      if(currentUser&&isBookDeckAdminRole(currentUser.role) && qpView !== 'user'){
-        window.top.location.href = buildAdminAppUrl_(currentTestToken);
-        return true;
-      }
       setTimeout(function() {
         activateTab('view-equipment');
         loadEquipment(currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY);
@@ -2081,11 +2069,6 @@
       var roleLabels = {'super_admin':'Admin','technician':'Technician','iiw_instructor':'IIW Instructor','instructor':'Instructor','student':'Student'};
       document.getElementById('navbar-user-name').innerText = currentUser.name;
       document.getElementById('navbar-user-role').innerText = roleLabels[currentUser.role]||currentUser.role;
-      var admL = document.getElementById('nav-admin-panel-link');
-      if (admL && currentTestToken && isBookDeckAdminRole(currentUser.role)) {
-        admL.classList.remove('hidden');
-        admL.href = buildAdminAppUrl_(currentTestToken);
-      } else if (admL) { admL.classList.add('hidden'); }
       var banner = document.getElementById('user-info-banner');
       banner.classList.remove('hidden');
       document.getElementById('banner-name').innerText = currentUser.name;
@@ -4200,7 +4183,7 @@
             });
           }
           var slots = [];
-          for (var hm = 9 * 60; hm <= 20 * 60 + 30; hm += 30) {
+          for (var hm = 9 * 60; hm <= 20 * 60; hm += 60) {
             var hh = String(Math.floor(hm / 60)).padStart(2, '0');
             var mm = String(hm % 60).padStart(2, '0');
             slots.push({ mins: hm, label: hh + ':' + mm });
@@ -4231,7 +4214,7 @@
             days.forEach(function(d){
               slots.forEach(function(s){
                 var slotMs = new Date(d.iso + 'T' + s.label + ':00').getTime();
-                var slotEnd = slotMs + 30 * 60000;
+                var slotEnd = slotMs + 60 * 60000;
                 if(slotMs < eMs && slotEnd > sMs){
                   var key = d.iso + '|' + s.mins;
                   if(cells[key] === 'free'){
