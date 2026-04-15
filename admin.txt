@@ -813,6 +813,108 @@
         isSuperAdmin: role === 'super_admin'
       };
     }
+    function toIsoDateLocal_(raw) {
+      var d = raw instanceof Date ? new Date(raw.getTime()) : new Date(String(raw || ''));
+      if (isNaN(d.getTime())) return '';
+      var y = d.getFullYear();
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+    function hhmmFromIso_(raw) {
+      var d = new Date(String(raw || ''));
+      if (isNaN(d.getTime())) return '—';
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+    function trafficActiveStatus_(status) {
+      var s = String(status || '').trim().toLowerCase();
+      return s === 'pending' || s === 'approved' || s === 'checked_out' || s === 'picked_up' || s === 'key_out';
+    }
+    function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, dayIso, qNorm) {
+      var all = [];
+      (equipmentRows || []).forEach(function(r) {
+        if (!trafficActiveStatus_(r && r.status)) return;
+        var eqId = String((r && r.equipment_item_id) || '').trim();
+        var meta = itemMetaById[eqId] || {};
+        var item = {
+          id: eqId,
+          name: String(meta.name || meta.code || eqId || 'Ekipman'),
+          eqId: eqId,
+          eqCode: String(meta.code || eqId || ''),
+          eqType: String(meta.type || ''),
+          isStudioKey: false
+        };
+        var base = {
+          id: String((r && r.id) || ''),
+          trafficKind: 'equipment',
+          userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+          email: String((r && r.requester_email) || ''),
+          phone: '',
+          handoverLabel: String((r && r.start_at) || ''),
+          returnLabel: String((r && r.end_at) || ''),
+          purpose: String((r && (r.note || r.purpose)) || ''),
+          status: String((r && r.status) || ''),
+          items: [item]
+        };
+        all.push(Object.assign({}, base, { type: 'pickup', time: hhmmFromIso_(base.handoverLabel) }));
+        all.push(Object.assign({}, base, { type: 'return', time: hhmmFromIso_(base.returnLabel) }));
+      });
+      (studioRows || []).forEach(function(r) {
+        if (!trafficActiveStatus_(r && r.status)) return;
+        var sId = String((r && r.studio_id) || '').trim();
+        var sName = String((r && (r.studio_name || r.studio_id)) || '').trim();
+        var sItem = {
+          id: sId || String((r && r.id) || ''),
+          name: sName || sId || 'Stüdyo',
+          eqId: sId || String((r && r.id) || ''),
+          eqCode: sId || 'STUDIO',
+          eqType: 'studio',
+          isStudioKey: true
+        };
+        var baseSt = {
+          id: String((r && r.id) || ''),
+          trafficKind: 'studio',
+          studioId: sId,
+          studioName: sName,
+          userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+          email: String((r && r.requester_email) || ''),
+          phone: '',
+          handoverLabel: String((r && r.start_at) || ''),
+          returnLabel: String((r && r.end_at) || ''),
+          purpose: String((r && r.purpose) || ''),
+          status: String((r && r.status) || ''),
+          items: [sItem]
+        };
+        all.push(Object.assign({}, baseSt, { type: 'pickup', time: hhmmFromIso_(baseSt.handoverLabel) }));
+        all.push(Object.assign({}, baseSt, { type: 'return', time: hhmmFromIso_(baseSt.returnLabel) }));
+      });
+      if (dayIso) {
+        all = all.filter(function(x) {
+          return x.type === 'pickup'
+            ? toIsoDateLocal_(x.handoverLabel) === dayIso
+            : toIsoDateLocal_(x.returnLabel) === dayIso;
+        });
+      }
+      if (qNorm) {
+        all = all.filter(function(x) {
+          var blob = [
+            x.userName,
+            x.email,
+            x.phone,
+            x.id,
+            x.purpose,
+            x.studioName,
+            (x.items || []).map(function(i) { return [i.name, i.eqCode, i.eqType].join(' '); }).join(' ')
+          ].join(' ').toLowerCase();
+          return blob.indexOf(String(qNorm || '').toLowerCase()) >= 0;
+        });
+      }
+      return all.sort(function(a, b) {
+        var aMs = new Date(String(a.type === 'pickup' ? a.handoverLabel : a.returnLabel) || '').getTime();
+        var bMs = new Date(String(b.type === 'pickup' ? b.handoverLabel : b.returnLabel) || '').getTime();
+        return bMs - aMs;
+      });
+    }
     var methods = {
       checkAdminAccessBridge: function() {
         return adminApiRequest('/auth/session', { method: 'GET' })
@@ -1003,6 +1105,54 @@
         }).catch(function() {
           return [];
         });
+      }
+      ,
+      getTrafficData: function(dateIso) {
+        var dayIso = String(dateIso || '').trim();
+        return Promise.all([
+          adminApiRequest('/equipment-reservations', { method: 'GET' }),
+          adminApiRequest('/studio-reservations', { method: 'GET' }),
+          adminApiRequest('/equipment-items', { method: 'GET' })
+        ]).then(function(arr) {
+          var eqRows = (arr[0] && arr[0].data) || [];
+          var stRows = (arr[1] && arr[1].data) || [];
+          var invRows = (arr[2] && arr[2].data) || [];
+          var itemMetaById = {};
+          (invRows || []).forEach(function(it) {
+            var iid = String((it && it.id) || '').trim();
+            if (!iid) return;
+            itemMetaById[iid] = {
+              name: String((it && it.name) || iid),
+              type: String((it && (it.category || it.type)) || ''),
+              code: String((it && (it.equipment_id || it.id)) || iid)
+            };
+          });
+          return buildTrafficRows_(eqRows, stRows, itemMetaById, dayIso, '');
+        }).catch(function() { return []; });
+      },
+      getTrafficDataByNameOrStudent: function(q) {
+        var qNorm = String(q || '').trim().toLowerCase();
+        if (!qNorm) return Promise.resolve([]);
+        return Promise.all([
+          adminApiRequest('/equipment-reservations', { method: 'GET' }),
+          adminApiRequest('/studio-reservations', { method: 'GET' }),
+          adminApiRequest('/equipment-items', { method: 'GET' })
+        ]).then(function(arr) {
+          var eqRows = (arr[0] && arr[0].data) || [];
+          var stRows = (arr[1] && arr[1].data) || [];
+          var invRows = (arr[2] && arr[2].data) || [];
+          var itemMetaById = {};
+          (invRows || []).forEach(function(it) {
+            var iid = String((it && it.id) || '').trim();
+            if (!iid) return;
+            itemMetaById[iid] = {
+              name: String((it && it.name) || iid),
+              type: String((it && (it.category || it.type)) || ''),
+              code: String((it && (it.equipment_id || it.id)) || iid)
+            };
+          });
+          return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
+        }).catch(function() { return []; });
       }
     };
     if (typeof window.google === 'undefined') window.google = {};
