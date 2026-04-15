@@ -841,11 +841,14 @@
         if (!trafficActiveStatus_(r && r.status)) return;
         var eqId = String((r && r.equipment_item_id) || '').trim();
         var meta = itemMetaById[eqId] || {};
+        var prettyCode = publicEquipmentId_(meta.code, eqId);
+        var prettyName = String(meta.name || '').trim();
+        if (!prettyName || isUuidLike_(prettyName)) prettyName = prettyCode || 'Ekipman';
         var item = {
           id: eqId,
-          name: String(meta.name || meta.code || eqId || 'Ekipman'),
+          name: prettyName,
           eqId: eqId,
-          eqCode: String(meta.code || eqId || ''),
+          eqCode: prettyCode || '',
           eqType: String(meta.type || ''),
           isStudioKey: false
         };
@@ -1126,11 +1129,14 @@
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
             if (!iid) return;
-            itemMetaById[iid] = {
+            var meta = {
               name: String((it && it.name) || iid),
               type: String((it && (it.category || it.type)) || ''),
               code: String((it && (it.equipment_id || it.id)) || iid)
             };
+            itemMetaById[iid] = meta;
+            var publicCode = String((it && it.equipment_id) || '').trim();
+            if (publicCode) itemMetaById[publicCode] = meta;
           });
           return buildTrafficRows_(eqRows, stRows, itemMetaById, dayIso, '');
         }).catch(function() { return []; });
@@ -1150,11 +1156,14 @@
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
             if (!iid) return;
-            itemMetaById[iid] = {
+            var meta = {
               name: String((it && it.name) || iid),
               type: String((it && (it.category || it.type)) || ''),
               code: String((it && (it.equipment_id || it.id)) || iid)
             };
+            itemMetaById[iid] = meta;
+            var publicCode = String((it && it.equipment_id) || '').trim();
+            if (publicCode) itemMetaById[publicCode] = meta;
           });
           return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
         }).catch(function() { return []; });
