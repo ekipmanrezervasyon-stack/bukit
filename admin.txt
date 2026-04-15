@@ -947,6 +947,38 @@
             }]
           };
         });
+      },
+      getAdminReservationHistory: function() {
+        return Promise.all([
+          adminApiRequest('/equipment-reservations', { method: 'GET' }),
+          adminApiRequest('/equipment-items', { method: 'GET' })
+        ]).then(function(arr) {
+          var eqRes = arr[0] || {};
+          var invRes = arr[1] || {};
+          var rows = Array.isArray(eqRes.data) ? eqRes.data : [];
+          var inv = Array.isArray(invRes.data) ? invRes.data : [];
+          var nameById = {};
+          inv.forEach(function(it) {
+            var iid = String((it && it.id) || '').trim();
+            if (!iid) return;
+            nameById[iid] = String((it && it.name) || iid);
+          });
+          return rows.map(function(r) {
+            var eqId = String((r && r.equipment_item_id) || '').trim();
+            return {
+              resId: String((r && r.id) || ''),
+              eqName: nameById[eqId] || eqId || '—',
+              userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+              startDt: String((r && r.start_at) || ''),
+              endDt: String((r && r.end_at) || ''),
+              status: String((r && r.status) || '')
+            };
+          }).sort(function(a, b) {
+            return new Date(String(b.startDt || '')).getTime() - new Date(String(a.startDt || '')).getTime();
+          });
+        }).catch(function() {
+          return [];
+        });
       }
     };
     if (typeof window.google === 'undefined') window.google = {};
