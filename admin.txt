@@ -2754,7 +2754,8 @@
     var st = adminStudiosById[String(studioId || '').trim()] || null;
     var sid = String(studioId || '').trim().toUpperCase();
     // GREEN stüdyo varsayılan olarak hafta sonu açık.
-    if (sid === 'GREEN') return true;
+    var sName = String((st && (st.name || st.studio_name || st.code)) || '').trim().toUpperCase();
+    if (sid === 'GREEN' || sName === 'GREEN' || sName === 'GREEN STUDIO' || sName.indexOf('GREEN') >= 0) return true;
     if (!st) return false;
     var v = (st.weekendOk != null) ? st.weekendOk : (st.weekend_ok != null ? st.weekend_ok : st.weekend);
     return v === true || v === 1 || String(v || '').toLowerCase() === 'true';
