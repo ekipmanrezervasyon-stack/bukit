@@ -693,6 +693,29 @@
     return '';
   }
 
+  function formatAdminCardDtTr_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '—';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    try {
+      var parts = new Intl.DateTimeFormat('tr-TR', {
+        timeZone: 'Europe/Istanbul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(d);
+      var map = {};
+      parts.forEach(function(p) { map[p.type] = p.value; });
+      return String(map.day || '00') + '.' + String(map.month || '00') + '.' + String(map.year || '0000') + ' / ' + String(map.hour || '00') + ':' + String(map.minute || '00');
+    } catch (_eFmt) {
+      return s;
+    }
+  }
+
   function adminApiRequest(path, opts) {
     if (!API_BASE) return Promise.reject(new Error('API base tanımlı değil. URL sonuna ?api_base=https://... ekleyin.'));
     var token = String(currentAuthToken || '').trim();
@@ -2174,7 +2197,9 @@
       }).join('');
       var schedBlock = '';
       if (res.handoverLabel || res.returnLabel) {
-        schedBlock = '<div class="mt-2 pt-2 border-t border-gray-100/80 text-[10px] text-gray-700 space-y-1"><p><span class="font-black text-gray-500 uppercase tracking-wide">Teslim</span> · ' + escAdm(res.handoverLabel || '—') + '</p><p><span class="font-black text-gray-500 uppercase tracking-wide">İade</span> · ' + escAdm(res.returnLabel || '—') + '</p></div>';
+        var handoverFmt = formatAdminCardDtTr_(res.handoverLabel);
+        var returnFmt = formatAdminCardDtTr_(res.returnLabel);
+        schedBlock = '<div class="mt-2 pt-2 border-t border-gray-100/80 text-[10px] text-gray-700 space-y-1"><p><span class="font-black text-gray-500 uppercase tracking-wide">Teslim</span> · ' + escAdm(handoverFmt) + '</p><p><span class="font-black text-gray-500 uppercase tracking-wide">İade</span> · ' + escAdm(returnFmt) + '</p></div>';
       }
       var phoneLine = res.phone ? '<p class="text-xs text-gray-600 mt-1">📞 ' + escAdm(res.phone) + '</p>' : '';
       var purposeBlock = res.purpose ? '<p class="text-[11px] text-gray-600 mt-2 whitespace-pre-wrap">' + escAdm(res.purpose) + '</p>' : '';
