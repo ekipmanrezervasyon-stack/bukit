@@ -1189,6 +1189,24 @@
           });
           return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
         }).catch(function() { return []; });
+      },
+      adminProcessPartialCheckout: function(resId) {
+        return adminApiRequest('/admin/traffic/checkout', {
+          method: 'POST',
+          body: { id: String(resId || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
+          return { success: true, url: String(res.url || '') };
+        });
+      },
+      adminProcessPartialCheckin: function(resId) {
+        return adminApiRequest('/admin/traffic/checkin', {
+          method: 'POST',
+          body: { id: String(resId || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkin failed.' };
+          return { success: true };
+        });
       }
     };
     if (typeof window.google === 'undefined') window.google = {};

@@ -89,6 +89,10 @@ const quickCheckoutSchema = z.object({
   project_purpose: z.string().max(300).optional().default("")
 });
 
+const adminTrafficActionSchema = z.object({
+  id: z.string().min(1)
+});
+
 const specialAccessUpsertSchema = z.object({
   email: z.string().email(),
   studio: z.enum(["GREEN", "RED", "PODCAST", "DUBBING"]),
@@ -642,6 +646,90 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     return { ok: true, data };
+  });
+
+  app.post("/admin/traffic/checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminTrafficActionSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({
+        status: "picked_up",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id,equipment_item_id,status")
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) {
+      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      if (eqId) {
+        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
+        if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+      }
+      return { ok: true, success: true, id, status: "picked_up", url: "" };
+    }
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        status: "key_out",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id,status")
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) return { ok: true, success: true, id, status: "key_out", url: "" };
+
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/traffic/checkin", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminTrafficActionSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({
+        status: "returned",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id,equipment_item_id,status")
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) {
+      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      if (eqId) {
+        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
+        if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+      }
+      return { ok: true, success: true, id, status: "returned" };
+    }
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        status: "returned",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id,status")
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) return { ok: true, success: true, id, status: "returned" };
+
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
 
   app.post("/equipment-notify/subscribe", { preHandler: requireAuth }, async (req, reply) => {
