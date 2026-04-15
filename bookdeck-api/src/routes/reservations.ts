@@ -116,6 +116,28 @@ const reservationIsActive = (status: string): boolean => {
   return ACTIVE_RES_STATUSES.includes(s) && !CLOSED_RES_STATUSES.includes(s);
 };
 
+const hasPrivilegedStudioAccess = (role: string): boolean =>
+  role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
+
+const isSpecialAccessActive = (untilRaw: string): boolean => {
+  const until = String(untilRaw || "").trim();
+  if (!until) return true;
+  const ms = new Date(until).getTime();
+  return Number.isFinite(ms) && ms >= Date.now();
+};
+
+const canAccessStudioByPolicy = (
+  profile: { role?: string; special_access?: string | null; special_access_until?: string | null },
+  studioId: string
+): boolean => {
+  const sid = String(studioId || "").trim().toUpperCase();
+  if (!sid) return false;
+  if (hasPrivilegedStudioAccess(String(profile.role || ""))) return true;
+  if (sid === "GREEN" || sid === "PODCAST" || sid === "DUBBING") return true;
+  const specialStudio = String(profile.special_access || "").trim().toUpperCase();
+  return sid === specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""));
+};
+
 const normalizeInvStatusEnglish = (status: string): string => {
   const s = String(status || "").trim().toUpperCase();
   if (s === "AVAILABLE" || s === "MUSAIT" || s === "MÜSAİT" || s === "UYGUN") return "Available";
@@ -397,6 +419,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .maybeSingle();
     if (stErr) return reply.code(500).send({ ok: false, error: stErr.message });
     if (!studio) return reply.code(404).send({ ok: false, error: "Studio not found." });
+    if (!canAccessStudioByPolicy(profile, studio_id)) {
+      return reply.code(403).send({ ok: false, error: "Studio is not available for your account." });
+    }
 
     const overlap = await supabaseAdmin
       .from("studio_reservations")

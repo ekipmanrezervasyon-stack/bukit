@@ -26,6 +26,8 @@ export type ProfileRow = {
   onboarding_completed: boolean;
   staff_type: "academic" | "administrative" | null;
   faculty_name: string | null;
+  special_access: string | null;
+  special_access_until: string | null;
 };
 
 type AuthedReq = FastifyRequest & { authProfile?: ProfileRow };
