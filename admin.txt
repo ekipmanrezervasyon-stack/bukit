@@ -2752,7 +2752,12 @@
 
   function adminStudioWeekendAllowed_(studioId) {
     var st = adminStudiosById[String(studioId || '').trim()] || null;
-    return !!(st && st.weekendOk);
+    var sid = String(studioId || '').trim().toUpperCase();
+    // GREEN stüdyo varsayılan olarak hafta sonu açık.
+    if (sid === 'GREEN') return true;
+    if (!st) return false;
+    var v = (st.weekendOk != null) ? st.weekendOk : (st.weekend_ok != null ? st.weekend_ok : st.weekend);
+    return v === true || v === 1 || String(v || '').toLowerCase() === 'true';
   }
 
   function adminStudioDayKind_(studioId, d) {
