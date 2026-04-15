@@ -785,12 +785,12 @@
           return v;
         }
         v = String(sessionStorage.getItem('bookdeck_api_base') || localStorage.getItem('bookdeck_api_base') || '').trim();
-        if (!v) v = 'http://127.0.0.1:4000';
+        if (!v) v = 'https://bukit-production.up.railway.app';
         if (v.endsWith('/')) v = v.slice(0, -1);
         if (v.endsWith('/api')) return v;
         return v + '/api';
       } catch (e) {
-        return 'http://127.0.0.1:4000/api';
+        return 'https://bukit-production.up.railway.app/api';
       }
     })();
     function getAuthTokenSafe_() {
