@@ -21,6 +21,22 @@ const normalizeWeekendFlag = (raw: unknown): boolean => {
   return Boolean(v);
 };
 
+const resolveStudioKey = (row: Record<string, unknown>): string => {
+  const candidates = [
+    row.id,
+    (row as Record<string, unknown>).studio_id,
+    (row as Record<string, unknown>).code,
+    (row as Record<string, unknown>).studio_code,
+    row.name
+  ];
+  for (const raw of candidates) {
+    const v = String(raw ?? "").trim().toUpperCase();
+    if (!v) continue;
+    if (v === "GREEN" || v === "RED" || v === "BLUE" || v === "PODCAST" || v === "DUBBING") return v;
+  }
+  return String(row.id || "").trim().toUpperCase();
+};
+
 export const studioRoutes: FastifyPluginAsync = async (app) => {
   app.get("/studios", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
@@ -38,11 +54,11 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
       if (specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""))) {
         allowed.add(specialStudio);
       }
-      visible = rows.filter((row) => allowed.has(String(row.id || "").trim().toUpperCase()));
+      visible = rows.filter((row) => allowed.has(resolveStudioKey(row)));
     }
 
     const normalized = visible.map((row) => {
-      const sid = String(row.id || "").trim().toUpperCase();
+      const sid = resolveStudioKey(row);
       const rawWeekend =
         (row as Record<string, unknown>).weekendOk ??
         (row as Record<string, unknown>).weekend_ok ??

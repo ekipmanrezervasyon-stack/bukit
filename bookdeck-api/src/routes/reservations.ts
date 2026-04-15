@@ -128,9 +128,22 @@ const isSpecialAccessActive = (untilRaw: string): boolean => {
 
 const canAccessStudioByPolicy = (
   profile: { role?: string; special_access?: string | null; special_access_until?: string | null },
-  studioId: string
+  studioRow: Record<string, unknown>
 ): boolean => {
-  const sid = String(studioId || "").trim().toUpperCase();
+  const sidCandidates = [
+    studioRow.id,
+    studioRow.studio_id,
+    studioRow.code,
+    studioRow.studio_code,
+    studioRow.name
+  ];
+  let sid = "";
+  for (const raw of sidCandidates) {
+    const v = String(raw ?? "").trim().toUpperCase();
+    if (!v) continue;
+    sid = v;
+    if (v === "GREEN" || v === "RED" || v === "BLUE" || v === "PODCAST" || v === "DUBBING") break;
+  }
   if (!sid) return false;
   if (hasPrivilegedStudioAccess(String(profile.role || ""))) return true;
   if (sid === "GREEN" || sid === "PODCAST" || sid === "DUBBING") return true;
@@ -419,7 +432,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .maybeSingle();
     if (stErr) return reply.code(500).send({ ok: false, error: stErr.message });
     if (!studio) return reply.code(404).send({ ok: false, error: "Studio not found." });
-    if (!canAccessStudioByPolicy(profile, studio_id)) {
+    if (!canAccessStudioByPolicy(profile, studio as Record<string, unknown>)) {
       return reply.code(403).send({ ok: false, error: "Studio is not available for your account." });
     }
 
