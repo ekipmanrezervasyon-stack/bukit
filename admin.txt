@@ -401,7 +401,8 @@
               <label class="text-[10px] font-bold text-gray-400 uppercase">Açıklama</label>
               <input type="text" id="fe-purpose" class="w-full p-3 mt-1 rounded-xl border border-gray-200 text-sm outline-none" placeholder="Proje / not">
             </div>
-            <button type="button" onclick="submitForwardReservation()" class="w-full bg-[#e30613] text-white font-black py-4 rounded-xl shadow-lg hover:bg-red-700 transition text-sm">REZERVASYON OLUŞTUR</button>
+            <p id="fe-holiday-warning" class="hidden text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">Resmi tatilde rezervasyon yapılamaz.</p>
+            <button type="button" id="fe-submit-btn" onclick="submitForwardReservation()" class="w-full bg-[#e30613] text-white font-black py-4 rounded-xl shadow-lg hover:bg-red-700 transition text-sm">REZERVASYON OLUŞTUR</button>
           </div>
         </div>
       </section>
@@ -1566,6 +1567,10 @@
         feEndWrap.classList.toggle('hidden', fePeriodEl.value === 'once');
       });
     }
+    ['fe-start-date', 'fe-start-time', 'fe-end-date', 'fe-end-time'].forEach(function(fid) {
+      var fel = document.getElementById(fid);
+      if (fel) fel.addEventListener('change', updateForwardHolidayWarning_);
+    });
 
     function applyHeaderFromAccess(access) {
       document.getElementById('adminNameDisplay').innerText = access.name || 'Admin';
@@ -3203,10 +3208,49 @@
     if (fep) fep.value = 'once';
     if (few) few.classList.add('hidden');
     if (fed) fed.value = '';
+    updateForwardHolidayWarning_();
     refreshInventoryData(function() {
       forwardPool = (allEq || []).filter(function(i) { return !i.isStudioKey && i.status === 'AVAILABLE'; });
       filterForwardEquip();
     });
+  }
+  function forwardHolidayDatesInRange_(startIso, endIso) {
+    var s = new Date(String(startIso || ''));
+    var e = new Date(String(endIso || ''));
+    if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return [];
+    var cur = new Date(s.getTime());
+    cur.setHours(0, 0, 0, 0);
+    var last = new Date(e.getTime() - 1);
+    last.setHours(0, 0, 0, 0);
+    var out = [];
+    while (cur <= last) {
+      if (isPublicHoliday(cur)) out.push(String(cur.getDate()).padStart(2, '0') + '.' + String(cur.getMonth() + 1).padStart(2, '0') + '.' + cur.getFullYear());
+      cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+  }
+  function updateForwardHolidayWarning_() {
+    var d1 = document.getElementById('fe-start-date');
+    var t1 = document.getElementById('fe-start-time');
+    var d2 = document.getElementById('fe-end-date');
+    var t2 = document.getElementById('fe-end-time');
+    var warn = document.getElementById('fe-holiday-warning');
+    var btn = document.getElementById('fe-submit-btn');
+    if (!warn || !btn || !d1 || !t1 || !d2 || !t2) return false;
+    var sd = d1.value && t1.value ? (d1.value + 'T' + t1.value) : '';
+    var ed = d2.value && t2.value ? (d2.value + 'T' + t2.value) : '';
+    var blocked = forwardHolidayDatesInRange_(sd, ed);
+    if (blocked.length) {
+      warn.textContent = 'Resmi tatil secimi var: ' + blocked.join(', ') + '. Bu aralikta rezervasyon yapilamaz.';
+      warn.classList.remove('hidden');
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      return true;
+    }
+    warn.classList.add('hidden');
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    return false;
   }
   function loadForwardAvailableItems() {
     var d1 = document.getElementById('fe-start-date').value;
@@ -3215,6 +3259,7 @@
     var t2 = document.getElementById('fe-end-time').value;
     var sd = d1 && t1 ? (d1 + 'T' + t1) : '';
     var ed = d2 && t2 ? (d2 + 'T' + t2) : '';
+    if (updateForwardHolidayWarning_()) { showToast('Resmi tatillerde rezervasyon kapalıdır.', 'error'); return; }
     if (!sd || !ed) { showToast('Önce teslim ve iade tarihi ile saatleri seçin.', 'error'); return; }
     if (new Date(ed).getTime() <= new Date(sd).getTime()) { showToast('İade, teslimden sonra olmalı.', 'error'); return; }
     showToast('Müsait ekipmanlar yükleniyor…', 'info');
@@ -3265,6 +3310,7 @@
     var t2 = document.getElementById('fe-end-time').value;
     var sd = d1 && t1 ? (d1 + 'T' + t1) : '';
     var ed = d2 && t2 ? (d2 + 'T' + t2) : '';
+    if (updateForwardHolidayWarning_()) { showToast('Resmi tatillerde rezervasyon kapalıdır.', 'error'); return; }
     var endPeriod = document.getElementById('fe-end-period-date') ? document.getElementById('fe-end-period-date').value : '';
     var period = document.getElementById('fe-period').value;
     var purpose = document.getElementById('fe-purpose').value.trim();
