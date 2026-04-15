@@ -816,6 +816,17 @@
     function toIsoDateLocal_(raw) {
       var d = raw instanceof Date ? new Date(raw.getTime()) : new Date(String(raw || ''));
       if (isNaN(d.getTime())) return '';
+      try {
+        var parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Istanbul',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).formatToParts(d);
+        var map = {};
+        parts.forEach(function(p) { map[p.type] = p.value; });
+        if (map.year && map.month && map.day) return map.year + '-' + map.month + '-' + map.day;
+      } catch (_eFmtDate) {}
       var y = d.getFullYear();
       var m = String(d.getMonth() + 1).padStart(2, '0');
       var day = String(d.getDate()).padStart(2, '0');
@@ -824,6 +835,17 @@
     function hhmmFromIso_(raw) {
       var d = new Date(String(raw || ''));
       if (isNaN(d.getTime())) return '—';
+      try {
+        var parts = new Intl.DateTimeFormat('tr-TR', {
+          timeZone: 'Europe/Istanbul',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).formatToParts(d);
+        var map = {};
+        parts.forEach(function(p) { map[p.type] = p.value; });
+        if (map.hour && map.minute) return map.hour + ':' + map.minute;
+      } catch (_eFmtTime) {}
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     }
     function trafficActiveStatus_(status) {
