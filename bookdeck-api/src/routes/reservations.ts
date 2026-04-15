@@ -92,6 +92,17 @@ const quickCheckoutSchema = z.object({
 const adminTrafficActionSchema = z.object({
   id: z.string().min(1)
 });
+const adminTrafficExtendSchema = z.object({
+  id: z.string().min(1),
+  new_end_at: isoDateSchema
+});
+const adminTrafficTransferSchema = z.object({
+  id: z.string().min(1),
+  query: z.string().min(1).max(190)
+});
+const adminEquipmentLookupSchema = z.object({
+  query: z.string().min(1).max(190)
+});
 
 const specialAccessUpsertSchema = z.object({
   email: z.string().email(),
@@ -730,6 +741,139 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (st.data) return { ok: true, success: true, id, status: "returned" };
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/traffic/cancel", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminTrafficActionSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({
+        status: "cancelled",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id,equipment_item_id")
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) {
+      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      if (eqId) await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
+      return { ok: true, success: true, id, status: "cancelled" };
+    }
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        status: "cancelled",
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) return { ok: true, success: true, id, status: "cancelled" };
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/traffic/extend", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminTrafficExtendSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+    const newEndAt = String(parsed.data.new_end_at || "");
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({ end_at: newEndAt, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id,end_at")
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) return { ok: true, success: true, id, end_at: newEndAt };
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .update({ end_at: newEndAt, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id,end_at")
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) return { ok: true, success: true, id, end_at: newEndAt };
+
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/traffic/transfer", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminTrafficTransferSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+    const raw = String(parsed.data.query || "").trim();
+    const isEmail = raw.includes("@");
+    const q = supabaseAdmin.from("profiles").select("*").limit(1);
+    const user = isEmail
+      ? await q.eq("email", raw.toLowerCase()).maybeSingle()
+      : await q.or(`student_number.eq.${raw},staff_number.eq.${raw}`).maybeSingle();
+    if (user.error) return reply.code(500).send({ ok: false, error: user.error.message });
+    if (!user.data) return reply.code(404).send({ ok: false, error: "Target user not found." });
+    const p = user.data as Record<string, unknown>;
+    const payload = {
+      requester_profile_id: String(p.id || ""),
+      requester_email: String(p.email || "").toLowerCase(),
+      requester_name: String(p.full_name || p.email || "")
+    };
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .update(payload)
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) return { ok: true, success: true, id };
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .update(payload)
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) return { ok: true, success: true, id };
+
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/equipment/lookup", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminEquipmentLookupSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const raw = String(parsed.data.query || "").trim();
+    let result = await supabaseAdmin
+      .from("equipment_items")
+      .select("*")
+      .or(`id.eq.${raw},equipment_id.eq.${raw}`)
+      .limit(1)
+      .maybeSingle();
+    if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+    if (!result.data) {
+      result = await supabaseAdmin.from("equipment_items").select("*").ilike("name", `%${raw}%`).limit(1).maybeSingle();
+      if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+    }
+    if (!result.data) return reply.code(404).send({ ok: false, error: "Equipment not found." });
+    const row = result.data as Record<string, unknown>;
+    return {
+      ok: true,
+      item: {
+        eqId: String(row.id || ""),
+        name: String(row.name || row.id || ""),
+        eqType: String(row.category || row.type || ""),
+        status: String(row.status || "")
+      }
+    };
   });
 
   app.post("/equipment-notify/subscribe", { preHandler: requireAuth }, async (req, reply) => {

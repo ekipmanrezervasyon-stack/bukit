@@ -1207,6 +1207,48 @@
           if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkin failed.' };
           return { success: true };
         });
+      },
+      adminTrafficCancelDeliveries: function(resId) {
+        return adminApiRequest('/admin/traffic/cancel', {
+          method: 'POST',
+          body: { id: String(resId || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Cancel failed.' };
+          return { success: true };
+        });
+      },
+      adminTrafficExtendDeliveries: function(resId, _checks, newEndAt) {
+        return adminApiRequest('/admin/traffic/extend', {
+          method: 'POST',
+          body: { id: String(resId || '').trim(), new_end_at: String(newEndAt || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Extend failed.' };
+          return { success: true };
+        });
+      },
+      adminTrafficTransferDeliveries: function(resId, _checks, query) {
+        return adminApiRequest('/admin/traffic/transfer', {
+          method: 'POST',
+          body: { id: String(resId || '').trim(), query: String(query || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Transfer failed.' };
+          return { success: true };
+        });
+      },
+      adminPendingLookupInventoryItem: function(eqQuery) {
+        return adminApiRequest('/admin/equipment/lookup', {
+          method: 'POST',
+          body: { query: String(eqQuery || '').trim() }
+        });
+      },
+      adminTrafficPrintPdf: function(resId) {
+        return adminApiRequest('/admin/traffic/checkout', {
+          method: 'POST',
+          body: { id: String(resId || '').trim() }
+        }).then(function(res) {
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
+          return { success: true, url: String(res.url || '') };
+        });
       }
     };
     if (typeof window.google === 'undefined') window.google = {};
@@ -2676,10 +2718,11 @@
       var oldContent = container.innerHTML;
       container.innerHTML = '<div class="text-center p-2 text-[10px] font-bold text-blue-600 animate-pulse">PDF…</div>';
       google.script.run.withSuccessHandler(function(r) {
-        if (r && r.success && r.url) {
-          window.open(r.url, '_blank');
+        if (r && r.success) {
+          if (r.url) window.open(r.url, '_blank');
           container.innerHTML = oldContent;
           refreshInventoryData();
+          loadTraffic();
         } else { container.innerHTML = oldContent; showToast((r && r.error) || 'Hata', 'error'); }
       }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast(err.message, 'error'); }).adminTrafficPrintPdf(resId, checks, note || '', trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
     });
@@ -2763,7 +2806,10 @@
     google.script.run.withSuccessHandler(function(r) {
       if (r.success) {
         showToast("Çıkış Başarılı!");
-        container.innerHTML = '<a href="' + r.url + '" target="_blank" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-2 animate-bounce">🖨️ YAZDIR</a><button onclick="loadTraffic()" class="w-full mt-3 text-[10px] font-bold text-gray-500 hover:text-gray-800 transition">Listeyi Yenile</button>';
+        var printBtn = r.url
+          ? '<a href="' + r.url + '" target="_blank" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-2 animate-bounce">🖨️ YAZDIR</a>'
+          : '<button type="button" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl opacity-80 cursor-default">✅ ÇIKIŞ İŞLENDİ</button>';
+        container.innerHTML = printBtn + '<button onclick="loadTraffic()" class="w-full mt-3 text-[10px] font-bold text-gray-500 hover:text-gray-800 transition">Listeyi Yenile</button>';
         refreshInventoryData();
       } else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
     }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckout(resId, checks, studioHandoverNote, trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
