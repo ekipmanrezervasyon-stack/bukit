@@ -206,8 +206,8 @@
           <input type="text" id="reg-student-phone" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Phone (optional)">
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[10px] text-gray-600 space-y-2 leading-snug">
             <p class="font-bold text-gray-800 text-xs">KVKK — Kişisel veriler</p>
-            <p>Kişisel verileriniz <a href="https://www.bilgi.edu.tr/tr/universite/hakkinda/kurumsal-ilkeler/kisisel-verilerin-korunmasi/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Türkçe bilgilendirme</a> ve <a href="https://www.bilgi.edu.tr/en/university/about/institutional-principles/protection-of-personal-data/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">English notice</a> sayfalarında açıklanmıştır.</p>
-            <label class="flex items-start gap-2 cursor-pointer select-none"><input type="checkbox" id="reg-kvkk-student" class="mt-0.5 rounded border-gray-300 text-[#e30613]"><span id="i18n-kvkk-student-label" class="text-[10px]">Okudum, anladım.</span></label>
+            <p>Kişisel verileriniz <a href="https://www.bilgi.edu.tr/tr/universite/hakkinda/kurumsal-ilkeler/kisisel-verilerin-korunmasi/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Türkçe bilgilendirme</a> ve <a href="https://www.bilgi.edu.tr/en/university/about/institutional-principles/protection-of-personal-data/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">English notice</a> sayfalarında açıklanmıştır. Ayrıca <a href="./terms.html" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Terms &amp; Conditions / Şartlar ve Koşullar</a> metnini inceleyebilirsiniz.</p>
+            <label class="flex items-start gap-2 cursor-pointer select-none"><input type="checkbox" id="reg-kvkk-student" class="mt-0.5 rounded border-gray-300 text-[#e30613]"><span id="i18n-kvkk-student-label" class="text-[10px]">KVKK ve Şartlar-Koşulları okudum, kabul ediyorum.</span></label>
           </div>
           <button type="button" id="reg-student-btn" onclick="submitStudentRegistration()" class="w-full bg-[#e30613] text-white rounded-xl py-3 font-bold text-sm">Complete Registration</button>
           <button type="button" id="i18n-student-change-email-btn" onclick="backToOtpEmailStep()" class="w-full bg-white border border-gray-200 text-gray-700 rounded-xl py-3 font-bold text-sm">Change Email</button>
@@ -231,8 +231,8 @@
           <input type="text" id="reg-staff-phone" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Phone (optional)">
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[10px] text-gray-600 space-y-2 leading-snug">
             <p class="font-bold text-gray-800 text-xs">KVKK — Kişisel veriler</p>
-            <p>Kişisel verileriniz <a href="https://www.bilgi.edu.tr/tr/universite/hakkinda/kurumsal-ilkeler/kisisel-verilerin-korunmasi/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Türkçe bilgilendirme</a> ve <a href="https://www.bilgi.edu.tr/en/university/about/institutional-principles/protection-of-personal-data/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">English notice</a> sayfalarında açıklanmıştır.</p>
-            <label class="flex items-start gap-2 cursor-pointer select-none"><input type="checkbox" id="reg-kvkk-staff" class="mt-0.5 rounded border-gray-300 text-[#e30613]"><span id="i18n-kvkk-staff-label" class="text-[10px]">Okudum, anladım.</span></label>
+            <p>Kişisel verileriniz <a href="https://www.bilgi.edu.tr/tr/universite/hakkinda/kurumsal-ilkeler/kisisel-verilerin-korunmasi/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Türkçe bilgilendirme</a> ve <a href="https://www.bilgi.edu.tr/en/university/about/institutional-principles/protection-of-personal-data/" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">English notice</a> sayfalarında açıklanmıştır. Ayrıca <a href="./terms.html" target="_blank" rel="noopener noreferrer" class="text-[#e30613] font-semibold underline">Terms &amp; Conditions / Şartlar ve Koşullar</a> metnini inceleyebilirsiniz.</p>
+            <label class="flex items-start gap-2 cursor-pointer select-none"><input type="checkbox" id="reg-kvkk-staff" class="mt-0.5 rounded border-gray-300 text-[#e30613]"><span id="i18n-kvkk-staff-label" class="text-[10px]">KVKK ve Şartlar-Koşulları okudum, kabul ediyorum.</span></label>
           </div>
           <button type="button" id="reg-staff-btn" onclick="submitStaffRegistration()" class="w-full bg-[#e30613] text-white rounded-xl py-3 font-bold text-sm">Complete Registration</button>
           <button type="button" id="i18n-staff-change-email-btn" onclick="backToOtpEmailStep()" class="w-full bg-white border border-gray-200 text-gray-700 rounded-xl py-3 font-bold text-sm">Change Email</button>
@@ -1278,7 +1278,7 @@
         msgNoneSelectedToRemove: 'Choose items to remove from the cart.',
         msgReservationPlaced: 'Reservation placed!',
         msgNothingSelected: 'Select at least one item to reserve.',
-        msgKvkkRequired: 'Please confirm you have read the KVKK / personal data notice.',
+        msgKvkkRequired: 'Please confirm that you have read and accepted the KVKK notice and Terms & Conditions.',
         confirmReservationResponsibility: 'Use of all functions/features of the equipment you receive is your responsibility. The equipment depot does not provide product briefing or training during handover.',
         cartTitle: 'Items in Cart',
         cartSub: 'Review before confirming',
@@ -1287,7 +1287,7 @@
         notifyMeDup: 'You are already on the notify list for this equipment type.',
         notifyMeErr: 'Could not save your notify request.',
         notifyMeSignin: 'Please sign in to use Notify Me.',
-        kvkkReadLabel: 'I have read and understood.',
+        kvkkReadLabel: 'I have read and accept KVKK and Terms & Conditions.',
         lateReturnPolicyTitle: 'Late returns & account suspension',
         lateReturnPolicyBody: 'Your return is judged only by the date and time on your booking (there is no separate “closing time” rule on top of that). Up to 30 minutes after your booked return time: yellow warning. More than 30 minutes late: if another user is scheduled to pick up the same equipment within about 32 minutes after you return, your account is suspended for 15 days right away, and the next person is told to contact the equipment desk. If you are more than 30 minutes late and no such pickup is scheduled, you get a yellow warning the first time and a 15-day suspension if it happens again. If you already had a 15-day suspension for late return and it happens again, you may get a semester-long suspension. Damaged equipment or missing parts can lead to stronger penalties.',
         studioProjectNameLabel: 'PROJECT NAME',
@@ -1385,7 +1385,7 @@
         msgNoneSelectedToRemove: 'Septten cikarmak icin urun secin.',
         msgReservationPlaced: 'Rezervasyon olusturuldu!',
         msgNothingSelected: 'Rezervasyon icin en az bir urun secin.',
-        msgKvkkRequired: 'KVKK / kisisel veri bilgilendirmesini okudugunuzu onaylayin.',
+        msgKvkkRequired: 'KVKK metnini ve Sartlar-Kosullari okudugunuzu, kabul ettiginizi onaylayin.',
         confirmReservationResponsibility: 'Aldiginiz ekipmanlarin tum fonksiyonlari ile kullanimi tarafinizin sorumlulugundadir. Ekipman deposu teslim sirasinda urun bilgilendirmesi ve egitimi yapmamaktadir.',
         cartTitle: 'Sepetteki urunler',
         cartSub: 'Onaylamadan once kontrol edin',
@@ -1394,7 +1394,7 @@
         notifyMeDup: 'Bu ekipman turu icin zaten bildirim listenizde kayitlisiniz.',
         notifyMeErr: 'Bildirim talebi kaydedilemedi.',
         notifyMeSignin: 'Bildirim icin once giris yapin.',
-        kvkkReadLabel: 'Okudum, anladim.',
+        kvkkReadLabel: 'KVKK ve Sartlar-Kosullari okudum, kabul ediyorum.',
         lateReturnPolicyTitle: 'Geç iade ve hesap askısı',
         lateReturnPolicyBody: 'İadeniz yalnızca rezervasyonunuzdaki iade tarihi ve saatine göre değerlendirilir (bunun üzerine ayrı bir “kapanış saati” kuralı yoktur). Rezervasyon iade saatine göre en çok 30 dakika gecikme: sarı uyarı. 30 dakikadan fazla gecikme: Sizin iadenizden sonra yaklaşık 32 dakika içinde aynı ekipmanı başka bir kullanıcının teslim alması planlanıyorsa hesabınız doğrudan 15 gün askıya alınır; sıradaki kullanıcıya ekipman masasına başvurması iletilir. 30 dakikadan fazla gecikir ve böyle bir teslim alma yoksa ilk sefer sarı uyarı, aynı durum tekrarlanırsa 15 gün askı uygulanır. Geç iade nedeniyle daha önce 15 gün askı aldıysanız ve durum yinelenirse dönemlik askı uygulanabilir. Hasarlı ekipman veya eksik parça daha ağır yaptırıma yol açabilir.',
         studioProjectNameLabel: 'PROJE ADI',
