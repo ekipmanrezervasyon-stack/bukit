@@ -828,7 +828,12 @@
     }
     function trafficActiveStatus_(status) {
       var s = String(status || '').trim().toLowerCase();
-      return s === 'pending' || s === 'approved' || s === 'checked_out' || s === 'picked_up' || s === 'key_out';
+      if (!s) return false;
+      if (s === 'pending' || s === 'approved' || s === 'checked_out' || s === 'picked_up' || s === 'key_out') return true;
+      if (s === 'onaylı' || s === 'onayli' || s === 'beklemede') return true;
+      if (s.indexOf('approved') >= 0 || s.indexOf('pending') >= 0 || s.indexOf('onay') >= 0 || s.indexOf('bekle') >= 0) return true;
+      if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0 || s.indexOf('key') >= 0) return true;
+      return false;
     }
     function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, dayIso, qNorm) {
       var all = [];
@@ -2582,6 +2587,8 @@
       trafficGlobalQuery = '';
       trafficAllRows = data || [];
       renderTrafficFromCache();
+    }).withFailureHandler(function(err) {
+      container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">Veri alınamadı: ' + escAdm((err && err.message) || 'Bilinmeyen hata') + '</div>';
     }).getTrafficData(date, currentAuthToken);
   }
 
