@@ -688,7 +688,6 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "key_out",
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString()
       })
@@ -696,7 +695,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id,status")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: "key_out", url: "" };
+    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved"), url: "" };
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
@@ -730,7 +729,6 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "returned",
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString()
       })
@@ -738,7 +736,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id,status")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: "returned" };
+    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved") };
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
