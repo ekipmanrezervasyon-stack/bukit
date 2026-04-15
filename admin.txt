@@ -2559,21 +2559,8 @@
   function loadAdminStudios() {
     var container = document.getElementById('admin-studio-selector');
     if (container) container.innerHTML = '<div class="col-span-full text-center text-gray-400 animate-pulse py-4 text-xs">Stüdyolar yükleniyor...</div>';
-    var ctl = null;
-    var tm = null;
-    try {
-      ctl = new AbortController();
-      tm = setTimeout(function() { try { ctl.abort(); } catch (_eAbort) {} }, 12000);
-    } catch (_eCtl) {}
-    fetch(API_BASE + '/studios', { method: 'GET', signal: ctl ? ctl.signal : undefined }).then(function(res) {
-      return res.text().then(function(txt) {
-        var data = {};
-        try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
-        if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
-        return (data && data.data) ? data.data : [];
-      });
-    }).then(function(studios) {
-      if (tm) clearTimeout(tm);
+    adminApiRequest('/studios', { method: 'GET' }).then(function(payload) {
+      var studios = (payload && payload.data) ? payload.data : [];
       var container = document.getElementById('admin-studio-selector');
       if (!container) return;
       if (!studios || !studios.length) { container.innerHTML = '<p class="text-gray-400 col-span-full text-center py-4">Stüdyo bulunamadı.</p>'; return; }
@@ -2592,7 +2579,6 @@
         container.innerHTML += '<div onclick="selectAdminStudio(\'' + sidJs + '\', \'' + snameJs + '\')" class="cursor-pointer rounded-2xl border-2 ' + activeClass + ' p-4 text-center transition-all"><span class="text-2xl block mb-2">' + calData.icon + '</span><h4 class="font-black text-xs text-gray-900">' + escAdm(s.name) + '</h4>' + (isActive ? '<span class="text-[8px] font-bold text-[#e30613] uppercase mt-1 block">Seçili</span>' : '') + '</div>';
       });
     }).catch(function(err) {
-      if (tm) clearTimeout(tm);
       var container = document.getElementById('admin-studio-selector');
       if (container) container.innerHTML = '<p class="text-red-500 col-span-full text-center py-4">' + escAdm((err && err.message) || 'Stüdyo listesi alınamadı.') + '</p>';
     });
@@ -2864,14 +2850,9 @@
   }
 
   function fetchAdminStudioReservationsRange_(fromIso, untilIso) {
-    return fetch(API_BASE + '/studio-reservations?from=' + encodeURIComponent(fromIso) + '&to=' + encodeURIComponent(untilIso), { method: 'GET' })
-      .then(function(res) {
-        return res.text().then(function(txt) {
-          var data = {};
-          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
-          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
-          return (data && data.data) ? data.data : [];
-        });
+    return adminApiRequest('/studio-reservations?from=' + encodeURIComponent(fromIso) + '&to=' + encodeURIComponent(untilIso), { method: 'GET' })
+      .then(function(payload) {
+        return (payload && payload.data) ? payload.data : [];
       });
   }
 
