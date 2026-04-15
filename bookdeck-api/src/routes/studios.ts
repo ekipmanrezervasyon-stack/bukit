@@ -40,6 +40,11 @@ const resolveStudioKey = (row: Record<string, unknown>): string => {
   return String(row.id || "").trim().toUpperCase();
 };
 
+const isRestrictedStudioForStandardStaff = (row: Record<string, unknown>): boolean => {
+  const key = resolveStudioKey(row);
+  return key === "RED" || key === "BLUE";
+};
+
 export const studioRoutes: FastifyPluginAsync = async (app) => {
   app.get("/studios", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
@@ -52,12 +57,12 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     const rows = (data ?? []) as Record<string, unknown>[];
     let visible = rows;
     if (!hasPrivilegedStudioAccess(String(profile.role || ""))) {
-      const allowed = new Set(["GREEN", "PODCAST", "DUBBING"]);
       const specialStudio = String(profile.special_access || "").trim().toUpperCase();
-      if (specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""))) {
-        allowed.add(specialStudio);
-      }
-      visible = rows.filter((row) => allowed.has(resolveStudioKey(row)));
+      const hasActiveSpecial = specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""));
+      visible = rows.filter((row) => {
+        if (!isRestrictedStudioForStandardStaff(row)) return true;
+        return hasActiveSpecial && resolveStudioKey(row) === specialStudio;
+      });
     }
 
     const normalized = visible.map((row) => {

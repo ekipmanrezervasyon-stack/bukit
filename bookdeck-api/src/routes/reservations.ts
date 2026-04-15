@@ -153,7 +153,7 @@ const canAccessStudioByPolicy = (
   }
   if (!sid) return false;
   if (hasPrivilegedStudioAccess(String(profile.role || ""))) return true;
-  if (sid === "GREEN" || sid === "PODCAST" || sid === "DUBBING") return true;
+  if (sid !== "RED" && sid !== "BLUE") return true;
   const specialStudio = String(profile.special_access || "").trim().toUpperCase();
   return sid === specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""));
 };
