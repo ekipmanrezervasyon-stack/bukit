@@ -148,6 +148,40 @@ const parseIsoDate = (v: string): string => {
   return new Date(t).toISOString().slice(0, 10);
 };
 
+const TR_FIXED_PUBLIC_HOLIDAYS = new Set(["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29"]);
+const TR_RELIGIOUS_HOLIDAYS_BY_YEAR: Record<string, string[]> = {
+  "2025": ["2025-03-30", "2025-03-31", "2025-04-01", "2025-04-02", "2025-06-06", "2025-06-07", "2025-06-08", "2025-06-09"],
+  "2026": ["2026-03-19", "2026-03-20", "2026-03-21", "2026-03-22", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30"],
+  "2027": ["2027-03-08", "2027-03-09", "2027-03-10", "2027-03-11", "2027-05-16", "2027-05-17", "2027-05-18", "2027-05-19"]
+};
+
+const toIsoDayLocal = (d: Date): string => {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const isTurkeyPublicHoliday = (d: Date): boolean => {
+  const monthDay = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (TR_FIXED_PUBLIC_HOLIDAYS.has(monthDay)) return true;
+  const y = String(d.getFullYear());
+  const dynamic = TR_RELIGIOUS_HOLIDAYS_BY_YEAR[y] || [];
+  return dynamic.includes(toIsoDayLocal(d));
+};
+
+const hasPublicHolidayInRange = (startAt: string, endAt: string): boolean => {
+  const s = new Date(String(startAt || ""));
+  const e = new Date(String(endAt || ""));
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) return false;
+  const cursor = new Date(s.getTime());
+  cursor.setHours(0, 0, 0, 0);
+  const last = new Date(e.getTime() - 1);
+  last.setHours(0, 0, 0, 0);
+  while (cursor <= last) {
+    if (isTurkeyPublicHoliday(cursor)) return true;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return false;
+};
+
 export const reservationRoutes: FastifyPluginAsync = async (app) => {
   app.get("/me/bookings", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
@@ -351,6 +385,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const s = new Date(start_at).getTime();
     const e = new Date(end_at).getTime();
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
+    if (hasPublicHolidayInRange(start_at, end_at)) {
+      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
 
     const { data: studio, error: stErr } = await supabaseAdmin
       .from("studios")
@@ -401,6 +438,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const s = new Date(start_at).getTime();
     const e = new Date(end_at).getTime();
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
+    if (hasPublicHolidayInRange(start_at, end_at)) {
+      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
 
     const { data: item, error: itemErr } = await supabaseAdmin
       .from("equipment_items")
@@ -1038,6 +1078,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
     const maxMs = 4 * 24 * 3600 * 1000;
     if (endMs - startMs > maxMs) return reply.code(400).send({ ok: false, error: "EXTEND_MAX_DAYS" });
+    if (hasPublicHolidayInRange(String(existing.data.start_at || ""), String(payload.new_end_at || ""))) {
+      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
 
     const overlap = await supabaseAdmin
       .from("equipment_reservations")
@@ -1070,6 +1113,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const p = parsed.data;
     const startAt = new Date().toISOString();
     const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
+    if (hasPublicHolidayInRange(startAt, endAt)) {
+      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
     const name = String(p.display_name || "").trim() || String(p.email.split("@")[0] || p.email);
     const results: string[] = [];
     for (const rawId of p.cart_ids) {
