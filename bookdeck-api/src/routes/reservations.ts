@@ -789,7 +789,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const q = supabaseAdmin.from("profiles").select("*").limit(1);
     const result = isEmail
       ? await q.eq("email", raw.toLowerCase()).maybeSingle()
-      : await q.eq("student_number", raw).maybeSingle();
+      : await q.or(`student_number.eq.${raw},staff_number.eq.${raw}`).maybeSingle();
     if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
     const p = result.data;
     if (!p) {
@@ -805,7 +805,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       ok: true,
       name: String(p.full_name || ""),
       email: String(p.email || ""),
-      studentId: String(p.student_number || p.id || ""),
+      studentId: String(p.student_number || p.staff_number || p.id || ""),
       level: String(p.access_override_level || "1")
     };
   });

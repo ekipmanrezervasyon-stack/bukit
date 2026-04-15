@@ -18,6 +18,7 @@ export type ProfileRow = {
   user_type: "student" | "staff";
   full_name: string | null;
   student_number: string | null;
+  staff_number: string | null;
   department_code: string | null;
   department_name: string | null;
   access_override_level: string | null;
