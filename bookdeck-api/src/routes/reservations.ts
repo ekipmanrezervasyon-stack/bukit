@@ -137,12 +137,19 @@ const canAccessStudioByPolicy = (
     studioRow.studio_code,
     studioRow.name
   ];
+  const canonical = ["GREEN", "RED", "BLUE", "PODCAST", "DUBBING"] as const;
   let sid = "";
   for (const raw of sidCandidates) {
     const v = String(raw ?? "").trim().toUpperCase();
     if (!v) continue;
     sid = v;
-    if (v === "GREEN" || v === "RED" || v === "BLUE" || v === "PODCAST" || v === "DUBBING") break;
+    for (const key of canonical) {
+      if (v === key || v.includes(key)) {
+        sid = key;
+        break;
+      }
+    }
+    if (sid === "GREEN" || sid === "RED" || sid === "BLUE" || sid === "PODCAST" || sid === "DUBBING") break;
   }
   if (!sid) return false;
   if (hasPrivilegedStudioAccess(String(profile.role || ""))) return true;

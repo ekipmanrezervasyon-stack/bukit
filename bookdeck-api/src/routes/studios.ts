@@ -29,10 +29,13 @@ const resolveStudioKey = (row: Record<string, unknown>): string => {
     (row as Record<string, unknown>).studio_code,
     row.name
   ];
+  const canonical = ["GREEN", "RED", "BLUE", "PODCAST", "DUBBING"] as const;
   for (const raw of candidates) {
     const v = String(raw ?? "").trim().toUpperCase();
     if (!v) continue;
-    if (v === "GREEN" || v === "RED" || v === "BLUE" || v === "PODCAST" || v === "DUBBING") return v;
+    for (const key of canonical) {
+      if (v === key || v.includes(key)) return key;
+    }
   }
   return String(row.id || "").trim().toUpperCase();
 };
