@@ -1273,6 +1273,7 @@
   };
 
   var activeAdminStudioId = null;
+  var activeAdminStudioName = '';
   var adminStudiosById = {};
   var adminStudioWeekStartIso = '';
   var adminStudioFocusIso = '';
@@ -2509,6 +2510,7 @@
 
   function selectAdminStudio(id, name) {
     activeAdminStudioId = id;
+    activeAdminStudioName = String(name || '');
     var calData = STUDIO_CALENDARS[id] || { icon: '🎬', calId: '' };
     loadAdminStudios();
     var calWrapper = document.getElementById('admin-calendar-wrapper');
@@ -2755,6 +2757,9 @@
     var sid = String(studioId || '').trim().toUpperCase();
     // GREEN stüdyo varsayılan olarak hafta sonu açık.
     var sName = String((st && (st.name || st.studio_name || st.code)) || '').trim().toUpperCase();
+    if (!sName && String(studioId || '').trim() === String(activeAdminStudioId || '').trim()) {
+      sName = String(activeAdminStudioName || '').trim().toUpperCase();
+    }
     if (sid === 'GREEN' || sName === 'GREEN' || sName === 'GREEN STUDIO' || sName.indexOf('GREEN') >= 0) return true;
     if (!st) return false;
     var v = (st.weekendOk != null) ? st.weekendOk : (st.weekend_ok != null ? st.weekend_ok : st.weekend);
