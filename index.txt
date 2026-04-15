@@ -859,6 +859,140 @@
         });
       });
     }
+    function installApiScriptRunShim_() {
+      function chainRunner(methodMap) {
+        var successHandler = null;
+        var failureHandler = null;
+        var base = {
+          withSuccessHandler: function(fn) { successHandler = fn; return proxy; },
+          withFailureHandler: function(fn) { failureHandler = fn; return proxy; }
+        };
+        function finalizeSuccess(value) {
+          var cb = successHandler;
+          successHandler = null;
+          failureHandler = null;
+          if (typeof cb === 'function') cb(value);
+        }
+        function finalizeFailure(err) {
+          var cb = failureHandler;
+          successHandler = null;
+          failureHandler = null;
+          if (typeof cb === 'function') cb(err);
+        }
+        var proxy = new Proxy(base, {
+          get: function(target, prop) {
+            if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+            return function() {
+              var args = Array.prototype.slice.call(arguments);
+              var fn = methodMap[String(prop)];
+              Promise.resolve()
+                .then(function() {
+                  if (typeof fn !== 'function') throw new Error('No API mapping for ' + String(prop));
+                  return fn.apply(null, args);
+                })
+                .then(finalizeSuccess)
+                .catch(finalizeFailure);
+              return undefined;
+            };
+          }
+        });
+        return proxy;
+      }
+      function isActiveReservationStatus_(s) {
+        var st = String(s || '').trim().toLowerCase();
+        return st === 'pending' || st === 'approved' || st === 'checked_out' || st === 'picked_up' || st === 'key_out';
+      }
+      var methods = {
+        getBookingLimits: function() {
+          return Promise.resolve(bookingLimits || {
+            equipmentMaxDays: 2,
+            studioMaxDaySpan: 1,
+            canExtendActiveLoan: false,
+            extendMaxTotalDaysFromPickup: 4,
+            isAdmin: false,
+            equipmentCategoryOutCounts: { Cam: 0, Ops: 0, Sound: 0, Light: 0, Grip: 0, Other: 0 }
+          });
+        },
+        getUserDashboardExtras: function() {
+          return Promise.resolve({ appBlocked: false, loans: [], penalties: [] });
+        },
+        getUnitsData: function() {
+          return Promise.resolve({ academic: [], communicationDepartments: [], admin: [] });
+        },
+        authLogout: function() {
+          return Promise.resolve({ ok: true });
+        },
+        checkStudioCalendarBridge: function(studioId, startIso, endIso) {
+          return apiPublicRequest('/studio-reservations?from=' + encodeURIComponent(String(startIso || '')) + '&to=' + encodeURIComponent(String(endIso || '')))
+            .then(function(res) {
+              var rows = (res && res.data) || [];
+              var sid = String(studioId || '').trim().toUpperCase();
+              var sMs = new Date(String(startIso || '')).getTime();
+              var eMs = new Date(String(endIso || '')).getTime();
+              var busy = rows.some(function(r) {
+                if (String((r && r.studio_id) || '').trim().toUpperCase() !== sid) return false;
+                if (!isActiveReservationStatus_(r && r.status)) return false;
+                var rs = new Date(String((r && r.start_at) || '')).getTime();
+                var re = new Date(String((r && r.end_at) || '')).getTime();
+                if (isNaN(rs) || isNaN(re)) return false;
+                return rs < eMs && re > sMs;
+              });
+              return { ok: true, busy: busy };
+            })
+            .catch(function(err) {
+              return { ok: false, busy: false, error: (err && err.message) || 'Calendar check failed.' };
+            });
+        },
+        extendEquipmentReservationBridge: function(groupResId, equipmentId, newEndIso) {
+          return apiRequest('/me/bookings/extend', {
+            method: 'POST',
+            body: {
+              id: String(groupResId || ''),
+              equipment_item_id: String(equipmentId || ''),
+              new_end_at: String(newEndIso || '')
+            }
+          }).then(function(res) {
+            return (res && res.ok === false) ? { error: res.error || 'Extend failed.' } : (res || { success: true });
+          }).catch(function(err) {
+            return { error: (err && err.message) || 'Extend failed.' };
+          });
+        },
+        checkEquipmentReservationConflictsBridge: function(itemIds, startIso, endIso) {
+          var ids = (Array.isArray(itemIds) ? itemIds : []).map(function(x) { return String(x || '').trim().toUpperCase(); }).filter(Boolean);
+          if (!ids.length) return Promise.resolve({ availableIds: [] });
+          return apiPublicRequest('/equipment-reservations')
+            .then(function(res) {
+              var rows = (res && res.data) || [];
+              var sMs = new Date(String(startIso || '')).getTime();
+              var eMs = new Date(String(endIso || '')).getTime();
+              var busy = {};
+              rows.forEach(function(r) {
+                var id = String((r && r.equipment_item_id) || '').trim().toUpperCase();
+                if (!id || !ids.includes(id)) return;
+                if (!isActiveReservationStatus_(r && r.status)) return;
+                var rs = new Date(String((r && r.start_at) || '')).getTime();
+                var re = new Date(String((r && r.end_at) || '')).getTime();
+                if (isNaN(rs) || isNaN(re)) return;
+                if (rs < eMs && re > sMs) busy[id] = 1;
+              });
+              return { availableIds: ids.filter(function(id) { return !busy[id]; }) };
+            })
+            .catch(function() {
+              return { availableIds: ids };
+            });
+        },
+        checkOfficialHolidayBridge: function() {
+          return Promise.resolve({ ok: true, blocked: false, dates: [] });
+        },
+        getStudioWeeklyGridBridge: function(studioId, weekStartIso) {
+          return fetchStudioWeekGridViaApi_(studioId, weekStartIso);
+        }
+      };
+      if (typeof window.google === 'undefined') window.google = {};
+      if (!window.google.script) window.google.script = {};
+      window.google.script.run = chainRunner(methods);
+    }
+    installApiScriptRunShim_();
     function mapAuthProfileToCurrentUser_(p) {
       var profile = p || {};
       var name = String(profile.full_name || '').trim();
@@ -3977,11 +4111,83 @@
       var mins=(Number(p[0]||0)*60)+Number(p[1]||0);
       return String(dayIso||'')+'|'+String(mins);
     }
+    function fetchStudioWeekGridViaApi_(studioId, weekStartIso){
+      var startIso = String(weekStartIso || '').trim();
+      if(!startIso) startIso = mondayIsoFrom_(new Date());
+      var startAt = startIso + 'T00:00:00';
+      var endDate = new Date(startIso + 'T00:00:00');
+      endDate.setDate(endDate.getDate() + 6);
+      var ey = endDate.getFullYear(), em = String(endDate.getMonth()+1).padStart(2,'0'), ed = String(endDate.getDate()).padStart(2,'0');
+      var endIso = ey + '-' + em + '-' + ed + 'T23:59:59';
+      return apiRequest('/studio-reservations?from=' + encodeURIComponent(startAt) + '&to=' + encodeURIComponent(endIso), { method: 'GET' })
+        .then(function(payload){
+          var rows = (payload && payload.data) ? payload.data : [];
+          var days = [];
+          for (var i=0;i<7;i++){
+            var d = new Date(startIso + 'T00:00:00');
+            d.setDate(d.getDate() + i);
+            days.push({
+              iso: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'),
+              day: d.getDate(),
+              month: d.getMonth()+1,
+              dow: d.getDay()
+            });
+          }
+          var slots = [];
+          for (var hm = 9 * 60; hm <= 20 * 60 + 30; hm += 30) {
+            var hh = String(Math.floor(hm / 60)).padStart(2, '0');
+            var mm = String(hm % 60).padStart(2, '0');
+            slots.push({ mins: hm, label: hh + ':' + mm });
+          }
+          var cells = {};
+          var cellBusyStart = {};
+          days.forEach(function(d){
+            var isClosedDay = (d.dow === 0) || safeIsPublicHoliday(new Date(d.iso + 'T00:00:00'));
+            slots.forEach(function(s){
+              var key = d.iso + '|' + s.mins;
+              cells[key] = isClosedDay ? 'closed' : 'free';
+            });
+          });
+          var activeStatuses = { pending:1, approved:1, checked_out:1, picked_up:1, key_out:1 };
+          var sid = String(studioId || '').trim().toUpperCase();
+          rows.forEach(function(r){
+            var rid = String((r && r.studio_id) || '').trim().toUpperCase();
+            if(!rid || rid !== sid) return;
+            var st = String((r && r.status) || '').trim().toLowerCase();
+            if(!activeStatuses[st]) return;
+            var sMs = new Date(String(r.start_at || '')).getTime();
+            var eMs = new Date(String(r.end_at || '')).getTime();
+            if(isNaN(sMs) || isNaN(eMs) || eMs <= sMs) return;
+            days.forEach(function(d){
+              slots.forEach(function(s){
+                var slotMs = new Date(d.iso + 'T' + s.label + ':00').getTime();
+                var slotEnd = slotMs + 30 * 60000;
+                if(slotMs < eMs && slotEnd > sMs){
+                  var key = d.iso + '|' + s.mins;
+                  if(cells[key] === 'free'){
+                    cells[key] = 'busy';
+                    cellBusyStart[key] = true;
+                  }
+                }
+              });
+            });
+          });
+          return { days: days, slots: slots, cells: cells, cell_busy_start: cellBusyStart, week_start: startIso };
+        });
+    }
     function renderNativeStudioWeekCalendar(studioId,container){
       if(!container||!currentTestToken) return;
       if(!nativeStudioWeekStartIso) nativeStudioWeekStartIso=mondayIsoFrom_(new Date());
       container.innerHTML='<div class="text-xs text-gray-400 animate-pulse">'+(currentLang==='tr'?'Takvim yükleniyor…':'Loading calendar…')+'</div>';
-      google.script.run.withSuccessHandler(function(res){
+      var loadGridPromise;
+      if(typeof google!=='undefined' && google.script && google.script.run){
+        loadGridPromise = new Promise(function(resolve,reject){
+          google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getStudioWeeklyGridBridge(studioId,nativeStudioWeekStartIso,currentTestToken);
+        });
+      } else {
+        loadGridPromise = fetchStudioWeekGridViaApi_(studioId, nativeStudioWeekStartIso);
+      }
+      loadGridPromise.then(function(res){
         if(!res||res.error){container.innerHTML='<div class="text-xs text-red-600">'+escHtml((res&&res.error)||'Error')+'</div>';return;}
         var days=res.days||[],slots=res.slots||[],cells=res.cells||{};
         var cellBusyStart=res.cell_busy_start||{};
@@ -4024,9 +4230,9 @@
             fillStudioFormFromSlot_(day,start);
           });
         });
-      }).withFailureHandler(function(err){
+      }).catch(function(err){
         container.innerHTML='<div class="text-xs text-red-600">'+escHtml((err&&err.message)||'Error')+'</div>';
-      }).getStudioWeeklyGridBridge(studioId,nativeStudioWeekStartIso,currentTestToken);
+      });
     }
 
     window.submitStudioReservation=function(){
@@ -4142,7 +4348,7 @@
                 if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
                   ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
                 }
-                return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
+                return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqDisplayId||L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
               }).join('')+'</ul>';
             }
           }

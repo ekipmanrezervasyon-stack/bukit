@@ -1,2 +1,2 @@
-/admin /admin.html 200
-/admin/ /admin.html 200
+/admin /admin/ 301
+/admin.html /admin/ 301

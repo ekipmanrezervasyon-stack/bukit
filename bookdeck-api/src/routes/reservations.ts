@@ -81,6 +81,36 @@ const bizeReplySchema = z.object({
   reply_text: z.string().min(1).max(1000)
 });
 
+const quickCheckoutSchema = z.object({
+  cart_ids: z.array(z.string().min(1)).min(1),
+  email: z.string().email(),
+  return_dt: isoDateSchema.optional(),
+  display_name: z.string().max(190).optional().default(""),
+  project_purpose: z.string().max(300).optional().default("")
+});
+
+const specialAccessUpsertSchema = z.object({
+  email: z.string().email(),
+  studio: z.enum(["GREEN", "RED", "PODCAST", "DUBBING"]),
+  until: z.string().optional().default("")
+});
+
+const specialEquipmentUpsertSchema = z.object({
+  email: z.string().email(),
+  equipment_id: z.string().min(1),
+  until: z.string().optional().default("")
+});
+
+const specialAccessDeleteSchema = z.object({
+  email: z.string().email()
+});
+
+const iiwSaveHoursSchema = z.object({
+  task_id: z.string().min(1),
+  student_email: z.string().email(),
+  hours: z.union([z.number(), z.string()])
+});
+
 const reservationIsActive = (status: string): boolean => {
   const s = String(status || "").trim().toLowerCase();
   return ACTIVE_RES_STATUSES.includes(s) && !CLOSED_RES_STATUSES.includes(s);
@@ -110,6 +140,12 @@ const isMissingTableError = (err: unknown): boolean => {
         ? String((err as { message?: string }).message || "")
         : "";
   return msg.includes("Could not find the table") || msg.includes("relation") || msg.includes("does not exist");
+};
+
+const parseIsoDate = (v: string): string => {
+  const t = new Date(String(v || "")).getTime();
+  if (Number.isNaN(t)) return "";
+  return new Date(t).toISOString().slice(0, 10);
 };
 
 export const reservationRoutes: FastifyPluginAsync = async (app) => {
@@ -147,7 +183,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const [eqItemsRes, studiosRes] = await Promise.all([
       eqIds.length
-        ? supabaseAdmin.from("equipment_items").select("id,name").in("id", eqIds)
+        ? supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
         : Promise.resolve({ data: [], error: null }),
       studioIds.length
         ? supabaseAdmin.from("studios").select("id,name").in("id", studioIds)
@@ -156,8 +192,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (eqItemsRes.error) return reply.code(500).send({ ok: false, error: eqItemsRes.error.message });
     if (studiosRes.error) return reply.code(500).send({ ok: false, error: studiosRes.error.message });
 
-    const eqNameById = new Map(
-      (eqItemsRes.data ?? []).map((r) => [String(r.id || ""), String(r.name || r.id || "")])
+    const eqMetaById = new Map(
+      (eqItemsRes.data ?? []).map((r) => [
+        String(r.id || ""),
+        {
+          name: String(r.name || r.id || ""),
+          code: String((r as Record<string, unknown>).equipment_id || r.id || "")
+        }
+      ])
     );
     const studioNameById = new Map((studiosRes.data ?? []).map((r) => [String(r.id || ""), String(r.name || r.id || "")]));
 
@@ -165,8 +207,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       ...eqRows.map((r) => ({
         id: String(r.id || ""),
         type: "Equipment",
-        item: eqNameById.get(String(r.equipment_item_id || "")) || String(r.equipment_item_id || ""),
+        item: (eqMetaById.get(String(r.equipment_item_id || "")) || { name: String(r.equipment_item_id || "") }).name,
         eqId: String(r.equipment_item_id || ""),
+        eqDisplayId: (eqMetaById.get(String(r.equipment_item_id || "")) || { code: String(r.equipment_item_id || "") }).code,
         start: String(r.start_at || ""),
         end: String(r.end_at || ""),
         status: String(r.status || "")
@@ -248,6 +291,21 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (stRes.error) return reply.code(500).send({ ok: false, error: stRes.error.message });
     const equipment = eqRes.data ?? [];
     const studios = stRes.data ?? [];
+    const eqIds = Array.from(new Set(equipment.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
+    const eqItems = eqIds.length
+      ? await supabaseAdmin.from("equipment_items").select("id,name,category,equipment_id").in("id", eqIds)
+      : { data: [], error: null };
+    if (eqItems.error) return reply.code(500).send({ ok: false, error: eqItems.error.message });
+    const eqMetaById = new Map(
+      (eqItems.data ?? []).map((r) => [
+        String(r.id || ""),
+        {
+          name: String(r.name || r.id || ""),
+          type: String((r as Record<string, unknown>).category || ""),
+          code: String((r as Record<string, unknown>).equipment_id || r.id || "")
+        }
+      ])
+    );
     const list = [
       ...equipment.map((r) => ({
         id: String(r.id),
@@ -258,7 +316,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         handoverLabel: String(r.start_at || ""),
         returnLabel: String(r.end_at || ""),
         purpose: String(r.note || ""),
-        items: [{ eqId: String(r.equipment_item_id || ""), name: String(r.equipment_item_id || ""), eqType: "" }]
+        items: [
+          {
+            eqId: String(r.equipment_item_id || ""),
+            eqCode: (eqMetaById.get(String(r.equipment_item_id || "")) || { code: String(r.equipment_item_id || "") }).code,
+            name: (eqMetaById.get(String(r.equipment_item_id || "")) || { name: String(r.equipment_item_id || "") }).name,
+            eqType: (eqMetaById.get(String(r.equipment_item_id || "")) || { type: "" }).type
+          }
+        ]
       })),
       ...studios.map((r) => ({
         id: String(r.id),
@@ -709,6 +774,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .filter((r) => !String(r.id || "").toUpperCase().startsWith("STUDIO_KEY"))
       .map((r) => ({
         id: String(r.id || ""),
+        code: String((r as Record<string, unknown>).equipment_id || r.id || ""),
         name: String(r.name || r.id || ""),
         type: String((r as Record<string, unknown>).category || (r as Record<string, unknown>).type || ""),
         status: String(r.status || "")
@@ -716,7 +782,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, list };
   });
 
-  app.get("/admin/equipment/:id/detail", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+  app.get("/admin/equipment/:id/detail", async (req, reply) => {
     const id = String((req.params as { id: string }).id || "").trim();
     if (!id) return reply.code(400).send({ ok: false, error: "Equipment ID required.", history: [] });
 
@@ -750,6 +816,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     return {
       ok: true,
       id: String(item.id || ""),
+      equipmentCode: String(item.equipment_id || item.id || ""),
       name: String(item.name || item.id || ""),
       type: String(item.category || item.type || ""),
       condition: String(item.condition_in || item.condition_out || "Excellent"),
@@ -934,5 +1001,383 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       if (!isMissingTableError(updated.error)) return reply.code(500).send({ ok: false, error: updated.error.message });
     }
     return reply.code(501).send({ ok: false, error: "Contact table is not configured in Supabase." });
+  });
+
+  app.post("/me/bookings/extend", { preHandler: requireAuth }, async (req, reply) => {
+    const profile = getAuthProfile(req);
+    const parsed = z
+      .object({
+        id: z.string().min(1),
+        equipment_item_id: z.string().min(1),
+        new_end_at: isoDateSchema
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const payload = parsed.data;
+    const existing = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,status,start_at,end_at,requester_profile_id,requester_email")
+      .eq("id", payload.id)
+      .eq("equipment_item_id", payload.equipment_item_id)
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
+    if (!existing.data) return reply.code(404).send({ ok: false, error: "Reservation not found." });
+
+    const ownerById = String(existing.data.requester_profile_id || "") === String(profile.id || "");
+    const ownerByEmail =
+      String(existing.data.requester_email || "").toLowerCase() === String(profile.email || "").toLowerCase();
+    if (!ownerById && !ownerByEmail) {
+      return reply.code(403).send({ ok: false, error: "Reservation does not belong to current user." });
+    }
+
+    const startMs = new Date(String(existing.data.start_at || "")).getTime();
+    const endMs = new Date(String(payload.new_end_at || "")).getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+      return reply.code(400).send({ ok: false, error: "Invalid extension range." });
+    }
+    const maxMs = 4 * 24 * 3600 * 1000;
+    if (endMs - startMs > maxMs) return reply.code(400).send({ ok: false, error: "EXTEND_MAX_DAYS" });
+
+    const overlap = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id")
+      .eq("equipment_item_id", payload.equipment_item_id)
+      .in("status", ["pending", "approved", "checked_out", "picked_up", "key_out"])
+      .lt("start_at", payload.new_end_at)
+      .gt("end_at", String(existing.data.start_at || ""))
+      .neq("id", payload.id)
+      .limit(1);
+    if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
+    if ((overlap.data ?? []).length > 0) {
+      return reply.code(409).send({ ok: false, error: "That equipment is already booked for part of the time you selected." });
+    }
+
+    const updated = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({ end_at: payload.new_end_at, updated_at: new Date().toISOString() })
+      .eq("id", payload.id)
+      .select("id,end_at")
+      .single();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    return { ok: true, success: true, id: String(updated.data.id || ""), new_end: String(updated.data.end_at || "") };
+  });
+
+  app.post("/admin/quick-checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = quickCheckoutSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const startAt = new Date().toISOString();
+    const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
+    const name = String(p.display_name || "").trim() || String(p.email.split("@")[0] || p.email);
+    const results: string[] = [];
+    for (const rawId of p.cart_ids) {
+      const eqId = String(rawId || "").trim();
+      if (!eqId) continue;
+      const created = await supabaseAdmin
+        .from("equipment_reservations")
+        .insert({
+          equipment_item_id: eqId,
+          requester_profile_id: null,
+          requester_email: p.email.toLowerCase(),
+          requester_name: name,
+          required_level: 1,
+          status: "picked_up",
+          approval_required: false,
+          start_at: startAt,
+          end_at: endAt,
+          note: p.project_purpose || "Hızlı Çıkış",
+          reviewed_by: String(actor.email || ""),
+          reviewed_at: new Date().toISOString()
+        })
+        .select("id")
+        .single();
+      if (created.error) return reply.code(500).send({ ok: false, error: created.error.message });
+      results.push(String(created.data?.id || ""));
+      await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
+    }
+    return { ok: true, success: true, reservation_ids: results, url: "" };
+  });
+
+  app.get("/admin/reports/summary", { preHandler: requireRoles(["super_admin"]) }, async (_req, reply) => {
+    const now = Date.now();
+    const d30 = new Date(now - 30 * 24 * 3600 * 1000).toISOString();
+    const [ticketsRes, eqResRes, studioResRes, itemsRes] = await Promise.all([
+      supabaseAdmin.from("tickets").select("*").gte("created_at", d30).order("created_at", { ascending: true }),
+      supabaseAdmin.from("equipment_reservations").select("*").order("start_at", { ascending: true }),
+      supabaseAdmin.from("studio_reservations").select("*").order("start_at", { ascending: true }),
+      supabaseAdmin.from("equipment_items").select("*")
+    ]);
+    if (ticketsRes.error && !isMissingTableError(ticketsRes.error)) return reply.code(500).send({ ok: false, error: ticketsRes.error.message });
+    if (eqResRes.error) return reply.code(500).send({ ok: false, error: eqResRes.error.message });
+    if (studioResRes.error) return reply.code(500).send({ ok: false, error: studioResRes.error.message });
+    if (itemsRes.error) return reply.code(500).send({ ok: false, error: itemsRes.error.message });
+
+    const tickets = (ticketsRes.data ?? []) as Record<string, unknown>[];
+    const eqRows = (eqResRes.data ?? []) as Record<string, unknown>[];
+    const studioRows = (studioResRes.data ?? []) as Record<string, unknown>[];
+    const items = (itemsRes.data ?? []) as Record<string, unknown>[];
+
+    const ticketStatus = { total: 0, pending: 0, approved: 0, rejected: 0 };
+    const byDeptMap = new Map<string, { total: number; approved: number; rejected: number }>();
+    const byTypeMap = new Map<string, number>();
+    const trendMap = new Map<string, number>();
+    tickets.forEach((t) => {
+      const status = String(t.status || "").toLowerCase();
+      const dept = String(t.department || "Unknown");
+      const type = String(t.ticket_type || "Other");
+      const day = parseIsoDate(String(t.created_at || ""));
+      ticketStatus.total += 1;
+      if (status.includes("beklemede") || status.includes("pending")) ticketStatus.pending += 1;
+      else if (status.includes("onay")) ticketStatus.approved += 1;
+      else if (status.includes("red")) ticketStatus.rejected += 1;
+      const dep = byDeptMap.get(dept) || { total: 0, approved: 0, rejected: 0 };
+      dep.total += 1;
+      if (status.includes("onay")) dep.approved += 1;
+      if (status.includes("red")) dep.rejected += 1;
+      byDeptMap.set(dept, dep);
+      byTypeMap.set(type, (byTypeMap.get(type) || 0) + 1);
+      if (day) trendMap.set(day, (trendMap.get(day) || 0) + 1);
+    });
+
+    const itemMap = new Map(items.map((i) => [String(i.id || ""), i]));
+    const overdue = eqRows
+      .filter((r) => {
+        const st = String(r.status || "").toLowerCase();
+        return ["approved", "checked_out", "picked_up", "key_out"].includes(st);
+      })
+      .filter((r) => {
+        const endMs = new Date(String(r.end_at || "")).getTime();
+        return !Number.isNaN(endMs) && endMs < now;
+      })
+      .map((r) => {
+        const id = String(r.equipment_item_id || "");
+        const it = itemMap.get(id) || {};
+        return {
+          id,
+          name: String((it as Record<string, unknown>).name || id),
+          assigned_name: String(r.requester_name || r.requester_email || ""),
+          due_date: String(r.end_at || "")
+        };
+      });
+
+    const studioByMap = new Map<string, { total: number; approved: number; cancelled: number }>();
+    studioRows.forEach((r) => {
+      const studio = String(r.studio_id || "Unknown");
+      const status = String(r.status || "").toLowerCase();
+      const row = studioByMap.get(studio) || { total: 0, approved: 0, cancelled: 0 };
+      row.total += 1;
+      if (status === "approved") row.approved += 1;
+      if (status === "cancelled") row.cancelled += 1;
+      studioByMap.set(studio, row);
+    });
+
+    const eqDemandMap = new Map<string, number>();
+    const catDemandMap = new Map<string, number>();
+    eqRows.forEach((r) => {
+      const id = String(r.equipment_item_id || "");
+      if (!id) return;
+      eqDemandMap.set(id, (eqDemandMap.get(id) || 0) + 1);
+      const cat = String((itemMap.get(id) as Record<string, unknown> | undefined)?.category || "Other");
+      catDemandMap.set(cat, (catDemandMap.get(cat) || 0) + 1);
+    });
+
+    return {
+      ok: true,
+      inventory: {
+        total: items.length,
+        available: items.filter((i) => String(i.status || "").toUpperCase() === "AVAILABLE").length,
+        in_use: items.filter((i) => String(i.status || "").toUpperCase() === "IN_USE").length
+      },
+      overdue,
+      overdueCount: overdue.length,
+      windowDays: 30,
+      tickets: {
+        status: ticketStatus,
+        byDepartment: Array.from(byDeptMap.entries()).map(([department, d]) => ({
+          department,
+          total: d.total,
+          approved: d.approved,
+          rejected: d.rejected,
+          approval_rate: d.total ? Math.round((d.approved / d.total) * 100) : 0
+        })),
+        byType: Array.from(byTypeMap.entries())
+          .map(([type, count]) => ({ type, count }))
+          .sort((a, b) => b.count - a.count),
+        trend: Array.from(trendMap.entries())
+          .map(([day, count]) => ({ day, count }))
+          .sort((a, b) => (a.day < b.day ? -1 : 1)),
+        avgPerDay: Math.round((ticketStatus.total / 30) * 10) / 10
+      },
+      studio: {
+        by_studio: Array.from(studioByMap.entries()).map(([studio, s]) => ({ studio, total: s.total, approved: s.approved, cancelled: s.cancelled }))
+      },
+      equipmentDemand: {
+        top_items: Array.from(eqDemandMap.entries())
+          .map(([id, count]) => ({ id, name: String((itemMap.get(id) as Record<string, unknown> | undefined)?.name || id), count }))
+          .sort((a, b) => b.count - a.count),
+        by_category: Array.from(catDemandMap.entries())
+          .map(([category, count]) => ({ category, count }))
+          .sort((a, b) => b.count - a.count)
+      }
+    };
+  });
+
+  app.post("/admin/special-access/upsert", { preHandler: requireRoles(["super_admin"]) }, async (req, reply) => {
+    const parsed = specialAccessUpsertSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const updated = await supabaseAdmin
+      .from("profiles")
+      .update({ special_access: p.studio, special_access_until: parseIsoDate(p.until) || null, updated_at: new Date().toISOString() })
+      .eq("email", p.email.toLowerCase())
+      .select("id")
+      .single();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    return { ok: true, success: true };
+  });
+
+  app.post("/admin/special-access/delete", { preHandler: requireRoles(["super_admin"]) }, async (req, reply) => {
+    const parsed = specialAccessDeleteSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const updated = await supabaseAdmin
+      .from("profiles")
+      .update({ special_access: null, special_access_until: null, updated_at: new Date().toISOString() })
+      .eq("email", parsed.data.email.toLowerCase())
+      .select("id")
+      .single();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    return { ok: true, success: true };
+  });
+
+  app.get("/admin/special-access/list", { preHandler: requireRoles(["super_admin"]) }, async (_req, reply) => {
+    const rows = await supabaseAdmin
+      .from("profiles")
+      .select("full_name,email,user_type,special_access,special_access_until,special_equipment_access,special_equipment_access_until")
+      .or("not.special_access.is.null,not.special_equipment_access.is.null")
+      .order("email", { ascending: true });
+    if (rows.error) return reply.code(500).send({ ok: false, error: rows.error.message });
+    const now = Date.now();
+    const list = (rows.data ?? [])
+      .filter((r) => String((r as Record<string, unknown>).special_access || "").trim())
+      .map((r) => {
+        const row = r as Record<string, unknown>;
+        const until = String(row.special_access_until || "");
+        const t = until ? new Date(until + "T23:59:59.999Z").getTime() : NaN;
+        return {
+          kind: String(row.user_type || ""),
+          name: String(row.full_name || ""),
+          email: String(row.email || "").toLowerCase(),
+          special_access: String(row.special_access || ""),
+          special_access_until: until,
+          active: Number.isNaN(t) ? true : t >= now
+        };
+      });
+    const equipment_list = (rows.data ?? [])
+      .filter((r) => String((r as Record<string, unknown>).special_equipment_access || "").trim())
+      .map((r) => {
+        const row = r as Record<string, unknown>;
+        const until = String(row.special_equipment_access_until || "");
+        const t = until ? new Date(until + "T23:59:59.999Z").getTime() : NaN;
+        return {
+          kind: String(row.user_type || ""),
+          name: String(row.full_name || ""),
+          email: String(row.email || "").toLowerCase(),
+          special_equipment_access: String(row.special_equipment_access || ""),
+          special_equipment_access_until: until,
+          active: Number.isNaN(t) ? true : t >= now
+        };
+      });
+    return { ok: true, list, equipment_list };
+  });
+
+  app.get("/admin/special-equipment/options", { preHandler: requireRoles(["super_admin"]) }, async (_req, reply) => {
+    const rows = await supabaseAdmin
+      .from("equipment_items")
+      .select("id,name,required_level,status")
+      .gte("required_level", 4)
+      .order("name", { ascending: true });
+    if (rows.error) return reply.code(500).send({ ok: false, error: rows.error.message, list: [] });
+    const list = (rows.data ?? [])
+      .filter((r) => !String(r.id || "").toUpperCase().startsWith("STUDIO_KEY"))
+      .filter((r) => !["DELETED", "HIDDEN", "DAMAGED"].includes(String(r.status || "").toUpperCase()))
+      .map((r) => ({ id: String(r.id || ""), name: String(r.name || r.id || ""), eq_level: String(r.required_level || "") }));
+    return { ok: true, list };
+  });
+
+  app.post("/admin/special-equipment/upsert", { preHandler: requireRoles(["super_admin"]) }, async (req, reply) => {
+    const parsed = specialEquipmentUpsertSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const eq = await supabaseAdmin.from("equipment_items").select("id,required_level").eq("id", p.equipment_id.toUpperCase()).limit(1).maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (!eq.data) return reply.code(404).send({ ok: false, error: "Equipment not found." });
+    if (Number(eq.data.required_level || 0) < 4) {
+      return reply.code(400).send({ ok: false, error: "Yalnızca seviye 4-5 ekipman seçilebilir." });
+    }
+    const updated = await supabaseAdmin
+      .from("profiles")
+      .update({
+        special_equipment_access: p.equipment_id.toUpperCase(),
+        special_equipment_access_until: parseIsoDate(p.until) || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("email", p.email.toLowerCase())
+      .select("id")
+      .single();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    return { ok: true, success: true };
+  });
+
+  app.post("/admin/special-equipment/delete", { preHandler: requireRoles(["super_admin"]) }, async (req, reply) => {
+    const parsed = specialAccessDeleteSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const updated = await supabaseAdmin
+      .from("profiles")
+      .update({ special_equipment_access: null, special_equipment_access_until: null, updated_at: new Date().toISOString() })
+      .eq("email", parsed.data.email.toLowerCase())
+      .select("id")
+      .single();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    return { ok: true, success: true };
+  });
+
+  app.get("/admin/iiw/tasks", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {
+    const candidates = ["iiw_tasks", "iiw_jobs"];
+    for (const table of candidates) {
+      const rows = await supabaseAdmin.from(table).select("*").order("created_at", { ascending: false }).limit(200);
+      if (!rows.error) return { ok: true, list: rows.data ?? [] };
+      if (!isMissingTableError(rows.error)) return reply.code(500).send({ ok: false, error: rows.error.message });
+    }
+    return { ok: true, list: [] };
+  });
+
+  app.post("/admin/iiw/hours", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = iiwSaveHoursSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const hoursNum = Number(p.hours);
+    if (Number.isNaN(hoursNum) || hoursNum <= 0) return reply.code(400).send({ ok: false, error: "Geçerli saat girin." });
+    const candidates = ["iiw_hours", "iiw_task_hours"];
+    for (const table of candidates) {
+      const created = await supabaseAdmin
+        .from(table)
+        .insert({
+          task_id: p.task_id,
+          student_email: p.student_email.toLowerCase(),
+          hours: hoursNum,
+          created_at: new Date().toISOString()
+        })
+        .select("id")
+        .single();
+      if (!created.error) {
+        const sum = await supabaseAdmin.from(table).select("hours").eq("task_id", p.task_id).eq("student_email", p.student_email.toLowerCase());
+        const total = (sum.data ?? []).reduce((acc, r) => acc + Number((r as { hours?: number }).hours || 0), 0);
+        return { ok: true, success: true, total };
+      }
+      if (!isMissingTableError(created.error)) return reply.code(500).send({ ok: false, error: created.error.message });
+    }
+    return { ok: false, error: "IIW hours table is not configured." };
   });
 };

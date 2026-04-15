@@ -717,6 +717,194 @@
       });
     });
   }
+  function installAdminApiScriptRunShim_() {
+    function isActiveReservationStatus_(s) {
+      var st = String(s || '').trim().toLowerCase();
+      return st === 'pending' || st === 'approved' || st === 'checked_out' || st === 'picked_up' || st === 'key_out';
+    }
+    function buildScriptRunner(methodMap) {
+      var onSuccess = null;
+      var onFailure = null;
+      var base = {
+        withSuccessHandler: function(fn) { onSuccess = fn; return proxy; },
+        withFailureHandler: function(fn) { onFailure = fn; return proxy; }
+      };
+      function doneSuccess(v) {
+        var cb = onSuccess;
+        onSuccess = null;
+        onFailure = null;
+        if (typeof cb === 'function') cb(v);
+      }
+      function doneFailure(err) {
+        var cb = onFailure;
+        onSuccess = null;
+        onFailure = null;
+        if (typeof cb === 'function') cb(err);
+      }
+      var proxy = new Proxy(base, {
+        get: function(target, prop) {
+          if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+          return function() {
+            var args = Array.prototype.slice.call(arguments);
+            var fn = methodMap[String(prop)];
+            Promise.resolve()
+              .then(function() {
+                if (typeof fn !== 'function') throw new Error('No API mapping for ' + String(prop));
+                return fn.apply(null, args);
+              })
+              .then(doneSuccess)
+              .catch(doneFailure);
+            return undefined;
+          };
+        }
+      });
+      return proxy;
+    }
+    function mapAccessFromProfile_(profile) {
+      var p = profile || {};
+      var role = String(p.role || '').trim().toLowerCase();
+      return {
+        ok: true,
+        email: String(p.email || ''),
+        name: String(p.full_name || p.email || 'Admin'),
+        role: role || 'admin',
+        isIiwPanelOnly: role === 'iiw_instructor' || role === 'iiw_admin',
+        isSuperAdmin: role === 'super_admin'
+      };
+    }
+    var methods = {
+      checkAdminAccessBridge: function() {
+        return adminApiRequest('/auth/session', { method: 'GET' })
+          .then(function(res) { return mapAccessFromProfile_(res && res.profile); })
+          .catch(function() { return { ok: false, isIiwPanelOnly: false, isSuperAdmin: false, name: 'Admin', role: 'admin' }; });
+      },
+      authGetSession: function() {
+        return adminApiRequest('/auth/session', { method: 'GET' })
+          .then(function(res) {
+            var p = (res && res.profile) || {};
+            return {
+              ok: true,
+              email: String(p.email || ''),
+              user: {
+                name: String(p.full_name || p.email || 'Admin'),
+                role: String(p.role || '')
+              }
+            };
+          });
+      },
+      authLogout: function() {
+        return Promise.resolve({ ok: true });
+      },
+      getPendingCount: function() {
+        return adminApiRequest('/admin/pending', { method: 'GET' })
+          .then(function(res) {
+            var list = (res && res.list) || [];
+            return Array.isArray(list) ? list.length : 0;
+          })
+          .catch(function() { return 0; });
+      },
+      getAdminEquipmentDataForUi: function() {
+        return adminApiRequest('/equipment-items', { method: 'GET' })
+          .then(function(res) {
+            var rows = (res && res.data) || [];
+            return (rows || []).map(function(r) {
+              var id = String((r && r.id) || '');
+              var status = String((r && r.status) || '').toUpperCase();
+              return {
+                id: id,
+                name: String((r && r.name) || id),
+                type: String((r && (r.category || r.type)) || ''),
+                status: status,
+                isStudioKey: id.toUpperCase().indexOf('STUDIO_KEY') === 0,
+                locationText: status === 'AVAILABLE' ? 'depot' : 'out',
+                responsibleText: ''
+              };
+            });
+          })
+          .catch(function() { return []; });
+      },
+      processQuickCheckout: function(cartIds, email, returnDt, displayName, projectPurpose) {
+        return adminApiRequest('/admin/quick-checkout', {
+          method: 'POST',
+          body: {
+            cart_ids: Array.isArray(cartIds) ? cartIds : [],
+            email: String(email || '').trim().toLowerCase(),
+            return_dt: returnDt || null,
+            display_name: String(displayName || ''),
+            project_purpose: String(projectPurpose || '')
+          }
+        });
+      },
+      adminCheckItemAvailabilityBridge: function(itemId, startIso, endIso) {
+        var id = String(itemId || '').trim().toUpperCase();
+        return adminApiRequest('/equipment-reservations', { method: 'GET' }).then(function(res) {
+          var rows = (res && res.data) || [];
+          var sMs = new Date(String(startIso || '')).getTime();
+          var eMs = new Date(String(endIso || '')).getTime();
+          var busy = rows.some(function(r) {
+            if (String((r && r.equipment_item_id) || '').trim().toUpperCase() !== id) return false;
+            if (!isActiveReservationStatus_(r && r.status)) return false;
+            var rs = new Date(String((r && r.start_at) || '')).getTime();
+            var re = new Date(String((r && r.end_at) || '')).getTime();
+            if (isNaN(rs) || isNaN(re)) return false;
+            return rs < eMs && re > sMs;
+          });
+          return { ok: true, available: !busy };
+        }).catch(function(err) {
+          return { ok: false, available: false, error: (err && err.message) || 'Availability check failed.' };
+        });
+      },
+      getAdminReportsSummaryBridge: function() {
+        return adminApiRequest('/admin/reports/summary', { method: 'GET' });
+      },
+      syncGoogleCalendarsToStudiosBridge: function() {
+        return Promise.resolve({ ok: true, synced: 0, message: 'Not required in Supabase-only deployment.' });
+      },
+      adminSpecialAccessUpsertBridge: function(_token, email, studio, until) {
+        return adminApiRequest('/admin/special-access/upsert', {
+          method: 'POST',
+          body: { email: String(email || '').toLowerCase(), studio: String(studio || '').toUpperCase(), until: String(until || '') }
+        });
+      },
+      adminSpecialEquipmentOptionsBridge: function() {
+        return adminApiRequest('/admin/special-equipment/options', { method: 'GET' });
+      },
+      adminSpecialEquipmentAccessUpsertBridge: function(_token, email, equipmentId, until) {
+        return adminApiRequest('/admin/special-equipment/upsert', {
+          method: 'POST',
+          body: { email: String(email || '').toLowerCase(), equipment_id: String(equipmentId || '').toUpperCase(), until: String(until || '') }
+        });
+      },
+      adminSpecialEquipmentAccessDeleteBridge: function(_token, email) {
+        return adminApiRequest('/admin/special-equipment/delete', {
+          method: 'POST',
+          body: { email: String(email || '').toLowerCase() }
+        });
+      },
+      adminSpecialAccessDeleteBridge: function(_token, email) {
+        return adminApiRequest('/admin/special-access/delete', {
+          method: 'POST',
+          body: { email: String(email || '').toLowerCase() }
+        });
+      },
+      adminSpecialAccessListBridge: function() {
+        return adminApiRequest('/admin/special-access/list', { method: 'GET' });
+      },
+      getIIWTasksAdminBridge: function() {
+        return adminApiRequest('/admin/iiw/tasks', { method: 'GET' });
+      },
+      saveIIWHoursAdminBridge: function(_token, taskId, studentEmail, hours) {
+        return adminApiRequest('/admin/iiw/hours', {
+          method: 'POST',
+          body: { task_id: String(taskId || ''), student_email: String(studentEmail || '').toLowerCase(), hours: Number(hours) }
+        });
+      }
+    };
+    if (typeof window.google === 'undefined') window.google = {};
+    if (!window.google.script) window.google.script = {};
+    window.google.script.run = buildScriptRunner(methods);
+  }
+  installAdminApiScriptRunShim_();
 
   function closePdfViewModal() {
     var m = document.getElementById('pdf-view-modal');
@@ -994,7 +1182,7 @@
         return '<div class="rounded-lg border border-gray-100 bg-gray-50/50 p-2">' +
           '<label class="flex items-center gap-3 text-xs bg-white p-2 rounded-lg border border-gray-100 ' + (isCheckable ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50') + '">' +
           '<input type="checkbox" ' + (isCheckable ? 'checked' : 'disabled') + ' class="w-4 h-4 text-blue-600 rounded" data-traffic-res="' + resAttr + '" value="' + vid + '">' +
-          '<div class="flex-1 font-medium text-gray-800">' + escAdm(i.name) + ' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(i.id) + ')</span></div>' +
+          '<div class="flex-1 font-medium text-gray-800">' + escAdm(i.name) + ' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(i.eqCode || i.id) + ')</span></div>' +
           '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + '</div>';
       }).join('');
       var mainBtn = isPickup
@@ -1426,14 +1614,51 @@
   }
 
   function refreshInventoryData(done) {
-    google.script.run.withSuccessHandler(function(items) {
-      if (items) {
-        allEq = items;
-        filterInventory();
-        filterQuickCheckout();
-      }
+    var list = document.getElementById('inv-list');
+    if (list) list.innerHTML = '<div class="mt-12 text-center text-xs text-gray-400 animate-pulse">Envanter yükleniyor...</div>';
+    var token = '';
+    try { token = String(currentAuthToken || localStorage.getItem('bookdeck_auth_token') || sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eTok) { token = ''; }
+    var reqPromise;
+    if (token) {
+      reqPromise = adminApiRequest('/equipment-items', { method: 'GET' });
+    } else {
+      // Public fallback so inventory list can render even if admin token is missing.
+      reqPromise = fetch(API_BASE + '/equipment-items', { method: 'GET' }).then(function(res) {
+        return res.text().then(function(txt) {
+          var data = {};
+          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
+          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+          return data;
+        });
+      });
+    }
+    reqPromise.then(function(res) {
+      var rows = (res && res.data) ? res.data : [];
+      allEq = (rows || []).map(function(r) {
+        var itemId = String((r && r.id) || '').trim();
+        var itemCode = String((r && r.equipment_id) || '').trim().toUpperCase();
+        var status = String((r && r.status) || '').trim().toUpperCase();
+        return {
+          id: itemId,
+          code: itemCode,
+          name: String((r && r.name) || itemCode || itemId),
+          type: String((r && (r.category || r.type)) || ''),
+          photo: String((r && (r.photo_url || r.photo)) || ''),
+          status: status,
+          isStudioKey: itemCode.indexOf('STUDIO_KEY') === 0,
+          locationText: String((r && (r.location || r.location_text)) || ''),
+          responsibleText: String((r && (r.responsible || r.responsible_text)) || '')
+        };
+      });
+      filterInventory();
+      filterQuickCheckout();
       if (typeof done === 'function') done();
-    }).getAdminEquipmentDataForUi(currentAuthToken);
+    }).catch(function(err) {
+      allEq = [];
+      if (list) list.innerHTML = '<div class="mt-12 text-center text-xs text-red-600">Envanter yüklenemedi: ' + escAdm((err && err.message) || 'Bilinmeyen hata') + '</div>';
+      showToast((err && err.message) || 'Envanter yüklenemedi.', 'error');
+      if (typeof done === 'function') done();
+    });
   }
 
   // ═══ ENVANTER ═══
@@ -1447,11 +1672,22 @@
       var loc = String(i.locationText || '').toLowerCase();
       var resp = String(i.responsibleText || '').toLowerCase();
       var ty = String(i.type || '').toLowerCase();
-      return (i.name && i.name.toLowerCase().includes(q)) || (i.id && i.id.toLowerCase().includes(q)) || (ty && ty.includes(q)) || (loc && loc.includes(q)) || (resp && resp.includes(q));
+      var code = String(i.code || '').toLowerCase();
+      return (i.name && i.name.toLowerCase().includes(q)) || (code && code.includes(q)) || (ty && ty.includes(q)) || (loc && loc.includes(q)) || (resp && resp.includes(q));
     }).forEach(function(item) {
       var isAvailable = (item.status === 'AVAILABLE');
       var eid = String(item.id || '').replace(/'/g, "\\'");
-      list.innerHTML += '<div onclick="showInvDetail(\'' + eid + '\')" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition"><div class="flex justify-between items-start mb-2"><span class="text-[9px] font-black text-gray-400 font-mono bg-gray-50 px-1 rounded">' + escAdm(item.id) + '</span><span class="w-2 h-2 rounded-full ' + (isAvailable ? 'bg-green-500' : 'bg-red-500') + '"></span></div><p class="text-[9px] text-gray-500 font-bold uppercase truncate">' + escAdm(item.type || '') + '</p><h3 class="text-xs font-bold text-gray-800">' + escAdm(item.name) + '</h3></div>';
+      var code = String(item.code || item.id || '');
+      var photo = String(item.photo || '').trim() || 'https://via.placeholder.com/240x140?text=BUKit';
+      list.innerHTML += '<div onclick="showInvDetail(\'' + eid + '\')" class="p-3 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition">' +
+        '<div class="relative mb-2 overflow-hidden rounded-xl border border-gray-100 bg-gray-50">' +
+          '<img src="' + escAttr(photo) + '" alt="' + escAttr(item.name || code) + '" class="w-full h-24 object-cover">' +
+          '<span class="absolute top-2 right-2 w-2 h-2 rounded-full ' + (isAvailable ? 'bg-green-500' : 'bg-red-500') + '"></span>' +
+        '</div>' +
+        '<p class="text-[9px] text-gray-500 font-bold uppercase truncate">' + escAdm(item.type || '') + '</p>' +
+        '<h3 class="text-xs font-bold text-gray-800 line-clamp-2 min-h-[2rem]">' + escAdm(item.name) + '</h3>' +
+        '<p class="mt-1 text-[10px] font-mono text-gray-400 bg-gray-50 px-1.5 py-0.5 inline-block rounded">' + escAdm(code) + '</p>' +
+      '</div>';
     });
   }
 
@@ -1459,7 +1695,22 @@
     lastInvDetailId = id;
     var panel = document.getElementById('inv-detail-panel');
     panel.innerHTML = '<div class="mt-20 text-center animate-pulse text-gray-400 text-sm font-medium">Yükleniyor...</div>';
-    adminApiRequest('/admin/equipment/' + encodeURIComponent(id) + '/detail').then(function(data) {
+    var token = '';
+    try { token = String(currentAuthToken || localStorage.getItem('bookdeck_auth_token') || sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eTok) { token = ''; }
+    var reqPromise;
+    if (token) {
+      reqPromise = adminApiRequest('/admin/equipment/' + encodeURIComponent(id) + '/detail', { method: 'GET' });
+    } else {
+      reqPromise = fetch(API_BASE + '/admin/equipment/' + encodeURIComponent(id) + '/detail', { method: 'GET' }).then(function(res) {
+        return res.text().then(function(txt) {
+          var data = {};
+          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
+          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+          return data;
+        });
+      });
+    }
+    reqPromise.then(function(data) {
       var isAvailable = (data.status === 'AVAILABLE' || String(data.statusEnglish || '').toLowerCase() === 'available');
       var historyHtml = data.history && data.history.length ? data.history.map(function(h) { return '<div class="py-2 border-b border-gray-50 flex justify-between"><div><p class="text-[11px] font-bold">' + escAdm(h.user) + '</p><p class="text-[9px] text-gray-400">' + escAdm(h.date) + '</p></div><span class="text-[9px] font-bold ' + (String(h.status).includes('Approve') ? 'text-green-600' : 'text-red-600') + '">' + escAdm(h.status) + '</span></div>'; }).join('') : '<p class="text-xs text-gray-400">Kayıt yok.</p>';
       var currentUserHtml = data.currentUser ? '<div class="mt-3 pt-3 border-t border-gray-100"><p class="text-[10px] font-black text-gray-500 uppercase">Şu an / son çıkış</p><p class="text-xs font-bold">👤 ' + escAdm(data.currentUser.name) + '</p><p class="text-[10px] font-mono">' + escAdm(data.currentUser.id) + '</p><p class="text-xs font-black text-[#e30613] mt-1">Planlanan iade: ' + escAdm(data.currentUser.returnDate) + '</p></div>' : '';
@@ -1495,7 +1746,8 @@
           '</div>' +
         '</div>';
       var availBox = '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200"><p class="text-[10px] font-black text-gray-500 uppercase mb-2">İleri tarihli müsaitlik</p><div class="grid grid-cols-1 gap-2"><input type="datetime-local" id="inv-avail-start" class="w-full text-xs border rounded-lg p-2"><input type="datetime-local" id="inv-avail-end" class="w-full text-xs border rounded-lg p-2"></div><button type="button" onclick="runInvAvailabilityCheck()" class="mt-2 w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Sorgula</button><p id="inv-avail-result" class="text-[10px] mt-2 text-gray-600"></p></div>';
-      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-cover rounded-2xl shadow-sm border border-gray-100"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + statEn + '<div class="p-4 rounded-2xl border ' + (isAvailable ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800') + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + (isAvailable ? 'DEPOLAMADA' : 'DIŞARIDA / KULLANIMDA') + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + editBox + availBox + '</div>';
+      var canEdit = !!token;
+      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-cover rounded-2xl shadow-sm border border-gray-100"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + statEn + '<div class="p-4 rounded-2xl border ' + (isAvailable ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800') + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + (isAvailable ? 'DEPOLAMADA' : 'DIŞARIDA / KULLANIMDA') + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
     }).catch(function(e) {
       panel.innerHTML = '<div class="mt-20 text-center text-red-600 text-sm font-medium">' + escAdm((e && e.message) || 'Detay yüklenemedi.') + '</div>';
     });
@@ -1553,12 +1805,13 @@
     list.innerHTML = '';
     allEq.filter(function(i) {
       var ty = String(i.type || '').toLowerCase();
-      return (i.name && i.name.toLowerCase().includes(q)) || (i.id && i.id.toLowerCase().includes(q)) || (ty && ty.includes(q));
+      var code = String(i.code || '').toLowerCase();
+      return (i.name && i.name.toLowerCase().includes(q)) || (code && code.includes(q)) || (ty && ty.includes(q));
     }).forEach(function(item) {
       var isAvailable = (item.status === 'AVAILABLE');
       var eid = String(item.id || '').replace(/'/g, "\\'");
       var tyQc = item.type ? '<p class="text-[9px] text-gray-500 mt-0.5">' + escAdm(item.type) + '</p>' : '';
-      list.innerHTML += '<div onclick="' + (isAvailable ? "addToQCCart('" + eid + "')" : '') + '" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm ' + (isAvailable ? 'cursor-pointer hover:border-[#e30613]' : 'opacity-40') + ' transition"><div class="flex justify-between items-start mb-2"><h3 class="text-xs font-bold ' + (isAvailable ? 'text-gray-800' : 'text-gray-500') + ' pr-2 leading-tight">' + escAdm(item.name) + '</h3>' + (item.isStudioKey ? '<span class="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded">ANAHTAR</span>' : '') + '</div><p class="text-[9px] text-gray-400 font-mono">' + escAdm(item.id) + '</p>' + tyQc + '</div>';
+      list.innerHTML += '<div onclick="' + (isAvailable ? "addToQCCart('" + eid + "')" : '') + '" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm ' + (isAvailable ? 'cursor-pointer hover:border-[#e30613]' : 'opacity-40') + ' transition"><div class="flex justify-between items-start mb-2"><h3 class="text-xs font-bold ' + (isAvailable ? 'text-gray-800' : 'text-gray-500') + ' pr-2 leading-tight">' + escAdm(item.name) + '</h3>' + (item.isStudioKey ? '<span class="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded">ANAHTAR</span>' : '') + '</div><p class="text-[9px] text-gray-400 font-mono">' + escAdm(item.code || item.id) + '</p>' + tyQc + '</div>';
     });
   }
 
@@ -1570,7 +1823,7 @@
     container.innerHTML = qcCart.length ? '' : '<p class="text-center text-gray-400 text-xs mt-10 italic">Sepet boş</p>';
     qcCart.forEach(function(id) {
       var item = allEq.find(function(i) { return i.id === id; });
-      if (item) container.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><div class="min-w-0"><p class="text-[11px] font-bold truncate text-gray-800">' + item.name + '</p><p class="text-[9px] font-mono text-gray-400">' + item.id + '</p></div><button onclick="removeFromQCCart(\'' + String(id).replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold text-lg px-2">×</button></div>';
+      if (item) container.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><div class="min-w-0"><p class="text-[11px] font-bold truncate text-gray-800">' + item.name + '</p><p class="text-[9px] font-mono text-gray-400">' + (item.code || item.id) + '</p></div><button onclick="removeFromQCCart(\'' + String(id).replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold text-lg px-2">×</button></div>';
     });
   }
 
@@ -2150,7 +2403,14 @@
 
   // ═══ STÜDYO TAKVİMİ ═══
   function loadAdminStudios() {
-    google.script.run.withSuccessHandler(function(studios) {
+    fetch(API_BASE + '/studios', { method: 'GET' }).then(function(res) {
+      return res.text().then(function(txt) {
+        var data = {};
+        try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
+        if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+        return (data && data.data) ? data.data : [];
+      });
+    }).then(function(studios) {
       var container = document.getElementById('admin-studio-selector');
       if (!container) return;
       if (!studios || !studios.length) { container.innerHTML = '<p class="text-gray-400 col-span-full text-center py-4">Stüdyo bulunamadı.</p>'; return; }
@@ -2163,7 +2423,10 @@
         var snameJs = String(s.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         container.innerHTML += '<div onclick="selectAdminStudio(\'' + sidJs + '\', \'' + snameJs + '\')" class="cursor-pointer rounded-2xl border-2 ' + activeClass + ' p-4 text-center transition-all"><span class="text-2xl block mb-2">' + calData.icon + '</span><h4 class="font-black text-xs text-gray-900">' + escAdm(s.name) + '</h4>' + (isActive ? '<span class="text-[8px] font-bold text-[#e30613] uppercase mt-1 block">Seçili</span>' : '') + '</div>';
       });
-    }).getStudioData();
+    }).catch(function(err) {
+      var container = document.getElementById('admin-studio-selector');
+      if (container) container.innerHTML = '<p class="text-red-500 col-span-full text-center py-4">' + escAdm((err && err.message) || 'Stüdyo listesi alınamadı.') + '</p>';
+    });
   }
 
   function selectAdminStudio(id, name) {
@@ -2404,6 +2667,79 @@
     }).adminUpdateStudioReservation({ id: String(ev.id), start_dt: startDt, end_dt: endDt, purpose: purpose }, currentAuthToken);
   }
 
+  function fetchAdminStudioWeekGridViaApi_(studioId, weekStartIso) {
+    var wk = String(weekStartIso || '').trim() || mondayIsoFrom_(new Date());
+    var start = new Date(wk + 'T00:00:00');
+    if (isNaN(start.getTime())) start = new Date();
+    start.setHours(0, 0, 0, 0);
+    var end = new Date(start.getTime());
+    end.setDate(end.getDate() + 7);
+    var toIso = function(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    };
+    var fromIso = toIso(start);
+    var untilIso = toIso(end);
+    return fetch(API_BASE + '/studio-reservations?from=' + encodeURIComponent(fromIso) + '&to=' + encodeURIComponent(untilIso), { method: 'GET' })
+      .then(function(res) {
+        return res.text().then(function(txt) {
+          var data = {};
+          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
+          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+          return (data && data.data) ? data.data : [];
+        });
+      }).then(function(rows) {
+        var days = [];
+        for (var di = 0; di < 7; di++) {
+          var d = new Date(start.getTime());
+          d.setDate(start.getDate() + di);
+          days.push({ iso: toIso(d), day: d.getDate(), month: d.getMonth() + 1, dow: d.getDay() });
+        }
+        var slots = [];
+        for (var mins = 8 * 60; mins <= (22 * 60 + 30); mins += 30) {
+          slots.push({ mins: mins, label: String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0') });
+        }
+        var cells = {};
+        var slotDetails = {};
+        var cellAdminCaption = {};
+        slots.forEach(function(s) {
+          days.forEach(function(d) { cells[d.iso + '|' + s.mins] = 'free'; });
+        });
+        (rows || []).forEach(function(r) {
+          var rid = String(r.studio_id || '').trim();
+          if (rid !== String(studioId || '').trim()) return;
+          var status = String(r.status || '').toLowerCase();
+          if (['cancelled', 'rejected', 'returned', 'completed', 'no_show'].indexOf(status) >= 0) return;
+          var sd = new Date(r.start_at);
+          var ed = new Date(r.end_at);
+          if (isNaN(sd.getTime()) || isNaN(ed.getTime()) || ed <= sd) return;
+          slots.forEach(function(s) {
+            days.forEach(function(d) {
+              var cellStart = new Date(d.iso + 'T' + String(Math.floor(s.mins / 60)).padStart(2, '0') + ':' + String(s.mins % 60).padStart(2, '0') + ':00');
+              var cellEnd = new Date(cellStart.getTime() + 30 * 60 * 1000);
+              if (sd < cellEnd && ed > cellStart) {
+                var key = d.iso + '|' + s.mins;
+                cells[key] = 'busy';
+                if (!slotDetails[key]) slotDetails[key] = [];
+                slotDetails[key].push(r);
+                if (!cellAdminCaption[key]) {
+                  var uname = String(r.requester_name || r.requester_email || '').trim();
+                  cellAdminCaption[key] = uname || 'Dolu';
+                }
+              }
+            });
+          });
+        });
+        return {
+          week_start: wk,
+          days: days,
+          slots: slots,
+          cells: cells,
+          slot_details: slotDetails,
+          cell_admin_caption: cellAdminCaption
+        };
+      });
+  }
+
   function renderAdminStudioWeekCalendar() {
     if (!activeAdminStudioId) return;
     if (adminStudioWeekGridInFlight) return;
@@ -2411,7 +2747,7 @@
     var frame = document.getElementById('admin-calendar-frame');
     if (!frame) { adminStudioWeekGridInFlight = false; return; }
     frame.innerHTML = '<div class="text-center text-gray-400 py-10 text-xs animate-pulse">Takvim yükleniyor...</div>';
-    google.script.run.withSuccessHandler(function(res) {
+    fetchAdminStudioWeekGridViaApi_(activeAdminStudioId, adminStudioWeekStartIso).then(function(res) {
       adminStudioWeekGridInFlight = false;
       if (!res || res.error) {
         frame.innerHTML = '<div class="text-center text-red-500 py-10 text-xs">' + escAdm((res && res.error) || 'Hata') + '</div>';
@@ -2461,10 +2797,10 @@
       }).join('');
       var slotLabel = adminStudioSelectedSlotKey ? ('Seçili: ' + adminStudioSelectedSlotKey.replace('|', ' ')) : 'Seçili slot yok';
       frame.innerHTML = '<div class="overflow-x-auto p-3 pb-6"><table class="w-full border-collapse text-center"><thead>' + th + '</thead><tbody>' + rows + '</tbody></table><p class="mt-2 mb-2 text-[10px] font-semibold text-gray-500">' + escAdm(slotLabel) + '</p></div>';
-    }).withFailureHandler(function(err) {
+    }).catch(function(err) {
       adminStudioWeekGridInFlight = false;
       frame.innerHTML = '<div class="text-center text-red-500 py-10 text-xs">' + escAdm((err && err.message) || 'Hata') + '</div>';
-    }).getAdminStudioWeeklyGrid(activeAdminStudioId, adminStudioWeekStartIso, currentAuthToken);
+    });
   }
 
   function clearStudioForm() {
@@ -2634,10 +2970,11 @@
     list.innerHTML = '';
     (forwardPool || []).filter(function(i) {
       var ty = String(i.type || '').toLowerCase();
-      return (i.name && i.name.toLowerCase().includes(q)) || (i.id && i.id.toLowerCase().includes(q)) || (ty && ty.includes(q));
+      var code = String(i.code || '').toLowerCase();
+      return (i.name && i.name.toLowerCase().includes(q)) || (code && code.includes(q)) || (ty && ty.includes(q));
     }).forEach(function(item) {
       var tyFe = item.type ? '<p class="text-[9px] text-gray-500 mt-0.5">' + escAdm(item.type) + '</p>' : '';
-      list.innerHTML += '<div onclick="addToForwardCart(\'' + item.id.replace(/'/g, "\\'") + '\')" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition"><h3 class="text-xs font-bold text-gray-800">' + escAdm(item.name) + '</h3><p class="text-[9px] font-mono text-gray-400">' + escAdm(item.id) + '</p>' + tyFe + '</div>';
+      list.innerHTML += '<div onclick="addToForwardCart(\'' + item.id.replace(/'/g, "\\'") + '\')" class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm cursor-pointer hover:border-[#e30613] transition"><h3 class="text-xs font-bold text-gray-800">' + escAdm(item.name) + '</h3><p class="text-[9px] font-mono text-gray-400">' + escAdm(item.code || item.id) + '</p>' + tyFe + '</div>';
     });
     if (!list.innerHTML) {
       list.innerHTML = '<p class="text-center text-gray-400 text-xs mt-8">Bu filtrede ekipman bulunamadı.</p>';
@@ -2651,7 +2988,7 @@
     el.innerHTML = forwardCart.length ? '' : '<p class="text-center text-gray-400 text-xs mt-6">Sepet boş</p>';
     forwardCart.forEach(function(id) {
       var item = allEq.find(function(i) { return i.id === id; });
-      if (item) el.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200"><div class="min-w-0"><p class="text-[11px] font-bold truncate">' + escAdm(item.name) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(id) + '</p></div><button type="button" onclick="removeFromForwardCart(\'' + id.replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold px-2">×</button></div>';
+      if (item) el.innerHTML += '<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200"><div class="min-w-0"><p class="text-[11px] font-bold truncate">' + escAdm(item.name) + '</p><p class="text-[9px] font-mono text-gray-400">' + escAdm(item.code || id) + '</p></div><button type="button" onclick="removeFromForwardCart(\'' + id.replace(/'/g, "\\'") + '\')" class="text-red-400 font-bold px-2">×</button></div>';
     });
   }
   function submitForwardReservation() {
