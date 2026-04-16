@@ -36,18 +36,28 @@ const hasDriveConfig = (): boolean => {
 const getDriveAuth = () => {
   const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
-  const creds = JSON.parse(raw) as { client_email: string; private_key: string };
+  const creds = JSON.parse(raw) as { client_email?: string; private_key?: string };
+  const clientEmail = String(creds.client_email || "").trim();
+  let privateKey = String(creds.private_key || "");
+  if (privateKey.includes("\\n")) {
+    // Many env providers store PEM line breaks as escaped \n.
+    privateKey = privateKey.replace(/\\n/g, "\n");
+  }
+  if (!clientEmail || !privateKey) {
+    throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON: missing client_email/private_key");
+  }
   const scopes = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents"
   ];
-  return new google.auth.JWT(creds.client_email, undefined, creds.private_key, scopes);
+  return new google.auth.JWT(clientEmail, undefined, privateKey, scopes);
 };
 
 export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string | null> => {
   if (!hasDriveConfig()) return null;
 
   const auth = getDriveAuth();
+  await auth.authorize();
   const drive = google.drive({ version: "v3", auth });
   const docs = google.docs({ version: "v1", auth });
 
