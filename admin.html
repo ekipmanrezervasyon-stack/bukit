@@ -8,6 +8,24 @@
 <body>
   <script>
     (function () {
+      var hasToken = false;
+      try {
+        var qs = new URLSearchParams(window.location.search);
+        var tokenFromUrl = String(qs.get("at") || qs.get("token") || "").trim();
+        hasToken = !!String(tokenFromUrl || localStorage.getItem("bookdeck_auth_token") || sessionStorage.getItem("bookdeck_auth_token") || "").trim();
+      } catch (_eToken) {
+        hasToken = false;
+      }
+      if (!hasToken) {
+        var current = new URL(window.location.href);
+        var loginUrl = new URL("./admin-login.html", window.location.href);
+        var apiBase = String(current.searchParams.get("api_base") || "").trim();
+        var appBase = String(current.searchParams.get("app_base") || "").trim();
+        if (apiBase) loginUrl.searchParams.set("api_base", apiBase);
+        if (appBase) loginUrl.searchParams.set("app_base", appBase);
+        window.location.replace(loginUrl.toString());
+        return;
+      }
       fetch("./admin.txt", { cache: "no-store" })
         .then(function (res) {
           if (!res.ok) throw new Error("Failed to load admin.txt");

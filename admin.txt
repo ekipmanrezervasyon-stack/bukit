@@ -744,10 +744,11 @@
           try { localStorage.removeItem('bookdeck_auth_token'); } catch (e3) {}
           try { sessionStorage.removeItem('bookdeck_auth_token'); } catch (e4) {}
           currentAuthToken = '';
-          showToast('Oturum süresi doldu. Kullanıcı ekranına yönlendiriliyorsunuz.', 'error');
+          showToast('Oturum süresi doldu. Admin giriş ekranına yönlendiriliyorsunuz.', 'error');
           setTimeout(function() {
-            try { window.top.location.href = (APP_BASE || '').split('?')[0].split('#')[0]; }
-            catch (_eNav) { window.location.href = (APP_BASE || '').split('?')[0].split('#')[0]; }
+            var loginUrl = buildAdminLoginUrl_();
+            try { window.top.location.href = loginUrl; }
+            catch (_eNav) { window.location.href = loginUrl; }
           }, 700);
           throw new Error('Session expired. Please sign in again.');
         }
@@ -1633,6 +1634,16 @@
     return !!getAdminToken_();
   }
 
+  function buildAdminLoginUrl_() {
+    var base = 'admin-login.html';
+    var params = [];
+    var apiBase = String(API_BASE || '').trim();
+    var appBase = String(APP_BASE || '').trim();
+    if (apiBase) params.push('api_base=' + encodeURIComponent(apiBase));
+    if (appBase) params.push('app_base=' + encodeURIComponent(appBase));
+    return params.length ? (base + '?' + params.join('&')) : base;
+  }
+
 // ═══ STÜDYO TAKVİM VERİLERİ ═══
   var STUDIO_CALENDARS = {
     'GREEN':   { icon: '🟢', calId: '6b1248a08f65098d73f62263382ed64f7d616887e36ce3d244e8a0169c3236ef@group.calendar.google.com', color: '%230B8043' }, // Yeşil
@@ -1686,6 +1697,10 @@
   document.addEventListener('DOMContentLoaded', function() {
     applyFrameGuard_();
     initAdminAuthFromUrl();
+    if (!ensureAdminToken_()) {
+      window.location.replace(buildAdminLoginUrl_());
+      return;
+    }
     document.getElementById('traffic-date').valueAsDate = new Date();
     fillTimeDropdowns();
     fillStudioTimeDropdowns();
@@ -2037,7 +2052,9 @@
       try { localStorage.removeItem('bookdeck_auth_token'); } catch (e) {}
       try { sessionStorage.removeItem('bookdeck_auth_token'); } catch (e2) {}
       currentAuthToken = '';
-      window.top.location.href = (APP_BASE || '').split('?')[0].split('#')[0];
+      var loginUrl = buildAdminLoginUrl_();
+      try { window.top.location.href = loginUrl; }
+      catch (_eTop) { window.location.href = loginUrl; }
     }
     if (t) {
       google.script.run.withSuccessHandler(redirectHome).withFailureHandler(redirectHome).authLogout(t);

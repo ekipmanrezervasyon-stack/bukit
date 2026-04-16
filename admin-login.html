@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+  <title>BUKit Admin Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-5">
+      <h1 class="text-3xl md:text-4xl font-black tracking-tight">
+        <span class="text-[#e30613]">BUK</span><span class="text-gray-900">it</span>
+      </h1>
+      <p class="text-[11px] uppercase tracking-[0.22em] font-black text-gray-400 mt-1">Admin Portal</p>
+    </div>
+
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 sm:p-6">
+      <h2 class="text-lg font-black text-gray-900">Admin OTP Login</h2>
+      <p class="text-sm text-gray-500 mt-1">Admin paneline giris icin e-posta OTP kodunu dogrulayin.</p>
+
+      <div class="mt-5">
+        <label for="email" class="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1.5">E-posta</label>
+        <input id="email" type="email" autocomplete="email" placeholder="ornek@bilgi.edu.tr" class="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm outline-none focus:border-[#e30613]">
+      </div>
+
+      <div class="mt-3">
+        <button id="send-btn" class="w-full bg-gray-900 text-white rounded-xl py-3 font-black text-sm hover:bg-black transition" type="button">OTP Gonder</button>
+      </div>
+
+      <div class="mt-4">
+        <label for="code" class="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1.5">OTP Kodu</label>
+        <input id="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 haneli kod" class="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm outline-none focus:border-[#e30613]">
+      </div>
+
+      <div class="mt-3">
+        <button id="verify-btn" class="w-full bg-[#e30613] text-white rounded-xl py-3 font-black text-sm hover:bg-red-700 transition" type="button">Dogrula ve Gir</button>
+      </div>
+
+      <div id="message" class="hidden mt-3 text-xs rounded-xl px-3 py-2.5 whitespace-pre-wrap"></div>
+      <p class="mt-4 text-[11px] text-gray-500">Basarili dogrulamadan sonra otomatik olarak admin panele yonlendirilirsiniz.</p>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var TOKEN_KEY = "bookdeck_auth_token";
+      var DEFAULT_API = "https://bukit-production.up.railway.app/api";
+      var rolesAllowed = { admin: true, super_admin: true, iiw_admin: true, iiw_instructor: true };
+
+      function parseApiBase() {
+        var v = "";
+        try {
+          var q = new URLSearchParams(window.location.search);
+          v = String(q.get("api_base") || "").trim();
+          if (!v) v = String(sessionStorage.getItem("bookdeck_api_base") || localStorage.getItem("bookdeck_api_base") || "").trim();
+        } catch (_e) {
+          v = "";
+        }
+        if (!v) v = DEFAULT_API;
+        if (v.endsWith("/")) v = v.slice(0, -1);
+        if (!v.endsWith("/api")) v = v + "/api";
+        try { localStorage.setItem("bookdeck_api_base", v); } catch (_e1) {}
+        try { sessionStorage.setItem("bookdeck_api_base", v); } catch (_e2) {}
+        return v;
+      }
+
+      var API_BASE = parseApiBase();
+      var msgEl = document.getElementById("message");
+      var emailEl = document.getElementById("email");
+      var codeEl = document.getElementById("code");
+      var sendBtn = document.getElementById("send-btn");
+      var verifyBtn = document.getElementById("verify-btn");
+
+      function setMsg(text, isError) {
+        msgEl.className = "mt-3 text-xs rounded-xl px-3 py-2.5 whitespace-pre-wrap " + (isError
+          ? "bg-red-50 text-red-700 border border-red-200"
+          : "bg-emerald-50 text-emerald-700 border border-emerald-200");
+        msgEl.textContent = text || "";
+      }
+
+      function clearMsg() {
+        msgEl.className = "hidden mt-3 text-xs rounded-xl px-3 py-2.5 whitespace-pre-wrap";
+        msgEl.textContent = "";
+      }
+
+      function apiPublicRequest(path, opts) {
+        var o = opts || {};
+        var method = o.method || "GET";
+        var headers = o.headers || {};
+        if (method !== "GET" && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+        return fetch(API_BASE + path, {
+          method: method,
+          headers: headers,
+          body: (method === "GET" || o.body == null) ? undefined : JSON.stringify(o.body)
+        }).then(function (res) {
+          return res.text().then(function (txt) {
+            var data = {};
+            try { data = txt ? JSON.parse(txt) : {}; } catch (_e) { data = { error: txt || "JSON parse error" }; }
+            if (!res.ok || (data && data.ok === false)) {
+              throw new Error((data && data.error) || ("HTTP " + res.status));
+            }
+            return data;
+          });
+        });
+      }
+
+      function apiAuthedRequest(path, token) {
+        return fetch(API_BASE + path, {
+          method: "GET",
+          headers: { Authorization: "Bearer " + token }
+        }).then(function (res) {
+          return res.text().then(function (txt) {
+            var data = {};
+            try { data = txt ? JSON.parse(txt) : {}; } catch (_e) { data = { error: txt || "JSON parse error" }; }
+            if (!res.ok || (data && data.ok === false)) {
+              throw new Error((data && data.error) || ("HTTP " + res.status));
+            }
+            return data;
+          });
+        });
+      }
+
+      function buildAdminTarget(token) {
+        var q = new URLSearchParams(window.location.search);
+        var target = new URL("./admin.html", window.location.href);
+        target.searchParams.set("at", token);
+        var apiBase = String(q.get("api_base") || "").trim();
+        var appBase = String(q.get("app_base") || "").trim();
+        if (apiBase) target.searchParams.set("api_base", apiBase);
+        if (appBase) target.searchParams.set("app_base", appBase);
+        return target.toString();
+      }
+
+      function isAdminSession(data) {
+        var p = (data && data.profile) || {};
+        var role = String((p && p.role) || "").trim().toLowerCase();
+        return !!rolesAllowed[role];
+      }
+
+      sendBtn.addEventListener("click", function () {
+        clearMsg();
+        var email = String(emailEl.value || "").trim().toLowerCase();
+        if (!email) { setMsg("E-posta zorunlu.", true); return; }
+        var old = sendBtn.textContent;
+        sendBtn.disabled = true;
+        sendBtn.textContent = "Gonderiliyor...";
+        apiPublicRequest("/auth/otp/request", { method: "POST", body: { email: email } })
+          .then(function (res) {
+            sendBtn.disabled = false;
+            sendBtn.textContent = old;
+            var extra = (res && res.devOtpCode) ? ("\nDev OTP: " + String(res.devOtpCode)) : "";
+            setMsg("OTP gonderildi." + extra, false);
+            codeEl.focus();
+          })
+          .catch(function (err) {
+            sendBtn.disabled = false;
+            sendBtn.textContent = old;
+            setMsg((err && err.message) || "OTP gonderimi basarisiz.", true);
+          });
+      });
+
+      verifyBtn.addEventListener("click", function () {
+        clearMsg();
+        var email = String(emailEl.value || "").trim().toLowerCase();
+        var code = String(codeEl.value || "").trim();
+        if (!email) { setMsg("E-posta zorunlu.", true); return; }
+        if (!/^\d{6}$/.test(code)) { setMsg("OTP kodu 6 haneli olmali.", true); return; }
+
+        var old = verifyBtn.textContent;
+        verifyBtn.disabled = true;
+        verifyBtn.textContent = "Dogrulaniyor...";
+
+        apiPublicRequest("/auth/otp/verify", { method: "POST", body: { email: email, code: code } })
+          .then(function (res) {
+            var token = String((res && res.token) || "").trim();
+            if (!token) throw new Error("Token donmedi.");
+            return apiAuthedRequest("/auth/session", token).then(function (sessionRes) {
+              return { token: token, session: sessionRes };
+            });
+          })
+          .then(function (payload) {
+            if (!isAdminSession(payload.session)) {
+              throw new Error("Bu hesap admin paneline erisimli degil.");
+            }
+            try { localStorage.setItem(TOKEN_KEY, payload.token); } catch (_e1) {}
+            try { sessionStorage.setItem(TOKEN_KEY, payload.token); } catch (_e2) {}
+            setMsg("Giris basarili. Yonlendiriliyor...", false);
+            window.location.replace(buildAdminTarget(payload.token));
+          })
+          .catch(function (err) {
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = old;
+            setMsg((err && err.message) || "OTP dogrulama basarisiz.", true);
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
