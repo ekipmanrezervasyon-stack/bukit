@@ -43,6 +43,12 @@ const getDriveAuth = () => {
   let clientEmail = String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim();
   let privateKey = String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "");
 
+  // Support base64-encoded private key
+  const privateKeyB64 = String(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_B64 || "").trim();
+  if (privateKeyB64 && !privateKey) {
+    privateKey = Buffer.from(privateKeyB64, "base64").toString("utf-8");
+  }
+
   if (raw) {
     const creds = JSON.parse(raw) as { client_email?: string; private_key?: string };
     clientEmail = String(creds.client_email || clientEmail || "").trim();
