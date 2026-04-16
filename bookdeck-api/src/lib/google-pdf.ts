@@ -255,29 +255,47 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   const page = pdfDoc.getPages()[0];
   if (!page) return null;
   const font = await loadOverlayFont(pdfDoc);
+  const { width, height } = page.getSize();
   const draw = (text: string, x: number, y: number, size = 10) =>
     page.drawText(safeText(text || "-"), { x, y, size, font, color: rgb(0, 0, 0) });
+  const paintWhite = (x: number, y: number, w: number, h: number) =>
+    page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
+  const clip = (v: string, n: number) => {
+    const t = safeText(v || "-");
+    return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+  };
+
+  // Clean placeholder-heavy dynamic zones on template before writing.
+  paintWhite(120, 764, 150, 14); // delivered_at
+  paintWhite(330, 764, 180, 14); // expected_return_at
+  paintWhite(98, 738, 160, 14); // student name
+  paintWhite(332, 738, 170, 14); // student id
+  paintWhite(42, 595, 510, 130); // equipment list block
+  paintWhite(45, 172, 500, 16); // received/returned student line
 
   // Header fields
-  draw(ctx.startAt || "-", 128, 768, 9);
-  draw(ctx.endAt || "-", 335, 768, 9);
-  draw(ctx.studentName || "-", 100, 742, 10);
-  draw(ctx.reservationId || "-", 280, 742, 9);
+  draw(clip(ctx.startAt || "-", 22), 128, 768, 8);
+  draw(clip(ctx.endAt || "-", 22), 335, 768, 8);
+  draw(clip(ctx.studentName || "-", 28), 100, 742, 9);
+  draw(clip(ctx.reservationId || "-", 32), 334, 742, 8);
 
   // Equipment 4-grid rows
-  // x: id=48, name=150, condOut=365, condIn=470
-  let y = 708;
-  for (const item of ctx.items.slice(0, 14)) {
-    draw(item.code || "-", 48, y, 9);
-    draw(item.name || "-", 150, y, 9);
-    draw(item.conditionOut || "-", 365, y, 9);
-    draw("", 470, y, 9); // Condition In intentionally empty for manual fill
-    y -= 16;
+  // Keep conservative bounds to avoid overlapping template legal text.
+  let y = 706;
+  for (const item of ctx.items.slice(0, 7)) {
+    draw(clip(item.code || "-", 14), 48, y, 8);
+    draw(clip(item.name || "-", 34), 150, y, 8);
+    draw(clip(item.conditionOut || "-", 14), 365, y, 8);
+    draw("", 470, y, 8); // Condition In intentionally empty for manual fill
+    y -= 18;
+    if (y < 600) break;
   }
 
   // Signature name/date helpers
-  draw(`${ctx.studentName || "-"} / ${ctx.startAt || "-"}`, 50, 176, 8);
-  draw(`${ctx.studentName || "-"} / ${ctx.endAt || "-"}`, 324, 176, 8);
+  const leftSig = `${clip(ctx.studentName || "-", 18)} / ${clip(ctx.startAt || "-", 18)}`;
+  const rightSig = `${clip(ctx.studentName || "-", 18)} / ${clip(ctx.endAt || "-", 18)}`;
+  draw(leftSig, 50, 176, 7);
+  draw(rightSig, 324, 176, 7);
 
   const out = await pdfDoc.save();
   return toDataUrl(out);
