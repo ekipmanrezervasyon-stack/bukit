@@ -777,7 +777,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
       let pdfUrl: string | null = null;
       if (eqId) {
-        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId).select("id,name,equipment_id").maybeSingle();
+        const updItem = await supabaseAdmin
+          .from("equipment_items")
+          .update({ status: "IN_USE" })
+          .eq("id", eqId)
+          .select("id,name,equipment_id,condition_out")
+          .maybeSingle();
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
         const itemRow = updItem.data as Record<string, unknown> | null;
         try {
@@ -791,7 +796,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             items: [
               {
                 name: String(itemRow?.name || ""),
-                code: String(itemRow?.equipment_id || eqId)
+                code: String(itemRow?.equipment_id || eqId),
+                conditionOut: String(itemRow?.condition_out || "")
               }
             ]
           });
@@ -1580,12 +1586,13 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (eqIdsForPdf.length) {
       const meta = await supabaseAdmin
         .from("equipment_items")
-        .select("id,name,equipment_id")
+        .select("id,name,equipment_id,condition_out")
         .in("id", eqIdsForPdf);
       if (meta.error) return reply.code(500).send({ ok: false, error: meta.error.message });
       const items = (meta.data ?? []).map((r) => ({
         name: String((r as Record<string, unknown>).name || ""),
-        code: String((r as Record<string, unknown>).equipment_id || (r as Record<string, unknown>).id || "")
+        code: String((r as Record<string, unknown>).equipment_id || (r as Record<string, unknown>).id || ""),
+        conditionOut: String((r as Record<string, unknown>).condition_out || "")
       }));
       try {
         pdfUrl = await generateCheckoutPdf({
