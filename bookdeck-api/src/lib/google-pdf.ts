@@ -5,8 +5,6 @@ import { promises as fs } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-type ReservationKind = "equipment" | "studio";
-
 type EquipmentCheckoutContext = {
   kind: "equipment";
   reservationId: string;
@@ -29,6 +27,7 @@ type StudioCheckoutContext = {
 };
 
 type CheckoutContext = EquipmentCheckoutContext | StudioCheckoutContext;
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATE_PATH = resolve(__dirname, "../../assets/Equipment Handover Form.pdf");
 const DEFAULT_UNICODE_FONT_PATH = resolve(
@@ -36,205 +35,23 @@ const DEFAULT_UNICODE_FONT_PATH = resolve(
   "../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf"
 );
 
-const formatDateRange = (startAt: string, endAt: string): string => {
-  const s = new Date(startAt);
-  const e = new Date(endAt);
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return `${startAt} → ${endAt}`;
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ` +
-    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return `${fmt(s)} → ${fmt(e)}`;
-};
-
-export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string | null> => {
-  if (ctx.kind === "equipment") {
-    const byTemplate = await generateFromTemplate(ctx);
-    if (byTemplate) return byTemplate;
-  }
-  // Üretilecek form çok küçük, data URL tarayıcılar için yeterli.
-  const doc = new PDFDocument({ size: "A4", margin: 48 });
-  const chunks: Buffer[] = [];
-
-  return await new Promise<string>((resolve, reject) => {
-    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
-    doc.on("error", (err: Error) => reject(err));
-    doc.on("end", () => {
-      const buf = Buffer.concat(chunks);
-      const base64 = buf.toString("base64");
-      resolve(`data:application/pdf;base64,${base64}`);
-    });
-
-    const isStudio = ctx.kind === "studio";
-
-    // Header
-    doc.fontSize(14).font("Helvetica-Bold").text("FACULTY OF COMMUNICATION", { align: "left" });
-    doc.moveDown(0.15);
-    doc.fontSize(13).font("Helvetica-Bold").text(isStudio ? "STUDIO HANDOVER FORM" : "EQUIPMENT HANDOVER FORM", {
-      align: "left"
-    });
-    doc.moveDown(0.6);
-
-    doc
-      .fontSize(10)
-      .font("Helvetica")
-      .text(`Reservation ID: ${ctx.reservationId}`)
-      .moveDown(0.2)
-      .text(`Student Name: ${ctx.studentName || "-"}`)
-      .moveDown(0.2)
-      .text(`Student Email: ${ctx.studentEmail || "-"}`)
-      .moveDown(0.2)
-      .text(`Date Range: ${formatDateRange(ctx.startAt, ctx.endAt)}`);
-
-    if (isStudio) {
-      const sCtx = ctx as StudioCheckoutContext;
-      doc
-        .moveDown(0.4)
-        .text(`Studio: ${sCtx.studioName || "-"}`)
-        .moveDown(0.2)
-        .text(`Handover Note: ${sCtx.handoverNote || "-"}`);
-    }
-
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").fontSize(11).text(isStudio ? "Notes" : "Equipment Condition");
-    doc.moveDown(0.4);
-
-    if (!isStudio) {
-      const eCtx = ctx as EquipmentCheckoutContext;
-      const items = eCtx.items || [];
-
-      // Tablo başlıkları
-      const startX = doc.x;
-      const colWidths = [90, 190, 100, 100]; // ID, Name, Condition Out, Condition In
-
-      doc
-        .fontSize(9)
-        .font("Helvetica-Bold")
-        .text("Equipment ID", startX, doc.y, { width: colWidths[0] })
-        .text("Equipment Name", startX + colWidths[0], doc.y, { width: colWidths[1] })
-        .text("Condition Out", startX + colWidths[0] + colWidths[1], doc.y, { width: colWidths[2] })
-        .text("Condition In", startX + colWidths[0] + colWidths[1] + colWidths[2], doc.y, { width: colWidths[3] });
-
-      doc.moveDown(0.6);
-      doc.font("Helvetica").fontSize(9);
-
-      if (items.length) {
-        items.forEach((item) => {
-          const y = doc.y;
-          doc
-            .text(item.code || "-", startX, y, { width: colWidths[0] })
-            .text(item.name || "-", startX + colWidths[0], y, { width: colWidths[1] })
-            .text(item.conditionOut || "-", startX + colWidths[0] + colWidths[1], y, {
-              width: colWidths[2]
-            })
-            .text("", startX + colWidths[0] + colWidths[1] + colWidths[2], y, {
-              width: colWidths[3]
-            });
-          doc.moveDown(0.4);
-        });
-      } else {
-        doc.text("-", startX, doc.y);
-      }
-    } else {
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .text(ctx.kind === "studio" ? (ctx as StudioCheckoutContext).handoverNote || "-" : "-", {
-          width: 480
-        });
-    }
-
-    // Terms & Conditions (TR + EN) – simplified from original form
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").fontSize(10).text("II. ŞARTLAR VE KOŞULLAR");
-    doc.moveDown(0.2);
-    doc.font("Helvetica").fontSize(9);
-    doc.text(
-      "1. Sorumluluk: Öğrenci, yukarıda listelenen tüm ekipmanlar için tam hukuki ve mali sorumluluğu üstlenir."
-    );
-    doc.moveDown(0.1);
-    doc.text(
-      "2. Kayıp ve Hasar: Hırsızlık, kayıp veya yanlış kullanım ve ihmalden kaynaklanan teknik hasar durumunda; öğrenci, ekipmanın tam yenileme/ikame bedelini ödemekle yükümlüdür."
-    );
-    doc.moveDown(0.1);
-    doc.text(
-      "3. İade Koşulları: Tüm ekipmanlar belirtilen son teslim tarihinde iade edilmelidir. Bu kurala uyulmaması, öğrencinin kısa ya da uzun süreli hak mahrumiyetine sebep olur. (Detaylar: booking.bilgi.edu.tr)."
-    );
-
-    doc.moveDown(0.6);
-    doc.font("Helvetica-Bold").fontSize(10).text("II. TERMS & CONDITIONS");
-    doc.moveDown(0.2);
-    doc.font("Helvetica").fontSize(9);
-    doc.text(
-      "1. Liability: The student assumes full legal and financial responsibility for the equipment listed above."
-    );
-    doc.moveDown(0.1);
-    doc.text(
-      "2. Loss & Damage: In case of theft, loss, or technical damage due to misuse or negligence, the student is liable for the full replacement cost."
-    );
-    doc.moveDown(0.1);
-    doc.text(
-      "3. All gear must be returned by the specified deadline. Missing the deadline may result in temporary or long-term suspension of booking privileges. (Details: booking.bilgi.edu.tr)."
-    );
-
-    // Signature area
-    doc.moveDown(1);
-    const sigStartX = doc.x;
-    const midX = sigStartX + 260;
-
-    doc.font("Helvetica-Bold").fontSize(9).text("RECEIVED BY (STUDENT)", sigStartX, doc.y, {
-      width: 240
-    });
-    doc.text("RETURNED BY (STUDENT)", midX, doc.y, { width: 240 });
-    doc.moveDown(0.5);
-
-    doc
-      .font("Helvetica")
-      .fontSize(8)
-      .text(`${ctx.studentName || "-"} / ${formatDateRange(ctx.startAt, ctx.endAt).split("→")[0].trim()}`, sigStartX, doc.y, {
-        width: 240
-      });
-    doc.text(
-      `${ctx.studentName || "-"} / ${formatDateRange(ctx.startAt, ctx.endAt).split("→")[1]?.trim() || "-"}`,
-      midX,
-      doc.y,
-      { width: 240 }
-    );
-    doc.moveDown(1);
-
-    doc
-      .font("Helvetica")
-      .fontSize(8)
-      .text("Wet Signature", sigStartX, doc.y, { width: 240 })
-      .text("Wet Signature", midX, doc.y, { width: 240 });
-
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").fontSize(9).text("Authorized Staff Signature:", sigStartX, doc.y, {
-      width: 240
-    });
-    doc.text("HANDOVER: ____________________", sigStartX, doc.y + 14, { width: 240 });
-    doc.text("RETURN: ____________________", midX, doc.y + 14, { width: 240 });
-
-    doc.end();
-  });
-};
-
-const getTemplatePath = (): string => {
-  const fromEnv = String(process.env.PDF_EQUIPMENT_TEMPLATE_PATH || "").trim();
-  return fromEnv || DEFAULT_TEMPLATE_PATH;
-};
-
-const toDataUrl = (bytes: Uint8Array): string => {
-  const base64 = Buffer.from(bytes).toString("base64");
-  return `data:application/pdf;base64,${base64}`;
+const formatDate = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 const safeText = (v: string): string => String(v || "").replace(/\s+/g, " ").trim();
+const clip = (v: string, n: number) => {
+  const t = safeText(v || "-");
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+const toDataUrl = (bytes: Uint8Array): string =>
+  `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}`;
 
 const loadOverlayFont = async (pdfDoc: LibPdfDocument) => {
-  const fromEnv = String(process.env.PDF_OVERLAY_FONT_PATH || "").trim();
-  const fontPath = fromEnv || DEFAULT_UNICODE_FONT_PATH;
   try {
-    const fontBytes = await fs.readFile(fontPath);
+    const fontBytes = await fs.readFile(DEFAULT_UNICODE_FONT_PATH);
     return await pdfDoc.embedFont(fontBytes);
   } catch {
     return await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -242,10 +59,9 @@ const loadOverlayFont = async (pdfDoc: LibPdfDocument) => {
 };
 
 const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<string | null> => {
-  const templatePath = getTemplatePath();
   let bytes: Uint8Array;
   try {
-    bytes = await fs.readFile(templatePath);
+    bytes = await fs.readFile(DEFAULT_TEMPLATE_PATH);
   } catch {
     return null;
   }
@@ -255,49 +71,68 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   const page = pdfDoc.getPages()[0];
   if (!page) return null;
   const font = await loadOverlayFont(pdfDoc);
-  const { width, height } = page.getSize();
-  const draw = (text: string, x: number, y: number, size = 10) =>
-    page.drawText(safeText(text || "-"), { x, y, size, font, color: rgb(0, 0, 0) });
-  const paintWhite = (x: number, y: number, w: number, h: number) =>
+
+  const draw = (text: string, x: number, y: number, size = 9) =>
+    page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
+  const white = (x: number, y: number, w: number, h: number) =>
     page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
-  const clip = (v: string, n: number) => {
-    const t = safeText(v || "-");
-    return t.length > n ? `${t.slice(0, n - 1)}…` : t;
-  };
 
-  // Clean placeholder-heavy dynamic zones on template before writing.
-  paintWhite(120, 764, 150, 14); // delivered_at
-  paintWhite(330, 764, 180, 14); // expected_return_at
-  paintWhite(98, 738, 160, 14); // student name
-  paintWhite(332, 738, 170, 14); // student id
-  paintWhite(42, 595, 510, 130); // equipment list block
-  paintWhite(45, 172, 500, 16); // received/returned student line
+  // Beyaz boyayarak placeholder'ları temizle
+  white(200, 750, 160, 14); // delivered_at
+  white(390, 750, 160, 14); // expected_return_at
+  white(130, 727, 160, 14); // student name
+  white(360, 727, 160, 14); // student id
+  white(42,  580, 510, 135); // equipment list
+  white(42,  148, 240, 14);  // sol alt imza
+  white(300, 148, 240, 14);  // sağ alt imza
 
-  // Header fields
-  draw(clip(ctx.startAt || "-", 22), 128, 768, 8);
-  draw(clip(ctx.endAt || "-", 22), 335, 768, 8);
-  draw(clip(ctx.studentName || "-", 28), 100, 742, 9);
-  draw(clip(ctx.reservationId || "-", 32), 334, 742, 8);
+  // Header alanlarını yaz
+  draw(formatDate(ctx.startAt), 202, 754);
+  draw(formatDate(ctx.endAt),   392, 754);
+  draw(clip(ctx.studentName, 28), 132, 731);
+  draw(clip(ctx.reservationId, 20), 362, 731, 8);
 
-  // Equipment 4-grid rows
-  // Keep conservative bounds to avoid overlapping template legal text.
+  // Ekipman listesi satırları
   let y = 706;
   for (const item of ctx.items.slice(0, 7)) {
-    draw(clip(item.code || "-", 14), 48, y, 8);
-    draw(clip(item.name || "-", 34), 150, y, 8);
-    draw(clip(item.conditionOut || "-", 14), 365, y, 8);
-    draw("", 470, y, 8); // Condition In intentionally empty for manual fill
-    y -= 18;
-    if (y < 600) break;
+    draw(clip(item.code || "-", 12),  48,  y, 8);
+    draw(clip(item.name || "-", 36),  148, y, 8);
+    draw(clip(item.conditionOut || "-", 14), 368, y, 8);
+    y -= 19;
+    if (y < 582) break;
   }
 
-  // Signature name/date helpers
-  const leftSig = `${clip(ctx.studentName || "-", 18)} / ${clip(ctx.startAt || "-", 18)}`;
-  const rightSig = `${clip(ctx.studentName || "-", 18)} / ${clip(ctx.endAt || "-", 18)}`;
-  draw(leftSig, 50, 176, 7);
-  draw(rightSig, 324, 176, 7);
+  // Alt imza satırı
+  draw(`${clip(ctx.studentName, 20)} / ${formatDate(ctx.startAt)}`, 48,  152, 7);
+  draw(`${clip(ctx.studentName, 20)} / ${formatDate(ctx.endAt)}`,   305, 152, 7);
 
-  const out = await pdfDoc.save();
-  return toDataUrl(out);
+  return toDataUrl(await pdfDoc.save());
 };
 
+export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string | null> => {
+  if (ctx.kind === "equipment") {
+    const result = await generateFromTemplate(ctx);
+    if (result) return result;
+  }
+
+  // Fallback: pdfkit ile basit form
+  const doc = new PDFDocument({ size: "A4", margin: 48 });
+  const chunks: Buffer[] = [];
+  return new Promise<string>((resolve, reject) => {
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("error", reject);
+    doc.on("end", () => {
+      const b64 = Buffer.concat(chunks).toString("base64");
+      resolve(`data:application/pdf;base64,${b64}`);
+    });
+    doc.fontSize(14).font("Helvetica-Bold").text("FACULTY OF COMMUNICATION");
+    doc.fontSize(13).text(ctx.kind === "studio" ? "STUDIO HANDOVER FORM" : "EQUIPMENT HANDOVER FORM");
+    doc.moveDown();
+    doc.fontSize(10).font("Helvetica")
+      .text(`Student: ${ctx.studentName}`)
+      .text(`Email: ${ctx.studentEmail}`)
+      .text(`Check-out: ${formatDate(ctx.startAt)}`)
+      .text(`Return: ${formatDate(ctx.endAt)}`);
+    doc.end();
+  });
+};
