@@ -27,24 +27,36 @@ type StudioCheckoutContext = {
 type CheckoutContext = EquipmentCheckoutContext | StudioCheckoutContext;
 
 const hasDriveConfig = (): boolean => {
+  const hasJson = Boolean(String(env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim());
+  const hasSplitCreds = Boolean(
+    String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim() &&
+      String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim()
+  );
   return Boolean(
-    env.GOOGLE_SERVICE_ACCOUNT_JSON &&
+    (hasJson || hasSplitCreds) &&
       (env.GOOGLE_EQUIPMENT_FORM_DOC_ID || env.GOOGLE_STUDIO_FORM_DOC_ID)
   );
 };
 
 const getDriveAuth = () => {
   const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
-  const creds = JSON.parse(raw) as { client_email?: string; private_key?: string };
-  const clientEmail = String(creds.client_email || "").trim();
-  let privateKey = String(creds.private_key || "");
+  let clientEmail = String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim();
+  let privateKey = String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "");
+
+  if (raw) {
+    const creds = JSON.parse(raw) as { client_email?: string; private_key?: string };
+    clientEmail = String(creds.client_email || clientEmail || "").trim();
+    privateKey = String(creds.private_key || privateKey || "");
+  }
+
   if (privateKey.includes("\\n")) {
     // Many env providers store PEM line breaks as escaped \n.
     privateKey = privateKey.replace(/\\n/g, "\n");
   }
   if (!clientEmail || !privateKey) {
-    throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON: missing client_email/private_key");
+    throw new Error(
+      "Missing Google service account credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY."
+    );
   }
   const scopes = [
     "https://www.googleapis.com/auth/drive",
