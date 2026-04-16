@@ -1547,6 +1547,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
     const name = String(p.display_name || "").trim() || String(p.email.split("@")[0] || p.email);
     const results: string[] = [];
+    const eqIdsForPdf: string[] = [];
     for (const rawId of p.cart_ids) {
       const eqId = String(rawId || "").trim();
       if (!eqId) continue;
@@ -1569,10 +1570,40 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         .select("id")
         .single();
       if (created.error) return reply.code(500).send({ ok: false, error: created.error.message });
-      results.push(String(created.data?.id || ""));
+      const rid = String(created.data?.id || "");
+      results.push(rid);
+      eqIdsForPdf.push(eqId);
       await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
     }
-    return { ok: true, success: true, reservation_ids: results, url: "" };
+
+    let pdfUrl: string | null = null;
+    if (eqIdsForPdf.length) {
+      const meta = await supabaseAdmin
+        .from("equipment_items")
+        .select("id,name,equipment_id")
+        .in("id", eqIdsForPdf);
+      if (meta.error) return reply.code(500).send({ ok: false, error: meta.error.message });
+      const items = (meta.data ?? []).map((r) => ({
+        name: String((r as Record<string, unknown>).name || ""),
+        code: String((r as Record<string, unknown>).equipment_id || (r as Record<string, unknown>).id || "")
+      }));
+      try {
+        pdfUrl = await generateCheckoutPdf({
+          kind: "equipment",
+          reservationId: results[0] || "quick",
+          studentName: name,
+          studentEmail: p.email.toLowerCase(),
+          startAt: startAt,
+          endAt: endAt,
+          items
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
+    }
+
+    return { ok: true, success: true, reservation_ids: results, url: pdfUrl || "" };
   });
 
   app.get("/admin/reports/summary", { preHandler: requireRoles(["super_admin"]) }, async (_req, reply) => {
