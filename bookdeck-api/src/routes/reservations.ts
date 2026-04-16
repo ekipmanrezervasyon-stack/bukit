@@ -764,7 +764,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const eq = await supabaseAdmin
       .from("equipment_reservations")
       .update({
-        status: "picked_up",
+        status: "checked_out",
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString()
       })
@@ -778,7 +778,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         const updItem = await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
       }
-      return { ok: true, success: true, id, status: "picked_up", url: "" };
+      return { ok: true, success: true, id, status: "checked_out", url: "" };
     }
 
     const st = await supabaseAdmin
@@ -1511,7 +1511,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           requester_email: p.email.toLowerCase(),
           requester_name: name,
           required_level: 1,
-          status: "picked_up",
+          status: "checked_out",
           approval_required: false,
           start_at: startAt,
           end_at: endAt,
