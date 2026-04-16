@@ -770,7 +770,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: new Date().toISOString()
       })
       .eq("id", id)
-      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email")
+      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,note")
       .maybeSingle();
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
