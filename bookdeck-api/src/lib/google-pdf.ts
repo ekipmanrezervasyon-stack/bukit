@@ -74,34 +74,38 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
 
   const draw = (text: string, x: number, y: number, size = 9) =>
     page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
-  const white = (x: number, y: number, w: number, h: number) =>
-    page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
 
-  // CHECK-OUT DATE: x=72, y=666 → değer sağında ~185'ten başlıyor
-  draw(formatDate(ctx.startAt), 185, 668);
+  // Header alanları — etiket sonrasına yaz
+  // Check Out Date: y=720, etiket "Check Out Date:" ~115px → değer 160'tan başlasın
+  draw(formatDate(ctx.startAt), 160, 722);
 
-  // RETURN DATE: x=302 civarı → değer ~390'dan başlıyor
-  draw(formatDate(ctx.endAt), 390, 668);
+  // Return Date: y=696
+  draw(formatDate(ctx.endAt), 160, 698);
 
-  // Profile Name: y=639 → değer ~185'ten
-  draw(clip(ctx.studentName, 30), 185, 641);
+  // Profile Name: y=673
+  draw(clip(ctx.studentName, 40), 160, 675);
 
-  // Profile ID: y=639 → değer ~390'dan
-  draw(clip(ctx.reservationId, 24), 390, 641, 8);
+  // Profile ID: y=649
+  draw(clip(ctx.reservationId, 30), 160, 651, 8);
 
-  // Equipment List: y=613, bir satır aşağısından başla
-  let y = 595;
-  for (const item of ctx.items.slice(0, 10)) {
-    draw(clip(item.code || "-", 12),  72,  y, 8);
-    draw(clip(item.name || "-", 38),  160, y, 8);
-    draw(clip(item.conditionOut || "-", 14), 400, y, 8);
-    y -= 16;
-    if (y < 410) break;
+  // Tablo satırları
+  // Başlık y=595, ilk satır ~575'ten başlıyor, her satır ~22px aralıklı
+  // Sütun x koordinatları: ID=60, NAME=185, CONDITION_OUT=327, CONDITION_IN=460
+  const tableStartY = 572;
+  const rowHeight = 22;
+
+  for (let i = 0; i < Math.min(ctx.items.length, 9); i++) {
+    const item = ctx.items[i];
+    const y = tableStartY - i * rowHeight;
+    draw(clip(item.code || "-", 14),          62,  y, 8);
+    draw(clip(item.name || "-", 28),          187, y, 8);
+    draw(clip(item.conditionOut || "-", 14),  329, y, 8);
+    // Condition In kasıtlı boş bırakılıyor (elle doldurulacak)
   }
 
-  // İmza tablosu içi — RECEIVED BY altı (y~155) ve RETURNED BY altı
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80,  148, 8);
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`,   305, 148, 8);
+  // İmza tablosu — RECEIVED/RETURNED altı y=166, tablo içi ~140
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80,  140, 8);
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`,   305, 140, 8);
 
   return toDataUrl(await pdfDoc.save());
 };
