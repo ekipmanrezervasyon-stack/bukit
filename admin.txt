@@ -2314,6 +2314,7 @@
         '<button type="button" onclick="printQcInlinePdf()" class="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl text-xs hover:bg-black">YAZDIR</button>' +
         '<button type="button" onclick="finishQcInlineReset()" class="flex-1 bg-white border-2 border-gray-200 text-gray-800 font-black py-3 rounded-xl text-xs hover:bg-gray-50">Sonraki işlem (sıfırla)</button>' +
         '</div></div>';
+      setTimeout(function() { try { printQcInlinePdf(); } catch (_e) {} }, 600);
     }).withFailureHandler(function(err) {
       showToast(err.message, "error");
       actionArea.innerHTML = '<button id="qc-btn" onclick="submitQuickCheckout()" class="w-full bg-[#e30613] text-white font-bold py-4 rounded-xl shadow-lg hover:bg-red-700 transition">TESLİM ET VE FORM OLUŞTUR</button>';
