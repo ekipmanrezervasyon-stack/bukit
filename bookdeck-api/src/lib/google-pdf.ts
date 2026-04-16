@@ -31,6 +31,10 @@ type StudioCheckoutContext = {
 type CheckoutContext = EquipmentCheckoutContext | StudioCheckoutContext;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATE_PATH = resolve(__dirname, "../../assets/Equipment Handover Form.pdf");
+const DEFAULT_UNICODE_FONT_PATH = resolve(
+  __dirname,
+  "../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf"
+);
 
 const formatDateRange = (startAt: string, endAt: string): string => {
   const s = new Date(startAt);
@@ -226,6 +230,17 @@ const toDataUrl = (bytes: Uint8Array): string => {
 
 const safeText = (v: string): string => String(v || "").replace(/\s+/g, " ").trim();
 
+const loadOverlayFont = async (pdfDoc: LibPdfDocument) => {
+  const fromEnv = String(process.env.PDF_OVERLAY_FONT_PATH || "").trim();
+  const fontPath = fromEnv || DEFAULT_UNICODE_FONT_PATH;
+  try {
+    const fontBytes = await fs.readFile(fontPath);
+    return await pdfDoc.embedFont(fontBytes);
+  } catch {
+    return await pdfDoc.embedFont(StandardFonts.Helvetica);
+  }
+};
+
 const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<string | null> => {
   const templatePath = getTemplatePath();
   let bytes: Uint8Array;
@@ -239,7 +254,7 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   pdfDoc.registerFontkit(fontkit);
   const page = pdfDoc.getPages()[0];
   if (!page) return null;
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const font = await loadOverlayFont(pdfDoc);
   const draw = (text: string, x: number, y: number, size = 10) =>
     page.drawText(safeText(text || "-"), { x, y, size, font, color: rgb(0, 0, 0) });
 
