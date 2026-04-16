@@ -1530,10 +1530,13 @@
             '<option value="Missing Part">Missing Part</option>' +
             '</select></div>';
         }
+        var rowName = String(i.name || '').trim();
+        if (!rowName || isUuidLike_(rowName)) rowName = 'Ekipman';
+        var rowCode = String(i.eqCode || '').trim();
         return '<div class="rounded-lg border border-gray-100 bg-gray-50/50 p-2">' +
           '<label class="flex items-center gap-3 text-xs bg-white p-2 rounded-lg border border-gray-100 ' + (isCheckable ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50') + '">' +
           '<input type="checkbox" ' + (isCheckable ? 'checked' : 'disabled') + ' class="w-4 h-4 text-blue-600 rounded" data-traffic-res="' + resAttr + '" value="' + vid + '">' +
-          '<div class="flex-1 font-medium text-gray-800">' + escAdm(i.name) + ' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(i.eqCode || i.id) + ')</span></div>' +
+          '<div class="flex-1 font-medium text-gray-800">' + escAdm(rowName) + (rowCode ? (' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(rowCode) + ')</span>') : '') + '</div>' +
           '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + '</div>';
       }).join('');
       var mainBtn = isPickup
@@ -1980,6 +1983,11 @@
     pageEl.classList.add('active');
     navEl.classList.add('active');
     if (id === 'inventory') refreshInventoryData();
+    if (id === 'checkout') {
+      var qcList = document.getElementById('qc-list');
+      if (qcList) qcList.innerHTML = '<div class="col-span-full mt-8 text-center text-xs text-gray-400 animate-pulse">Envanter yükleniyor...</div>';
+      refreshInventoryData();
+    }
     if (id === 'pending') loadPending();
     if (id === 'traffic') loadTraffic();
     if (id === 'history') loadHistory();
@@ -2439,7 +2447,11 @@
       var itemsHtml = mergedItems.map(function(item) {
         var vid = String(item.eqId || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
         var typeLn = item.eqType ? '<span class="text-[10px] text-gray-500 block mt-0.5">' + escAdm(item.eqType) + '</span>' : '';
-        return '<label class="flex items-center gap-4 text-xs bg-white/90 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50"><input type="checkbox" checked class="w-5 h-5 rounded text-[#e30613]" data-res="' + ridAttr + '" value="' + vid + '"><div class="flex-1"><span class="font-bold text-gray-800 text-sm block">' + escAdm(item.name) + '</span><span class="text-[10px] text-gray-400 font-mono">' + escAdm(item.eqCode || item.eqId) + '</span>' + typeLn + '</div></label>';
+        var cardName = String(item.name || '').trim();
+        if (!cardName || isUuidLike_(cardName)) cardName = 'Ekipman';
+        var cardCode = String(item.eqCode || '').trim();
+        var codeHtml = cardCode ? ('<span class="text-[10px] text-gray-400 font-mono">' + escAdm(cardCode) + '</span>') : '';
+        return '<label class="flex items-center gap-4 text-xs bg-white/90 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50"><input type="checkbox" checked class="w-5 h-5 rounded text-[#e30613]" data-res="' + ridAttr + '" value="' + vid + '"><div class="flex-1"><span class="font-bold text-gray-800 text-sm block">' + escAdm(cardName) + '</span>' + codeHtml + typeLn + '</div></label>';
       }).join('');
       var schedBlock = '';
       if (res.handoverLabel || res.returnLabel) {

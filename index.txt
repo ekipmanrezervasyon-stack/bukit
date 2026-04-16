@@ -916,7 +916,18 @@
           return Promise.resolve({ appBlocked: false, loans: [], penalties: [] });
         },
         getUnitsData: function() {
-          return Promise.resolve({ academic: [], communicationDepartments: [], admin: [] });
+          return apiPublicRequest('/auth/onboarding/units')
+            .then(function(res) {
+              if (!res || res.error) return { academic: [], communicationDepartments: [], admin: [] };
+              return {
+                academic: Array.isArray(res.academic) ? res.academic : [],
+                communicationDepartments: Array.isArray(res.communicationDepartments) ? res.communicationDepartments : [],
+                admin: Array.isArray(res.admin) ? res.admin : []
+              };
+            })
+            .catch(function() {
+              return { academic: [], communicationDepartments: [], admin: [] };
+            });
         },
         authLogout: function() {
           return Promise.resolve({ ok: true });

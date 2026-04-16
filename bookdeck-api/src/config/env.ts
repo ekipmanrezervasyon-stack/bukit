@@ -10,7 +10,7 @@ const EnvSchema = z.object({
   CORS_ORIGIN: z.string().default("*"),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
-  OTP_DEV_BYPASS: z.string().default("true"),
+  OTP_DEV_BYPASS: z.string().default("false"),
   OTP_CODE_TTL_MINUTES: z.coerce.number().default(5),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
   RESEND_API_KEY: z.string().optional().default(""),
@@ -22,6 +22,13 @@ const EnvSchema = z.object({
 const parsed = EnvSchema.safeParse(process.env);
 if (!parsed.success) {
   throw new Error(`Invalid env: ${parsed.error.message}`);
+}
+
+if (
+  parsed.data.OTP_DEV_BYPASS !== "true" &&
+  (!String(parsed.data.RESEND_API_KEY || "").trim() || !String(parsed.data.OTP_EMAIL_FROM || "").trim())
+) {
+  throw new Error("Invalid env: OTP mail delivery requires RESEND_API_KEY and OTP_EMAIL_FROM when OTP_DEV_BYPASS is false.");
 }
 
 export const env = parsed.data;

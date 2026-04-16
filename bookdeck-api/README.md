@@ -14,8 +14,10 @@ cp .env.example .env
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `OTP_DEV_BYPASS`
-- (Production) `RESEND_API_KEY`, `OTP_EMAIL_FROM`
+- `OTP_DEV_BYPASS` (`false` for live, `true` only for local testing)
+- `RESEND_API_KEY`
+- `OTP_EMAIL_FROM` (must be verified in Resend)
+- Optional: `OTP_EMAIL_REPLY_TO`, `OTP_APP_NAME`
 
 3. Run:
 
@@ -43,6 +45,6 @@ npm run dev
 - This is the starting skeleton.
 - Next step: OTP + onboarding + role guard + reservation create/approve flow.
 - For live OTP email delivery:
-  - Set `OTP_DEV_BYPASS=false`
-  - Set `RESEND_API_KEY`
-  - Set `OTP_EMAIL_FROM` to a verified sender/domain in Resend
+  - Keep `OTP_DEV_BYPASS=false`.
+  - Set `RESEND_API_KEY` and `OTP_EMAIL_FROM` (verified sender/domain in Resend).
+  - API now fails fast at startup if mail delivery config is missing while bypass is disabled.

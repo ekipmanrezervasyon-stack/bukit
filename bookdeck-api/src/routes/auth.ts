@@ -20,6 +20,37 @@ const RoleSchema = z.enum([
 ]);
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/auth/onboarding/units", async () => {
+    const empty = { academic: [], communicationDepartments: [], admin: [] };
+    const { data, error } = await supabaseAdmin.from("units").select("*").limit(2000);
+    if (error) return empty;
+    const rows = Array.isArray(data) ? data : [];
+    const acc = { academic: [] as string[], communicationDepartments: [] as string[], admin: [] as string[] };
+    for (const r of rows) {
+      const row = (r ?? {}) as Record<string, unknown>;
+      const raw = (row.raw && typeof row.raw === "object") ? (row.raw as Record<string, unknown>) : null;
+      const ac = String(row.academic ?? row.academic_unit ?? row.name ?? row.code ?? "").trim();
+      const comm = String(row.communication_department ?? row.communication ?? row.comm_dept ?? "").trim();
+      const ad = String(row.admin ?? row.administrative_unit ?? "").trim();
+      if (ac) acc.academic.push(ac);
+      if (ad) acc.admin.push(ad);
+      if (comm) acc.communicationDepartments.push(comm);
+      if (raw) {
+        const rawAc = String(raw.academic ?? "").trim();
+        const rawAd = String(raw.admin ?? "").trim();
+        const rawComm = String(raw.communication ?? raw.communication_department ?? "").trim();
+        if (rawAc) acc.academic.push(rawAc);
+        if (rawAd) acc.admin.push(rawAd);
+        if (rawComm) acc.communicationDepartments.push(rawComm);
+      }
+    }
+    return {
+      academic: Array.from(new Set(acc.academic)),
+      communicationDepartments: Array.from(new Set(acc.communicationDepartments)),
+      admin: Array.from(new Set(acc.admin))
+    };
+  });
+
   app.post("/auth/otp/request", async (req, reply) => {
     const parsed = z.object({ email: EmailSchema }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: "Invalid email." });
