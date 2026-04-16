@@ -16,7 +16,11 @@ const EnvSchema = z.object({
   RESEND_API_KEY: z.string().optional().default(""),
   OTP_EMAIL_FROM: z.string().optional().default(""),
   OTP_EMAIL_REPLY_TO: z.string().optional().default(""),
-  OTP_APP_NAME: z.string().optional().default("BUKit")
+  OTP_APP_NAME: z.string().optional().default("BUKit"),
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional().default(""),
+  GOOGLE_EQUIPMENT_FORM_DOC_ID: z.string().optional().default(""),
+  GOOGLE_STUDIO_FORM_DOC_ID: z.string().optional().default(""),
+  GOOGLE_PDF_FOLDER_ID: z.string().optional().default("")
 });
 
 const parsed = EnvSchema.safeParse(process.env);

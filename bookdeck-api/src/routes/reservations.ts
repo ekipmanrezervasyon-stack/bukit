@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { supabaseAdmin } from "../lib/supabase.js";
+import { generateCheckoutPdf } from "../lib/google-pdf.js";
 import { getAuthProfile, isAdminRole, requireAuth, requireRoles, type AppRole } from "../modules/auth/guards.js";
 
 const isoDateSchema = z
@@ -769,16 +770,37 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: new Date().toISOString()
       })
       .eq("id", id)
-      .select("id,equipment_item_id,status")
+      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email")
       .maybeSingle();
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      let pdfUrl: string | null = null;
       if (eqId) {
-        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
+        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId).select("id,name,equipment_id").maybeSingle();
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+        const itemRow = updItem.data as Record<string, unknown> | null;
+        try {
+          pdfUrl = await generateCheckoutPdf({
+            kind: "equipment",
+            reservationId: String((eq.data as Record<string, unknown>).id || id),
+            studentName: String((eq.data as Record<string, unknown>).requester_name || ""),
+            studentEmail: String((eq.data as Record<string, unknown>).requester_email || ""),
+            startAt: String((eq.data as Record<string, unknown>).start_at || ""),
+            endAt: String((eq.data as Record<string, unknown>).end_at || ""),
+            items: [
+              {
+                name: String(itemRow?.name || ""),
+                code: String(itemRow?.equipment_id || eqId)
+              }
+            ]
+          });
+        } catch (e) {
+          req.log.error({ err: e }, "generate equipment checkout pdf failed");
+          pdfUrl = null;
+        }
       }
-      return { ok: true, success: true, id, status: "checked_out", url: "" };
+      return { ok: true, success: true, id, status: "checked_out", url: pdfUrl || "" };
     }
 
     const st = await supabaseAdmin
@@ -788,10 +810,34 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: new Date().toISOString()
       })
       .eq("id", id)
-      .select("id,status")
+      .select("id,status,start_at,end_at,requester_name,requester_email,studio_name")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved"), url: "" };
+    if (st.data) {
+      let pdfUrl: string | null = null;
+      try {
+        pdfUrl = await generateCheckoutPdf({
+          kind: "studio",
+          reservationId: String((st.data as Record<string, unknown>).id || id),
+          studentName: String((st.data as Record<string, unknown>).requester_name || ""),
+          studentEmail: String((st.data as Record<string, unknown>).requester_email || ""),
+          startAt: String((st.data as Record<string, unknown>).start_at || ""),
+          endAt: String((st.data as Record<string, unknown>).end_at || ""),
+          studioName: String((st.data as Record<string, unknown>).studio_name || ""),
+          handoverNote: ""
+        });
+      } catch (e) {
+        req.log.error({ err: e }, "generate studio checkout pdf failed");
+        pdfUrl = null;
+      }
+      return {
+        ok: true,
+        success: true,
+        id,
+        status: String((st.data as Record<string, unknown>).status || "approved"),
+        url: pdfUrl || ""
+      };
+    }
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
