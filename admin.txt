@@ -1208,37 +1208,22 @@
           return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
         }).catch(function() { return []; });
       },
-      adminProcessPartialCheckout: function(resId, checks, studioNote, conditionMap, _token) {
-        var co = {};
-        (checks || []).forEach(function(id) {
-          var k = String(id || '').trim();
-          if (!k) return;
-          co[k] = (conditionMap && conditionMap[k]) ? conditionMap[k] : 'Excellent';
-        });
+      adminProcessPartialCheckout: function(resId) {
         return adminApiRequest('/admin/traffic/checkout', {
           method: 'POST',
-          body: {
-            id: String(resId || '').trim(),
-            item_ids: Array.isArray(checks) ? checks.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [],
-            condition_out: co,
-            studio_handover_note: String(studioNote || '')
-          }
+          body: { id: String(resId || '').trim() }
         }).then(function(res) {
           if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
           return { success: true, url: String(res.url || '') };
         });
       },
-      adminProcessPartialCheckin: function(resId, checks, handover, _token) {
+      adminProcessPartialCheckin: function(resId) {
         return adminApiRequest('/admin/traffic/checkin', {
           method: 'POST',
-          body: {
-            id: String(resId || '').trim(),
-            item_ids: Array.isArray(checks) ? checks.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [],
-            return_condition: String(handover || '')
-          }
+          body: { id: String(resId || '').trim() }
         }).then(function(res) {
           if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkin failed.' };
-          return { success: true, url: String(res.url || '') };
+          return { success: true };
         });
       },
       adminTrafficCancelDeliveries: function(resId) {
@@ -1274,23 +1259,12 @@
           body: { query: String(eqQuery || '').trim() }
         });
       },
-      adminTrafficPrintPdf: function(resId, checks, studioNote, conditionMap, _token) {
-        var co = {};
-        (checks || []).forEach(function(id) {
-          var k = String(id || '').trim();
-          if (!k) return;
-          co[k] = (conditionMap && conditionMap[k]) ? conditionMap[k] : 'Excellent';
-        });
-        return adminApiRequest('/admin/traffic/checkout-pdf', {
+      adminTrafficPrintPdf: function(resId) {
+        return adminApiRequest('/admin/traffic/checkout', {
           method: 'POST',
-          body: {
-            id: String(resId || '').trim(),
-            item_ids: Array.isArray(checks) ? checks.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [],
-            condition_out: co,
-            studio_handover_note: String(studioNote || '')
-          }
+          body: { id: String(resId || '').trim() }
         }).then(function(res) {
-          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'PDF oluşturulamadı.' };
+          if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
           return { success: true, url: String(res.url || '') };
         });
       }
@@ -1301,48 +1275,10 @@
   }
   installAdminApiScriptRunShim_();
 
-  function adminPdfRevokeBlobOnIframe_(f) {
-    if (!f || !f.getAttribute) return;
-    var prev = f.getAttribute('data-blob-url');
-    if (prev) {
-      try { URL.revokeObjectURL(prev); } catch (_r) {}
-      f.removeAttribute('data-blob-url');
-    }
-  }
-
-  /** data:application/pdf → blob: daha güvenilir yazdırma; önceki blob URL iptal edilir */
-  function adminPdfAssignIframeSrc_(iframeEl, url) {
-    var f = typeof iframeEl === 'string' ? document.getElementById(iframeEl) : iframeEl;
-    if (!f) return;
-    var u = String(url || '').trim();
-    if (!u) return;
-    adminPdfRevokeBlobOnIframe_(f);
-    var finalSrc = u;
-    if (u.indexOf('data:application/pdf') === 0) {
-      try {
-        var comma = u.indexOf(',');
-        var b64 = u.substring(comma + 1);
-        var bin = atob(b64);
-        var len = bin.length;
-        var bytes = new Uint8Array(len);
-        for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-        var blob = new Blob([bytes], { type: 'application/pdf' });
-        finalSrc = URL.createObjectURL(blob);
-        f.setAttribute('data-blob-url', finalSrc);
-      } catch (_e) {
-        finalSrc = u;
-      }
-    }
-    f.src = finalSrc;
-  }
-
   function closePdfViewModal() {
     var m = document.getElementById('pdf-view-modal');
     var f = document.getElementById('pdf-view-frame');
-    if (f) {
-      adminPdfRevokeBlobOnIframe_(f);
-      f.src = 'about:blank';
-    }
+    if (f) f.src = 'about:blank';
     if (m) m.classList.add('hidden');
   }
 
@@ -1414,30 +1350,18 @@
     var f = document.getElementById('pdf-view-frame');
     var m = document.getElementById('pdf-view-modal');
     if (!f || !m) return;
-    adminPdfAssignIframeSrc_(f, u);
+    f.src = u;
     m.classList.remove('hidden');
   }
 
   function printAdminPdfIframe(iframeId) {
     var f = document.getElementById(iframeId);
-    if (!f) { showToast('PDF bulunamadı.', 'error'); return; }
-    var run = function() {
-      try {
-        if (f.contentWindow) {
-          f.contentWindow.focus();
-          f.contentWindow.print();
-        }
-      } catch (e0) { showToast('Yazdırma penceresi açılamadı.', 'error'); }
-    };
     try {
-      var d = f.contentDocument;
-      if (d && d.readyState === 'complete') setTimeout(run, 120);
-      else {
-        f.onload = function() { setTimeout(run, 320); };
+      if (f && f.contentWindow) {
+        f.contentWindow.focus();
+        f.contentWindow.print();
       }
-    } catch (_e) {
-      setTimeout(run, 450);
-    }
+    } catch (e0) { showToast('Yazdırma penceresi açılamadı.', 'error'); }
   }
 
   function openAdminStudentPdfFromBtn(el) {
@@ -1647,7 +1571,7 @@
       }).join('');
       var mainBtn = isPickup
         ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="w-full bg-gray-900 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-black transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR TESLİM ET & STÜDYO FORMU ÜRET' : '📦 ÇIKIŞ YAP & PDF ÜRET') + '</button>'
-        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="w-full bg-green-600 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-green-700 transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR İADE AL & PDF' : '📥 İADE AL & PDF') + '</button>';
+        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="w-full bg-green-600 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-green-700 transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR İADE AL (PDF yok)' : '📥 İADE AL (PDF yok)') + '</button>';
       var extraBtns = isPickup
         ? '<div class="grid grid-cols-2 gap-2 mt-2">' +
           '<button type="button" onclick="adminTrafficCancelAct(\'' + ridJs + '\')" class="bg-white border border-red-100 text-red-700 text-[9px] font-black py-2 rounded-lg hover:bg-red-50">İptal</button>' +
@@ -2417,18 +2341,14 @@
         actionArea.innerHTML = '<button id="qc-btn" onclick="submitQuickCheckout()" class="w-full bg-[#e30613] text-white font-bold py-4 rounded-xl shadow-lg hover:bg-red-700 transition">TESLİM ET VE FORM OLUŞTUR</button>';
         return;
       }
+      var src = escAttr(res.url);
       actionArea.innerHTML = '<div class="space-y-3">' +
-        '<iframe id="qc-inline-pdf" class="w-full h-[480px] max-h-[55vh] border border-gray-200 rounded-xl bg-gray-100" title="PDF"></iframe>' +
+        '<iframe id="qc-inline-pdf" class="w-full h-[480px] max-h-[55vh] border border-gray-200 rounded-xl bg-gray-100" src="' + src + '"></iframe>' +
         '<div class="flex flex-col sm:flex-row gap-2">' +
         '<button type="button" onclick="printQcInlinePdf()" class="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl text-xs hover:bg-black">YAZDIR</button>' +
         '<button type="button" onclick="finishQcInlineReset()" class="flex-1 bg-white border-2 border-gray-200 text-gray-800 font-black py-3 rounded-xl text-xs hover:bg-gray-50">Sonraki işlem (sıfırla)</button>' +
         '</div></div>';
-      setTimeout(function() {
-        var el = document.getElementById('qc-inline-pdf');
-        if (!el || !res.url) return;
-        el.onload = function() { setTimeout(function() { try { printQcInlinePdf(); } catch (_e) {} }, 350); };
-        adminPdfAssignIframeSrc_(el, res.url);
-      }, 0);
+      setTimeout(function() { try { printQcInlinePdf(); } catch (_e) {} }, 600);
     }).withFailureHandler(function(err) {
       showToast(err.message, "error");
       actionArea.innerHTML = '<button id="qc-btn" onclick="submitQuickCheckout()" class="w-full bg-[#e30613] text-white font-bold py-4 rounded-xl shadow-lg hover:bg-red-700 transition">TESLİM ET VE FORM OLUŞTUR</button>';
@@ -2436,12 +2356,16 @@
   }
 
   function printQcInlinePdf() {
-    printAdminPdfIframe('qc-inline-pdf');
+    var f = document.getElementById('qc-inline-pdf');
+    try {
+      if (f && f.contentWindow) {
+        f.contentWindow.focus();
+        f.contentWindow.print();
+      }
+    } catch (e0) { showToast('Yazdırma penceresi açılamadı; PDF üzerinden deneyin.', 'error'); }
   }
 
   function finishQcInlineReset() {
-    var qcFrame = document.getElementById('qc-inline-pdf');
-    if (qcFrame) adminPdfRevokeBlobOnIframe_(qcFrame);
     qcCart = [];
     renderQCCart();
     var uq = document.getElementById('qc-user-query'); if (uq) uq.value = '';
@@ -2955,10 +2879,8 @@
             '<button type="button" onclick="loadTraffic()" class="flex-1 bg-white border border-gray-200 text-gray-800 font-black py-3 rounded-xl text-xs hover:bg-gray-50">Listeyi Yenile</button>' +
             '</div></div>';
           var ifr = document.getElementById(iframeId);
-          if (ifr) {
-            ifr.onload = function() { setTimeout(function() { try { printAdminPdfIframe(iframeId); } catch (_e) {} }, 350); };
-            adminPdfAssignIframeSrc_(ifr, r.url);
-          }
+          if (ifr) ifr.src = r.url;
+          setTimeout(function() { try { printAdminPdfIframe(iframeId); } catch (_e) {} }, 600);
         } else {
           container.innerHTML = '<button type="button" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl opacity-80 cursor-default">✅ ÇIKIŞ İŞLENDİ</button>' +
             '<button onclick="loadTraffic()" class="w-full mt-3 text-[10px] font-bold text-gray-500 hover:text-gray-800 transition">Listeyi Yenile</button>';
@@ -2980,28 +2902,8 @@
     var oldContent = container.innerHTML;
     container.innerHTML = '<div class="text-center p-3 text-xs font-bold text-green-600 animate-pulse">İade İşleniyor...</div>';
     google.script.run.withSuccessHandler(function(r) {
-      if (r.success) {
-        showToast("İade Alındı!");
-        var iframeId = 'traffic-return-pdf-' + actId;
-        if (r.url) {
-          container.innerHTML =
-            '<div class="space-y-2">' +
-            '<iframe id="' + iframeId + '" class="w-full h-[280px] max-h-[50vh] border border-gray-200 rounded-xl bg-gray-100" title="İade PDF"></iframe>' +
-            '<div class="flex flex-col sm:flex-row gap-2">' +
-            '<button type="button" onclick="printAdminPdfIframe(\'' + iframeId + '\')" class="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl text-xs hover:bg-black">YAZDIR</button>' +
-            '<button type="button" onclick="loadTraffic()" class="flex-1 bg-white border border-gray-200 text-gray-800 font-black py-3 rounded-xl text-xs hover:bg-gray-50">Listeyi Yenile</button>' +
-            '</div></div>';
-          var ifr = document.getElementById(iframeId);
-          if (ifr) {
-            ifr.onload = function() { setTimeout(function() { try { printAdminPdfIframe(iframeId); } catch (_e) {} }, 350); };
-            adminPdfAssignIframeSrc_(ifr, r.url);
-          }
-        } else {
-          container.innerHTML = '<button type="button" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl opacity-80 cursor-default">✅ İADE İŞLENDİ</button>' +
-            '<button onclick="loadTraffic()" class="w-full mt-3 text-[10px] font-bold text-gray-500 hover:text-gray-800 transition">Listeyi Yenile</button>';
-        }
-        refreshInventoryData();
-      } else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
+      if (r.success) { showToast("İade Alındı!"); loadTraffic(); refreshInventoryData(); }
+      else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
     }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckin(resId, checks, handover, currentAuthToken);
   }
 
