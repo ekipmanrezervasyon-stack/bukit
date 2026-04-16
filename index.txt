@@ -2758,6 +2758,9 @@
           var statusRaw = String((r && r.status) || '').trim().toUpperCase();
           var photo = String((r && (r.photo_url || r.photo || r.image_url)) || '').trim();
           var ret = String((r && (r.return_date || r.due_date || r.end_at)) || '').trim();
+          var levelRaw = String((r && (r.eq_level || r.required_level || r.level)) || '').trim();
+          var perResCapRaw = Number((r && r.eq_max_per_reservation));
+          var perResCap = (isNaN(perResCapRaw) || perResCapRaw < 1) ? null : perResCapRaw;
           var isStudioKey = /studio\s*key|anahtar/i.test(id + ' ' + name + ' ' + typeLabel);
           return {
             id: id,
@@ -2770,6 +2773,8 @@
             status: statusRaw || 'UNKNOWN',
             image: photo,
             returnDate: ret,
+            eq_level: levelRaw,
+            eq_max_per_reservation: perResCap,
             details: [{
               equipment_id: id,
               equipment_code: code || id,

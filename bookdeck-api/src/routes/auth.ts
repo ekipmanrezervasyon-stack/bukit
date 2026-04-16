@@ -205,6 +205,14 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!p) return reply.code(401).send({ ok: false, error: "Invalid session token." });
 
     const safeRole = parsed.data.role && parsed.data.role !== "student" ? parsed.data.role : "staff";
+    const facultyName = String(parsed.data.faculty_name || "").trim();
+    const lowFaculty = facultyName.toLowerCase();
+    const isCommFaculty =
+      lowFaculty.includes("faculty of communication") ||
+      lowFaculty.includes("iletişim fakültesi") ||
+      lowFaculty.includes("iletisim fakultesi");
+    const departmentCode = isCommFaculty ? "COMM" : "NON_FACULTY";
+    const departmentName = isCommFaculty ? facultyName : `Non-Faculty - ${facultyName}`;
     const { data, error } = await supabaseAdmin
       .from("profiles")
       .update({
@@ -212,7 +220,9 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         user_type: "staff",
         full_name: parsed.data.full_name,
         staff_type: parsed.data.staff_type,
-        faculty_name: parsed.data.faculty_name,
+        faculty_name: facultyName,
+        department_code: departmentCode,
+        department_name: departmentName,
         onboarding_completed: true,
         updated_at: new Date().toISOString()
       })

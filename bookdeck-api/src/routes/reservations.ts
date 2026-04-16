@@ -946,13 +946,24 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const parsed = adminEquipmentLookupSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const raw = String(parsed.data.query || "").trim();
-    let result = await supabaseAdmin
-      .from("equipment_items")
-      .select("*")
-      .or(`id.eq.${raw},equipment_id.eq.${raw}`)
-      .limit(1)
-      .maybeSingle();
-    if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+    const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw);
+    let result:
+      | { data: Record<string, unknown> | null; error: { message: string } | null }
+      | { data: null; error: null } = { data: null, error: null };
+
+    if (uuidLike) {
+      result = await supabaseAdmin.from("equipment_items").select("*").eq("id", raw).limit(1).maybeSingle();
+      if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+    }
+    if (!result.data) {
+      result = await supabaseAdmin
+        .from("equipment_items")
+        .select("*")
+        .eq("equipment_id", raw.toUpperCase())
+        .limit(1)
+        .maybeSingle();
+      if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+    }
     if (!result.data) {
       result = await supabaseAdmin.from("equipment_items").select("*").ilike("name", `%${raw}%`).limit(1).maybeSingle();
       if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
