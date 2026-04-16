@@ -93,6 +93,73 @@ const quickCheckoutSchema = z.object({
 const adminTrafficActionSchema = z.object({
   id: z.string().min(1)
 });
+
+const adminTrafficCheckoutBodySchema = z.object({
+  id: z.string().min(1),
+  item_ids: z.array(z.string().min(1)).max(40).optional().default([]),
+  condition_out: z.record(z.string(), z.string()).optional().default({}),
+  studio_handover_note: z.string().max(2000).optional().default("")
+});
+
+const adminTrafficCheckinBodySchema = z.object({
+  id: z.string().min(1),
+  item_ids: z.array(z.string().min(1)).max(40).optional().default([]),
+  return_condition: z.string().max(2000).optional().default("")
+});
+
+function mergeTrafficEquipmentItemIds(baseItemId: string, extras: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of [baseItemId, ...extras]) {
+    const id = String(raw || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+async function buildTrafficEquipmentPdfItems(
+  baseEquipmentItemId: string,
+  extraItemIds: string[],
+  conditionOutMap: Record<string, string>,
+  phase: "checkout" | "return",
+  returnCondition: string
+): Promise<Array<{ name: string; code: string; conditionOut: string; conditionIn?: string }>> {
+  const ordered = mergeTrafficEquipmentItemIds(baseEquipmentItemId, extraItemIds);
+  if (!ordered.length) return [];
+  const meta = await supabaseAdmin
+    .from("equipment_items")
+    .select("id,name,equipment_id,condition_out")
+    .in("id", ordered);
+  if (meta.error) throw new Error(meta.error.message);
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const r of meta.data ?? []) {
+    const id = String((r as Record<string, unknown>).id || "").trim();
+    if (id) byId.set(id, r as Record<string, unknown>);
+  }
+  return ordered
+    .filter((id) => byId.has(id))
+    .map((id) => {
+      const row = byId.get(id)!;
+      const name = String(row.name || "");
+      const code = String(row.equipment_id || id);
+      const dbCo = String(row.condition_out || "");
+      if (phase === "return") {
+        return {
+          name,
+          code,
+          conditionOut: dbCo,
+          conditionIn: returnCondition || "-"
+        };
+      }
+      return {
+        name,
+        code,
+        conditionOut: String(conditionOutMap[id] ?? dbCo ?? "")
+      };
+    });
+}
 const adminTrafficExtendSchema = z.object({
   id: z.string().min(1),
   new_end_at: isoDateSchema
@@ -756,11 +823,87 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, data };
   });
 
-  app.post("/admin/traffic/checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
-    const actor = getAuthProfile(req);
-    const parsed = adminTrafficActionSchema.safeParse(req.body);
+  app.post("/admin/traffic/checkout-pdf", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminTrafficCheckoutBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
+    const itemIds = parsed.data.item_ids;
+    const conditionOut = parsed.data.condition_out;
+    const studioHandover = String(parsed.data.studio_handover_note || "");
+
+    const eq = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,start_at,end_at,requester_name,requester_email,note")
+      .eq("id", id)
+      .maybeSingle();
+    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+    if (eq.data) {
+      const row = eq.data as Record<string, unknown>;
+      const baseEq = String(row.equipment_item_id || "").trim();
+      let pdfUrl: string | null = null;
+      if (baseEq) {
+        try {
+          const items = await buildTrafficEquipmentPdfItems(baseEq, itemIds, conditionOut, "checkout", "");
+          if (items.length) {
+            pdfUrl = await generateCheckoutPdf({
+              kind: "equipment",
+              phase: "checkout",
+              reservationId: String(row.id || id),
+              studentName: String(row.requester_name || ""),
+              studentEmail: String(row.requester_email || ""),
+              startAt: String(row.start_at || ""),
+              endAt: String(row.end_at || ""),
+              projectExplanation: String(row.note || ""),
+              items
+            });
+          }
+        } catch (e) {
+          req.log.error({ err: e }, "traffic checkout-pdf equipment failed");
+          const msg = e instanceof Error ? e.message : String(e);
+          return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+        }
+      }
+      return { ok: true, success: true, id, url: pdfUrl || "" };
+    }
+
+    const st = await supabaseAdmin
+      .from("studio_reservations")
+      .select("id,status,start_at,end_at,requester_name,requester_email,studio_name")
+      .eq("id", id)
+      .maybeSingle();
+    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
+    if (st.data) {
+      try {
+        const row = st.data as Record<string, unknown>;
+        const pdfUrl = await generateCheckoutPdf({
+          kind: "studio",
+          reservationId: String(row.id || id),
+          studentName: String(row.requester_name || ""),
+          studentEmail: String(row.requester_email || ""),
+          startAt: String(row.start_at || ""),
+          endAt: String(row.end_at || ""),
+          studioName: String(row.studio_name || ""),
+          handoverNote: studioHandover
+        });
+        return { ok: true, success: true, id, url: pdfUrl || "" };
+      } catch (e) {
+        req.log.error({ err: e }, "traffic checkout-pdf studio failed");
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
+    }
+
+    return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.post("/admin/traffic/checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminTrafficCheckoutBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+    const itemIds = parsed.data.item_ids;
+    const conditionOut = parsed.data.condition_out;
+    const studioHandover = String(parsed.data.studio_handover_note || "");
 
     const eq = await supabaseAdmin
       .from("equipment_reservations")
@@ -774,7 +917,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .maybeSingle();
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
-      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      const row = eq.data as Record<string, unknown>;
+      const eqId = String(row.equipment_item_id || "").trim();
       let pdfUrl: string | null = null;
       if (eqId) {
         const updItem = await supabaseAdmin
@@ -784,25 +928,21 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           .select("id,name,equipment_id,condition_out")
           .maybeSingle();
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
-        const itemRow = updItem.data as Record<string, unknown> | null;
-        console.log("NOTE_DEBUG:", JSON.stringify((eq.data as Record<string, unknown>).note));
         try {
-          pdfUrl = await generateCheckoutPdf({
-            kind: "equipment",
-            reservationId: String((eq.data as Record<string, unknown>).id || id),
-            studentName: String((eq.data as Record<string, unknown>).requester_name || ""),
-            studentEmail: String((eq.data as Record<string, unknown>).requester_email || ""),
-            startAt: String((eq.data as Record<string, unknown>).start_at || ""),
-            endAt: String((eq.data as Record<string, unknown>).end_at || ""),
-            projectExplanation: String((eq.data as Record<string, unknown>).note || ""),
-            items: [
-              {
-                name: String(itemRow?.name || ""),
-                code: String(itemRow?.equipment_id || eqId),
-                conditionOut: String(itemRow?.condition_out || "")
-              }
-            ]
-          });
+          const items = await buildTrafficEquipmentPdfItems(eqId, itemIds, conditionOut, "checkout", "");
+          if (items.length) {
+            pdfUrl = await generateCheckoutPdf({
+              kind: "equipment",
+              phase: "checkout",
+              reservationId: String(row.id || id),
+              studentName: String(row.requester_name || ""),
+              studentEmail: String(row.requester_email || ""),
+              startAt: String(row.start_at || ""),
+              endAt: String(row.end_at || ""),
+              projectExplanation: String(row.note || ""),
+              items
+            });
+          }
         } catch (e) {
           req.log.error({ err: e }, "generate equipment checkout pdf failed");
           const msg = e instanceof Error ? e.message : String(e);
@@ -824,21 +964,22 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
     if (st.data) {
       try {
+        const row = st.data as Record<string, unknown>;
         const pdfUrl = await generateCheckoutPdf({
           kind: "studio",
-          reservationId: String((st.data as Record<string, unknown>).id || id),
-          studentName: String((st.data as Record<string, unknown>).requester_name || ""),
-          studentEmail: String((st.data as Record<string, unknown>).requester_email || ""),
-          startAt: String((st.data as Record<string, unknown>).start_at || ""),
-          endAt: String((st.data as Record<string, unknown>).end_at || ""),
-          studioName: String((st.data as Record<string, unknown>).studio_name || ""),
-          handoverNote: ""
+          reservationId: String(row.id || id),
+          studentName: String(row.requester_name || ""),
+          studentEmail: String(row.requester_email || ""),
+          startAt: String(row.start_at || ""),
+          endAt: String(row.end_at || ""),
+          studioName: String(row.studio_name || ""),
+          handoverNote: studioHandover
         });
         return {
           ok: true,
           success: true,
           id,
-          status: String((st.data as Record<string, unknown>).status || "approved"),
+          status: String(row.status || "approved"),
           url: pdfUrl || ""
         };
       } catch (e) {
@@ -853,9 +994,11 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/admin/traffic/checkin", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
     const actor = getAuthProfile(req);
-    const parsed = adminTrafficActionSchema.safeParse(req.body);
+    const parsed = adminTrafficCheckinBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
+    const itemIds = parsed.data.item_ids;
+    const returnCondition = String(parsed.data.return_condition || "");
 
     const eq = await supabaseAdmin
       .from("equipment_reservations")
@@ -865,16 +1008,40 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: new Date().toISOString()
       })
       .eq("id", id)
-      .select("id,equipment_item_id,status")
+      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,note")
       .maybeSingle();
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
-      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      const row = eq.data as Record<string, unknown>;
+      const eqId = String(row.equipment_item_id || "").trim();
       if (eqId) {
         const updItem = await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
       }
-      return { ok: true, success: true, id, status: "returned" };
+      let pdfUrl: string | null = null;
+      if (eqId) {
+        try {
+          const items = await buildTrafficEquipmentPdfItems(eqId, itemIds, {}, "return", returnCondition);
+          if (items.length) {
+            pdfUrl = await generateCheckoutPdf({
+              kind: "equipment",
+              phase: "return",
+              reservationId: String(row.id || id),
+              studentName: String(row.requester_name || ""),
+              studentEmail: String(row.requester_email || ""),
+              startAt: String(row.start_at || ""),
+              endAt: String(row.end_at || ""),
+              projectExplanation: String(row.note || ""),
+              items
+            });
+          }
+        } catch (e) {
+          req.log.error({ err: e }, "generate equipment return pdf failed");
+          const msg = e instanceof Error ? e.message : String(e);
+          return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+        }
+      }
+      return { ok: true, success: true, id, status: "returned", url: pdfUrl || "" };
     }
 
     const st = await supabaseAdmin
@@ -884,10 +1051,36 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: new Date().toISOString()
       })
       .eq("id", id)
-      .select("id,status")
+      .select("id,status,start_at,end_at,requester_name,requester_email,studio_name")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved") };
+    if (st.data) {
+      const row = st.data as Record<string, unknown>;
+      let pdfUrl: string | null = null;
+      try {
+        pdfUrl = await generateCheckoutPdf({
+          kind: "studio",
+          reservationId: String(row.id || id),
+          studentName: String(row.requester_name || ""),
+          studentEmail: String(row.requester_email || ""),
+          startAt: String(row.start_at || ""),
+          endAt: String(row.end_at || ""),
+          studioName: String(row.studio_name || ""),
+          handoverNote: returnCondition || "İade"
+        });
+      } catch (e) {
+        req.log.error({ err: e }, "generate studio return pdf failed");
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
+      return {
+        ok: true,
+        success: true,
+        id,
+        status: String(row.status || "approved"),
+        url: pdfUrl || ""
+      };
+    }
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
