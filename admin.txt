@@ -1635,7 +1635,7 @@
   }
 
   function buildAdminLoginUrl_() {
-    var base = 'admin-login.html';
+    var base = '/admin-login.html';
     var params = [];
     var apiBase = String(API_BASE || '').trim();
     var appBase = String(APP_BASE || '').trim();

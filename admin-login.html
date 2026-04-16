@@ -127,7 +127,7 @@
 
       function buildAdminTarget(token) {
         var q = new URLSearchParams(window.location.search);
-        var target = new URL("./admin.html", window.location.href);
+        var target = new URL("/admin.html", window.location.href);
         target.searchParams.set("at", token);
         var apiBase = String(q.get("api_base") || "").trim();
         var appBase = String(q.get("app_base") || "").trim();
