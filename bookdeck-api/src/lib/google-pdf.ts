@@ -91,8 +91,8 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   // Tablo satırları
   // Başlık y=595, ilk satır ~575'ten başlıyor, her satır ~22px aralıklı
   // Sütun x koordinatları: ID=60, NAME=185, CONDITION_OUT=327, CONDITION_IN=460
-  const tableStartY = 572;
-  const rowHeight = 22;
+  const tableStartY = 575;
+  const rowHeight = 24;
 
   for (let i = 0; i < Math.min(ctx.items.length, 9); i++) {
     const item = ctx.items[i];
