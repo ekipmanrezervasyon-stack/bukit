@@ -77,34 +77,31 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   const white = (x: number, y: number, w: number, h: number) =>
     page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
 
-  // Beyaz boyayarak placeholder'ları temizle
-  white(200, 750, 160, 14); // delivered_at
-  white(390, 750, 160, 14); // expected_return_at
-  white(130, 727, 160, 14); // student name
-  white(360, 727, 160, 14); // student id
-  white(42,  580, 510, 135); // equipment list
-  white(42,  148, 240, 14);  // sol alt imza
-  white(300, 148, 240, 14);  // sağ alt imza
+  // CHECK-OUT DATE: x=72, y=666 → değer sağında ~185'ten başlıyor
+  draw(formatDate(ctx.startAt), 185, 668);
 
-  // Header alanlarını yaz
-  draw(formatDate(ctx.startAt), 202, 754);
-  draw(formatDate(ctx.endAt),   392, 754);
-  draw(clip(ctx.studentName, 28), 132, 731);
-  draw(clip(ctx.reservationId, 20), 362, 731, 8);
+  // RETURN DATE: x=302 civarı → değer ~390'dan başlıyor
+  draw(formatDate(ctx.endAt), 390, 668);
 
-  // Ekipman listesi satırları
-  let y = 706;
-  for (const item of ctx.items.slice(0, 7)) {
-    draw(clip(item.code || "-", 12),  48,  y, 8);
-    draw(clip(item.name || "-", 36),  148, y, 8);
-    draw(clip(item.conditionOut || "-", 14), 368, y, 8);
-    y -= 19;
-    if (y < 582) break;
+  // Profile Name: y=639 → değer ~185'ten
+  draw(clip(ctx.studentName, 30), 185, 641);
+
+  // Profile ID: y=639 → değer ~390'dan
+  draw(clip(ctx.reservationId, 24), 390, 641, 8);
+
+  // Equipment List: y=613, bir satır aşağısından başla
+  let y = 595;
+  for (const item of ctx.items.slice(0, 10)) {
+    draw(clip(item.code || "-", 12),  72,  y, 8);
+    draw(clip(item.name || "-", 38),  160, y, 8);
+    draw(clip(item.conditionOut || "-", 14), 400, y, 8);
+    y -= 16;
+    if (y < 410) break;
   }
 
-  // Alt imza satırı
-  draw(`${clip(ctx.studentName, 20)} / ${formatDate(ctx.startAt)}`, 48,  152, 7);
-  draw(`${clip(ctx.studentName, 20)} / ${formatDate(ctx.endAt)}`,   305, 152, 7);
+  // İmza tablosu içi — RECEIVED BY altı (y~155) ve RETURNED BY altı
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80,  148, 8);
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`,   305, 148, 8);
 
   return toDataUrl(await pdfDoc.save());
 };
