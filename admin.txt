@@ -857,6 +857,14 @@
       if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0 || s.indexOf('key') >= 0) return true;
       return false;
     }
+    function trafficCanShowReturn_(status) {
+      var s = String(status || '').trim().toLowerCase();
+      if (!s) return false;
+      if (s === 'picked_up' || s === 'checked_out' || s === 'key_out') return true;
+      if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0) return true;
+      if (s.indexOf('key_out') >= 0) return true;
+      return false;
+    }
     function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, dayIso, qNorm) {
       var all = [];
       (equipmentRows || []).forEach(function(r) {
@@ -887,7 +895,9 @@
           items: [item]
         };
         all.push(Object.assign({}, base, { type: 'pickup', time: hhmmFromIso_(base.handoverLabel) }));
-        all.push(Object.assign({}, base, { type: 'return', time: hhmmFromIso_(base.returnLabel) }));
+        if (trafficCanShowReturn_(base.status)) {
+          all.push(Object.assign({}, base, { type: 'return', time: hhmmFromIso_(base.returnLabel) }));
+        }
       });
       (studioRows || []).forEach(function(r) {
         if (!trafficActiveStatus_(r && r.status)) return;
@@ -916,7 +926,9 @@
           items: [sItem]
         };
         all.push(Object.assign({}, baseSt, { type: 'pickup', time: hhmmFromIso_(baseSt.handoverLabel) }));
-        all.push(Object.assign({}, baseSt, { type: 'return', time: hhmmFromIso_(baseSt.returnLabel) }));
+        if (trafficCanShowReturn_(baseSt.status)) {
+          all.push(Object.assign({}, baseSt, { type: 'return', time: hhmmFromIso_(baseSt.returnLabel) }));
+        }
       });
       if (dayIso) {
         all = all.filter(function(x) {
