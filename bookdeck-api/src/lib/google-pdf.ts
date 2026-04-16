@@ -1,4 +1,9 @@
 import PDFDocument from "pdfkit";
+import { PDFDocument as LibPdfDocument, StandardFonts, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { promises as fs } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type ReservationKind = "equipment" | "studio";
 
@@ -24,6 +29,8 @@ type StudioCheckoutContext = {
 };
 
 type CheckoutContext = EquipmentCheckoutContext | StudioCheckoutContext;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_TEMPLATE_PATH = resolve(__dirname, "../../assets/Equipment Handover Form.pdf");
 
 const formatDateRange = (startAt: string, endAt: string): string => {
   const s = new Date(startAt);
@@ -36,13 +43,17 @@ const formatDateRange = (startAt: string, endAt: string): string => {
 };
 
 export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string | null> => {
+  if (ctx.kind === "equipment") {
+    const byTemplate = await generateFromTemplate(ctx);
+    if (byTemplate) return byTemplate;
+  }
   // Üretilecek form çok küçük, data URL tarayıcılar için yeterli.
   const doc = new PDFDocument({ size: "A4", margin: 48 });
   const chunks: Buffer[] = [];
 
   return await new Promise<string>((resolve, reject) => {
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("error", (err) => reject(err));
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("error", (err: Error) => reject(err));
     doc.on("end", () => {
       const buf = Buffer.concat(chunks);
       const base64 = buf.toString("base64");
@@ -201,5 +212,59 @@ export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string 
 
     doc.end();
   });
+};
+
+const getTemplatePath = (): string => {
+  const fromEnv = String(process.env.PDF_EQUIPMENT_TEMPLATE_PATH || "").trim();
+  return fromEnv || DEFAULT_TEMPLATE_PATH;
+};
+
+const toDataUrl = (bytes: Uint8Array): string => {
+  const base64 = Buffer.from(bytes).toString("base64");
+  return `data:application/pdf;base64,${base64}`;
+};
+
+const safeText = (v: string): string => String(v || "").replace(/\s+/g, " ").trim();
+
+const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<string | null> => {
+  const templatePath = getTemplatePath();
+  let bytes: Uint8Array;
+  try {
+    bytes = await fs.readFile(templatePath);
+  } catch {
+    return null;
+  }
+
+  const pdfDoc = await LibPdfDocument.load(bytes);
+  pdfDoc.registerFontkit(fontkit);
+  const page = pdfDoc.getPages()[0];
+  if (!page) return null;
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const draw = (text: string, x: number, y: number, size = 10) =>
+    page.drawText(safeText(text || "-"), { x, y, size, font, color: rgb(0, 0, 0) });
+
+  // Header fields
+  draw(ctx.startAt || "-", 128, 768, 9);
+  draw(ctx.endAt || "-", 335, 768, 9);
+  draw(ctx.studentName || "-", 100, 742, 10);
+  draw(ctx.reservationId || "-", 280, 742, 9);
+
+  // Equipment 4-grid rows
+  // x: id=48, name=150, condOut=365, condIn=470
+  let y = 708;
+  for (const item of ctx.items.slice(0, 14)) {
+    draw(item.code || "-", 48, y, 9);
+    draw(item.name || "-", 150, y, 9);
+    draw(item.conditionOut || "-", 365, y, 9);
+    draw("", 470, y, 9); // Condition In intentionally empty for manual fill
+    y -= 16;
+  }
+
+  // Signature name/date helpers
+  draw(`${ctx.studentName || "-"} / ${ctx.startAt || "-"}`, 50, 176, 8);
+  draw(`${ctx.studentName || "-"} / ${ctx.endAt || "-"}`, 324, 176, 8);
+
+  const out = await pdfDoc.save();
+  return toDataUrl(out);
 };
 
