@@ -1601,6 +1601,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           studentName: name,
           studentEmail: p.email.toLowerCase(),
           startAt: startAt,
+          projectExplanation: String((eq.data as Record<string, unknown>).project_explanation || ""),
           endAt: endAt,
           items
         });
