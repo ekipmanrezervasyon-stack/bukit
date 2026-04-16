@@ -95,7 +95,7 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   draw(clip(ctx.reservationId, 30), 160, 651, 8);
 
   // Project Explanation: y=626
-  draw(clip(ctx.projectExplanation || "-", 60), 160, 628, 8);
+  draw(clip(ctx.projectExplanation || "-", 60), 140, 628, 8);
 
   // Tablo satırları
   // Başlık y=595, ilk satır ~575'ten başlıyor, her satır ~22px aralıklı
