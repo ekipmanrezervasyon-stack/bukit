@@ -740,7 +740,9 @@
         var data = {};
         try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt || 'JSON parse error' }; }
         var msg = (data && data.error) || ('HTTP ' + res.status);
-        if (res.status === 401 || res.status === 403 || /unauthorized|invalid token|jwt|auth|session/i.test(String(msg || ''))) {
+        var msgLower = String(msg || '').toLowerCase();
+        var tokenErr = /unauthorized|invalid token|jwt|token expired|session expired|forbidden/.test(msgLower);
+        if (res.status === 401 || res.status === 403 || tokenErr) {
           try { localStorage.removeItem('bookdeck_auth_token'); } catch (e3) {}
           try { sessionStorage.removeItem('bookdeck_auth_token'); } catch (e4) {}
           currentAuthToken = '';
