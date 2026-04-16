@@ -785,10 +785,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           .maybeSingle();
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
         const itemRow = updItem.data as Record<string, unknown> | null;
+        console.log("NOTE_DEBUG:", JSON.stringify((eq.data as Record<string, unknown>).note));
         try {
           pdfUrl = await generateCheckoutPdf({
-            // eslint-disable-next-line no-console
-            console.log("PDF_NOTE_DEBUG:", JSON.stringify((eq.data as Record<string, unknown>).note));
             kind: "equipment",
             reservationId: String((eq.data as Record<string, unknown>).id || id),
             studentName: String((eq.data as Record<string, unknown>).requester_name || ""),
