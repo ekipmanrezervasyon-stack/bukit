@@ -797,7 +797,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           });
         } catch (e) {
           req.log.error({ err: e }, "generate equipment checkout pdf failed");
-          pdfUrl = null;
+          const msg = e instanceof Error ? e.message : String(e);
+          return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
         }
       }
       return { ok: true, success: true, id, status: "checked_out", url: pdfUrl || "" };
@@ -814,9 +815,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
     if (st.data) {
-      let pdfUrl: string | null = null;
       try {
-        pdfUrl = await generateCheckoutPdf({
+        const pdfUrl = await generateCheckoutPdf({
           kind: "studio",
           reservationId: String((st.data as Record<string, unknown>).id || id),
           studentName: String((st.data as Record<string, unknown>).requester_name || ""),
@@ -826,17 +826,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           studioName: String((st.data as Record<string, unknown>).studio_name || ""),
           handoverNote: ""
         });
+        return {
+          ok: true,
+          success: true,
+          id,
+          status: String((st.data as Record<string, unknown>).status || "approved"),
+          url: pdfUrl || ""
+        };
       } catch (e) {
         req.log.error({ err: e }, "generate studio checkout pdf failed");
-        pdfUrl = null;
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
       }
-      return {
-        ok: true,
-        success: true,
-        id,
-        status: String((st.data as Record<string, unknown>).status || "approved"),
-        url: pdfUrl || ""
-      };
     }
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
