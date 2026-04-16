@@ -793,7 +793,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             studentEmail: String((eq.data as Record<string, unknown>).requester_email || ""),
             startAt: String((eq.data as Record<string, unknown>).start_at || ""),
             endAt: String((eq.data as Record<string, unknown>).end_at || ""),
-            projectExplanation: String((eq.data as Record<string, unknown>).project_explanation || ""),
+            projectExplanation: String((eq.data as Record<string, unknown>).note || ""),
             items: [
               {
                 name: String(itemRow?.name || ""),
