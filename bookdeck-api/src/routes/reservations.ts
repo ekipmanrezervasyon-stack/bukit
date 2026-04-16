@@ -787,6 +787,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         const itemRow = updItem.data as Record<string, unknown> | null;
         try {
           pdfUrl = await generateCheckoutPdf({
+            // eslint-disable-next-line no-console
+            console.log("PDF_NOTE_DEBUG:", JSON.stringify((eq.data as Record<string, unknown>).note));
             kind: "equipment",
             reservationId: String((eq.data as Record<string, unknown>).id || id),
             studentName: String((eq.data as Record<string, unknown>).requester_name || ""),
