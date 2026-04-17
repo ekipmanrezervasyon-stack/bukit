@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { env } from "../config/env.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { generateCheckoutPdf } from "../lib/google-pdf.js";
 import { getAuthProfile, isAdminRole, requireAuth, requireRoles, type AppRole } from "../modules/auth/guards.js";
@@ -35,6 +37,7 @@ const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "
 const ACTIVE_RES_STATUSES = ["pending", "approved", "checked_out", "picked_up", "key_out"];
 const CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
+const ON_LOAN_RES_STATUSES = ["checked_out", "picked_up", "key_out"];
 
 const notifySubscribeSchema = z.object({
   group_key: z.string().min(1).max(190),
@@ -106,6 +109,9 @@ const adminTrafficTransferSchema = z.object({
 });
 const adminEquipmentLookupSchema = z.object({
   query: z.string().min(1).max(190)
+});
+const adminOverdueReminderSchema = z.object({
+  equipment_ids: z.array(z.string().min(1)).min(1)
 });
 
 const specialAccessUpsertSchema = z.object({
@@ -334,6 +340,377 @@ const parseIsoDate = (v: string): string => {
   return new Date(t).toISOString().slice(0, 10);
 };
 
+const escapeHtml = (v: string): string =>
+  String(v || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const isAppAdminRole = (roleRaw: unknown): boolean => {
+  const role = String(roleRaw || "").trim().toLowerCase();
+  return role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
+};
+
+const BAN_LEVELS = {
+  YELLOW: "yellow_warning",
+  DAY15: "15_day_ban",
+  SEMESTER: "semester_ban",
+  PERMANENT: "permanent_ban"
+} as const;
+
+const DELAY_PICKUP_QUEUE_WINDOW_MIN = 32;
+const DELAY_MINOR_LATE_MAX_MIN = 30;
+const DELAY_SOFT_MAJOR_LATE_YELLOW_CAP = 1;
+
+const BAN_TABLE_CANDIDATES = ["bans", "user_bans", "restrictions_bans"];
+let banTableCache: string | null | undefined = undefined;
+
+const resolveBanTable = async (): Promise<string | null> => {
+  if (banTableCache !== undefined) return banTableCache;
+  banTableCache = await firstExistingTable(BAN_TABLE_CANDIDATES);
+  return banTableCache;
+};
+
+const formatBanStageForUser = (levelRaw: string): string => {
+  const l = String(levelRaw || "").toLowerCase();
+  if (l.includes("yellow")) return "Yellow Warning";
+  if (l.includes("15")) return "15 Day Suspension";
+  if (l.includes("7")) return "7 Day Suspension";
+  if (l.includes("semester")) return "Semester Suspension";
+  if (l.includes("permanent")) return "Permanent Ban";
+  return l || "Penalty";
+};
+
+const formatBanStageForAdmin = (levelRaw: string): string => {
+  const l = String(levelRaw || "").toLowerCase();
+  if (l.includes("yellow")) return "Sarı Uyarı";
+  if (l.includes("15")) return "15 Gün Askı";
+  if (l.includes("7")) return "7 Gün Askı";
+  if (l.includes("semester")) return "Dönemlik Askı";
+  if (l.includes("permanent")) return "Kalıcı Yasak";
+  return levelRaw || "Ceza";
+};
+
+const normalizeBool = (raw: unknown): boolean => {
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw || "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes";
+};
+
+const getSemesterEndDateIso = (): string => {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  if (month <= 6) return new Date(year, 5, 30, 23, 59, 59, 0).toISOString();
+  return new Date(year + 1, 0, 31, 23, 59, 59, 0).toISOString();
+};
+
+const safeDiffMinutes = (aIso: string, bIso: string): number => {
+  const a = new Date(String(aIso || "")).getTime();
+  const b = new Date(String(bIso || "")).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return (a - b) / 60000;
+};
+
+type DashboardLoan = {
+  eqId: string;
+  eqDisplayId: string;
+  name: string;
+  due: string;
+  overdue: boolean;
+  msLeft: number | null;
+  resGroupId: string;
+  handover: string;
+  resEnd: string;
+};
+
+type DashboardPenalty = {
+  id: string;
+  ban_level: string;
+  stageLabel: string;
+  reason: string;
+  banned_at: string;
+  expires_at: string;
+  active: boolean;
+  remainingMs: number | null;
+  isYellowWarning: boolean;
+  isHardBan: boolean;
+};
+
+type DashboardExtras = {
+  loans: DashboardLoan[];
+  penalties: DashboardPenalty[];
+  appBlocked: boolean;
+  blockReason: string;
+};
+
+const listUserBanRows = async (profileId: string, email: string): Promise<Record<string, unknown>[]> => {
+  const table = await resolveBanTable();
+  if (!table) return [];
+  const rows: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const run = async (userId: string) => {
+    if (!userId) return;
+    const q = await supabaseAdmin
+      .from(table)
+      .select("*")
+      .eq("user_id", userId)
+      .order("banned_at", { ascending: false })
+      .limit(200);
+    if (q.error) {
+      if (isMissingTableError(q.error)) return;
+      throw new Error(q.error.message);
+    }
+    for (const r of q.data ?? []) {
+      const id = String((r as Record<string, unknown>).id || "");
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      rows.push(r as Record<string, unknown>);
+    }
+  };
+  await run(profileId);
+  if (!rows.length) await run(email);
+  return rows.sort((a, b) => new Date(String(b.banned_at || "")).getTime() - new Date(String(a.banned_at || "")).getTime());
+};
+
+const getUserDashboardExtrasForProfile = async (
+  profile: { id?: string | null; email?: string | null; role?: string | null }
+): Promise<DashboardExtras> => {
+  const profileId = String(profile.id || "").trim();
+  const email = String(profile.email || "").trim().toLowerCase();
+  const ownerFilter = profileId && email
+    ? `requester_profile_id.eq.${profileId},requester_email.eq.${email}`
+    : profileId
+      ? `requester_profile_id.eq.${profileId}`
+      : `requester_email.eq.${email}`;
+  const now = Date.now();
+
+  const loanRowsRes = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,equipment_item_id,start_at,end_at,status")
+    .or(ownerFilter)
+    .in("status", ON_LOAN_RES_STATUSES)
+    .order("end_at", { ascending: true });
+  if (loanRowsRes.error) throw new Error(loanRowsRes.error.message);
+
+  const loanRows = (loanRowsRes.data ?? []) as Record<string, unknown>[];
+  const eqIds = Array.from(new Set(loanRows.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
+  const eqMetaRes = eqIds.length
+    ? await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
+    : { data: [], error: null };
+  if (eqMetaRes.error) throw new Error(eqMetaRes.error.message);
+  const eqMetaById = new Map(
+    ((eqMetaRes.data ?? []) as Record<string, unknown>[]).map((r) => [
+      String(r.id || ""),
+      {
+        name: String(r.name || r.id || ""),
+        code: String(r.equipment_id || r.id || "")
+      }
+    ])
+  );
+
+  const loans: DashboardLoan[] = loanRows.map((r) => {
+    const due = String(r.end_at || "");
+    const dueMs = due ? new Date(due).getTime() : NaN;
+    const meta = eqMetaById.get(String(r.equipment_item_id || "")) || { name: String(r.equipment_item_id || ""), code: String(r.equipment_item_id || "") };
+    return {
+      eqId: String(r.equipment_item_id || ""),
+      eqDisplayId: String(meta.code || r.equipment_item_id || ""),
+      name: String(meta.name || r.equipment_item_id || ""),
+      due,
+      overdue: !Number.isNaN(dueMs) && dueMs < now,
+      msLeft: Number.isNaN(dueMs) ? null : dueMs - now,
+      resGroupId: String(r.id || ""),
+      handover: String(r.start_at || ""),
+      resEnd: due
+    };
+  });
+
+  const penaltiesRaw = await listUserBanRows(profileId, email);
+  const penalties: DashboardPenalty[] = [];
+  const table = await resolveBanTable();
+  for (const b of penaltiesRaw) {
+    const id = String(b.id || "");
+    const banLevel = String(b.ban_level || "");
+    const isYellowWarning = banLevel.toLowerCase().includes("yellow");
+    const expiresAt = String(b.expires_at || "");
+    const expMs = expiresAt ? new Date(expiresAt).getTime() : NaN;
+    const activeRaw = normalizeBool(b.active);
+    const isExpired = !Number.isNaN(expMs) && expMs < now;
+    const active = activeRaw && !isExpired;
+    const remainingMs = Number.isNaN(expMs) ? null : Math.max(0, expMs - now);
+    if (activeRaw && isExpired && table && id) {
+      await supabaseAdmin.from(table).update({ active: false }).eq("id", id);
+    }
+    penalties.push({
+      id,
+      ban_level: banLevel,
+      stageLabel: formatBanStageForUser(banLevel),
+      reason: String(b.reason || ""),
+      banned_at: String(b.banned_at || ""),
+      expires_at: expiresAt,
+      active,
+      remainingMs,
+      isYellowWarning,
+      isHardBan: active && !isYellowWarning
+    });
+  }
+
+  const hasOverdue = loans.some((l) => l.overdue);
+  const hasBlockingPenalty = penalties.some((p) => p.active && !p.isYellowWarning);
+  const isAdmin = isAppAdminRole(profile.role);
+  const appBlocked = !isAdmin && (hasOverdue || hasBlockingPenalty);
+  let blockReason = "";
+  if (hasOverdue && hasBlockingPenalty) blockReason = "overdue_and_penalty";
+  else if (hasOverdue) blockReason = "overdue";
+  else if (hasBlockingPenalty) blockReason = "penalty";
+
+  return { loans, penalties, appBlocked, blockReason };
+};
+
+const assertUserNotAppBlocked = async (profile: { id?: string | null; email?: string | null; role?: string | null }) => {
+  if (isAppAdminRole(profile.role)) return;
+  const ex = await getUserDashboardExtrasForProfile(profile);
+  if (ex.appBlocked) {
+    throw new Error("Your account is restricted (overdue equipment or an active non-warning penalty). Please visit the equipment desk. New bookings are disabled until this is resolved.");
+  }
+};
+
+const countPriorHardLateBans = (penalties: DashboardPenalty[]): number =>
+  penalties.filter((p) => p.ban_level === BAN_LEVELS.DAY15).length;
+
+const countMajorLateSoftWarnings = (penalties: DashboardPenalty[]): number =>
+  penalties.filter((p) =>
+    p.ban_level === BAN_LEVELS.YELLOW &&
+    String(p.reason || "").toLowerCase().includes("major") &&
+    String(p.reason || "").toLowerCase().includes("late")
+  ).length;
+
+const hasPickupQueuedSoon = async (
+  itemId: string,
+  returnAtIso: string,
+  windowMin: number,
+  currentReservationId: string,
+  currentOwnerProfileId: string,
+  currentOwnerEmail: string
+): Promise<boolean> => {
+  const endMs = new Date(returnAtIso).getTime() + windowMin * 60000;
+  const windowEndIso = new Date(endMs).toISOString();
+  const q = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,requester_profile_id,requester_email,start_at,status")
+    .eq("equipment_item_id", itemId)
+    .in("status", ACTIVE_RES_STATUSES)
+    .gt("start_at", returnAtIso)
+    .lte("start_at", windowEndIso)
+    .neq("id", currentReservationId)
+    .order("start_at", { ascending: true })
+    .limit(20);
+  if (q.error) throw new Error(q.error.message);
+  const rows = (q.data ?? []) as Record<string, unknown>[];
+  return rows.some((r) => {
+    const pid = String(r.requester_profile_id || "");
+    const em = String(r.requester_email || "").toLowerCase();
+    const sameById = currentOwnerProfileId && pid && pid === currentOwnerProfileId;
+    const sameByEmail = currentOwnerEmail && em && em === currentOwnerEmail;
+    return !(sameById || sameByEmail);
+  });
+};
+
+const applyLateReturnPenalty = async (payload: {
+  reservationId: string;
+  itemId: string;
+  itemName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  dueAt: string;
+  returnAt: string;
+  actorId: string;
+}): Promise<{ action: string; is_ban: boolean; reason: string; expires_at: string; level?: string }> => {
+  const table = await resolveBanTable();
+  if (!table) return { action: "penalty_table_missing", is_ban: false, reason: "Penalty table is not configured.", expires_at: "" };
+  const ownerId = String(payload.userId || payload.userEmail || "").trim().toLowerCase();
+  if (!ownerId) return { action: "skip_no_user", is_ban: false, reason: "Missing user identity.", expires_at: "" };
+  const diffMin = safeDiffMinutes(payload.returnAt, payload.dueAt);
+  if (diffMin <= 0) return { action: "clean_return", is_ban: false, reason: "On time.", expires_at: "" };
+
+  const extras = await getUserDashboardExtrasForProfile({ id: ownerId, email: payload.userEmail, role: "" });
+  const priorHardDelays = countPriorHardLateBans(extras.penalties);
+  const priorMajorSoftYellows = countMajorLateSoftWarnings(extras.penalties);
+
+  const majorLate = diffMin > DELAY_MINOR_LATE_MAX_MIN;
+  const queuedPickupSoon = majorLate
+    ? await hasPickupQueuedSoon(
+      payload.itemId,
+      payload.returnAt,
+      DELAY_PICKUP_QUEUE_WINDOW_MIN,
+      payload.reservationId,
+      ownerId,
+      payload.userEmail.toLowerCase()
+    )
+    : false;
+
+  let banLevel = "";
+  let banReason = "";
+  let expiresAt = "";
+  let isActualBan = false;
+
+  const applyHardLate = () => {
+    if (priorHardDelays >= 1) {
+      banLevel = BAN_LEVELS.SEMESTER;
+      banReason = "Repeated late-return violation. Semester suspension.";
+      expiresAt = getSemesterEndDateIso();
+      isActualBan = true;
+      return;
+    }
+    const exp = new Date();
+    exp.setDate(exp.getDate() + 15);
+    banLevel = BAN_LEVELS.DAY15;
+    banReason = "Late return. 15-day suspension.";
+    expiresAt = exp.toISOString();
+    isActualBan = true;
+  };
+
+  if (majorLate) {
+    if (queuedPickupSoon) applyHardLate();
+    else if (priorMajorSoftYellows >= DELAY_SOFT_MAJOR_LATE_YELLOW_CAP) applyHardLate();
+    else {
+      banLevel = BAN_LEVELS.YELLOW;
+      banReason = "Yellow Warning: Late (major, no pickup queue).";
+      isActualBan = false;
+    }
+  } else {
+    banLevel = BAN_LEVELS.YELLOW;
+    banReason = "Yellow Warning: Late.";
+    isActualBan = false;
+  }
+
+  const banPayload = {
+    id: randomUUID(),
+    user_id: ownerId,
+    user_name: payload.userName || payload.userEmail,
+    ban_level: banLevel,
+    reason: banReason,
+    banned_by: payload.actorId || "SYSTEM",
+    banned_at: payload.returnAt,
+    expires_at: expiresAt || null,
+    active: isActualBan,
+    notes: [
+      `policy=late_return`,
+      `major=${majorLate ? "1" : "0"}`,
+      `queued=${queuedPickupSoon ? "1" : "0"}`,
+      `item=${payload.itemId}`,
+      `res=${payload.reservationId}`
+    ].join(";")
+  };
+  const ins = await supabaseAdmin.from(table).insert(banPayload).select("id").single();
+  if (ins.error) throw new Error(ins.error.message);
+  return { action: banLevel, level: banLevel, is_ban: isActualBan, reason: banReason, expires_at: expiresAt };
+};
+
 const TR_FIXED_PUBLIC_HOLIDAYS = new Set(["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29"]);
 const TR_RELIGIOUS_HOLIDAYS_BY_YEAR: Record<string, string[]> = {
   "2025": ["2025-03-30", "2025-03-31", "2025-04-01", "2025-04-02", "2025-06-06", "2025-06-07", "2025-06-08", "2025-06-09"],
@@ -368,7 +745,180 @@ const hasPublicHolidayInRange = (startAt: string, endAt: string): boolean => {
   return false;
 };
 
+const listOverdueEquipmentRows = async (): Promise<Array<{
+  id: string;
+  reservation_id: string;
+  name: string;
+  studentName: string;
+  studentId: string;
+  emailHint: string;
+  userId: string;
+  userEmail: string;
+  due: string;
+}>> => {
+  const nowIso = new Date().toISOString();
+  const activeForOverdue = Array.from(new Set(["approved", ...ON_LOAN_RES_STATUSES]));
+  const eqRes = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,equipment_item_id,requester_name,requester_profile_id,requester_email,end_at,status")
+    .in("status", activeForOverdue)
+    .lt("end_at", nowIso)
+    .order("end_at", { ascending: true });
+  if (eqRes.error) throw new Error(eqRes.error.message);
+  const rows = (eqRes.data ?? []) as Record<string, unknown>[];
+  const eqIds = Array.from(new Set(rows.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
+  const items = eqIds.length
+    ? await supabaseAdmin.from("equipment_items").select("id,name").in("id", eqIds)
+    : { data: [], error: null };
+  if (items.error) throw new Error(items.error.message);
+  const nameById = new Map(((items.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || ""), String(r.name || r.id || "")]));
+  return rows.map((r) => {
+    const eqId = String(r.equipment_item_id || "");
+    return {
+      id: eqId,
+      reservation_id: String(r.id || ""),
+      name: nameById.get(eqId) || eqId,
+      studentName: String(r.requester_name || r.requester_email || ""),
+      studentId: String(r.requester_profile_id || r.requester_email || ""),
+      emailHint: String(r.requester_email || ""),
+      userId: String(r.requester_profile_id || r.requester_email || ""),
+      userEmail: String(r.requester_email || ""),
+      due: String(r.end_at || "")
+    };
+  });
+};
+
+const sendOverdueReminderEmail = async (toEmail: string, payload: { name: string; id: string; due: string }): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Overdue reminder mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const dueRaw = String(payload.due || "");
+  const dueMs = new Date(dueRaw).getTime();
+  const dueLabel = Number.isNaN(dueMs)
+    ? dueRaw
+    : new Date(dueMs).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+  const subject = `[${appName}] Iade hatirlatmasi / Equipment return reminder`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba,</p>
+      <p>Asagidaki ekipmanin iade suresi <strong>gecmistir</strong>:</p>
+      <p><strong>${escapeHtml(payload.name)}</strong> (${escapeHtml(payload.id)})<br>Son iade: ${escapeHtml(dueLabel)}</p>
+      <p>Lutfen en kisa surede ekipman ofisine iade ediniz.</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello,</p>
+      <p>This is a reminder that the following equipment is <strong>overdue</strong> for return:</p>
+      <p><strong>${escapeHtml(payload.name)}</strong> (${escapeHtml(payload.id)})<br>Due: ${escapeHtml(dueLabel)}</p>
+      <p>Please return it to the equipment office as soon as possible.</p>
+    </div>
+  `;
+  const text =
+    `TR: Iade suresi gecen ekipman: ${payload.name} (${payload.id})\n` +
+    `Son iade: ${dueLabel}\n\n` +
+    `EN: Overdue equipment: ${payload.name} (${payload.id})\n` +
+    `Due: ${dueLabel}`;
+
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
+const listAdminPenalties = async (): Promise<Array<{
+  id: string;
+  user_id: string;
+  user_name: string;
+  ban_level: string;
+  stageLabel: string;
+  reason: string;
+  banned_at: string;
+  expires_at: string;
+  active: boolean;
+  remainingMs: number | null;
+  isSuspended: boolean;
+  isYellow: boolean;
+}>> => {
+  const table = await resolveBanTable();
+  if (!table) return [];
+  const q = await supabaseAdmin.from(table).select("*").order("banned_at", { ascending: false }).limit(1000);
+  if (q.error) {
+    if (isMissingTableError(q.error)) return [];
+    throw new Error(q.error.message);
+  }
+  const now = Date.now();
+  const rows = (q.data ?? []) as Record<string, unknown>[];
+  const out: Array<{
+    id: string;
+    user_id: string;
+    user_name: string;
+    ban_level: string;
+    stageLabel: string;
+    reason: string;
+    banned_at: string;
+    expires_at: string;
+    active: boolean;
+    remainingMs: number | null;
+    isSuspended: boolean;
+    isYellow: boolean;
+  }> = [];
+  for (const b of rows) {
+    const id = String(b.id || "");
+    const banLevel = String(b.ban_level || "");
+    const isYellow = banLevel.toLowerCase().includes("yellow");
+    const expiresAt = String(b.expires_at || "");
+    const expMs = expiresAt ? new Date(expiresAt).getTime() : NaN;
+    const activeRaw = normalizeBool(b.active);
+    const isExpired = !Number.isNaN(expMs) && expMs < now;
+    const active = activeRaw && !isExpired;
+    const remainingMs = Number.isNaN(expMs) ? null : Math.max(0, expMs - now);
+    if (activeRaw && isExpired && id) {
+      await supabaseAdmin.from(table).update({ active: false }).eq("id", id);
+    }
+    out.push({
+      id,
+      user_id: String(b.user_id || ""),
+      user_name: String(b.user_name || ""),
+      ban_level: banLevel,
+      stageLabel: formatBanStageForAdmin(banLevel),
+      reason: String(b.reason || ""),
+      banned_at: String(b.banned_at || ""),
+      expires_at: expiresAt,
+      active,
+      remainingMs,
+      isSuspended: active && !isYellow,
+      isYellow
+    });
+  }
+  return out;
+};
+
 export const reservationRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/me/dashboard-extras", { preHandler: requireAuth }, async (req, reply) => {
+    const profile = getAuthProfile(req);
+    try {
+      const extras = await getUserDashboardExtrasForProfile({
+        id: String(profile.id || ""),
+        email: String(profile.email || "").toLowerCase(),
+        role: String(profile.role || "")
+      });
+      return { ok: true, ...extras };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg, loans: [], penalties: [], appBlocked: false, blockReason: "" });
+    }
+  });
+
   app.get("/me/bookings", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
     const profileId = String(profile.id || "").trim();
@@ -566,6 +1116,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const profile = getAuthProfile(req);
     const parsed = studioCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    try {
+      await assertUserNotAppBlocked({
+        id: String(profile.id || ""),
+        email: String(profile.email || "").toLowerCase(),
+        role: String(profile.role || "")
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(403).send({ ok: false, error: msg });
+    }
 
     const { studio_id, start_at, end_at, purpose } = parsed.data;
     const s = new Date(start_at).getTime();
@@ -622,6 +1182,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const profile = getAuthProfile(req);
     const parsed = equipmentCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    try {
+      await assertUserNotAppBlocked({
+        id: String(profile.id || ""),
+        email: String(profile.email || "").toLowerCase(),
+        role: String(profile.role || "")
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(403).send({ ok: false, error: msg });
+    }
 
     const { equipment_item_id, start_at, end_at, note } = parsed.data;
     const s = new Date(start_at).getTime();
@@ -976,32 +1546,64 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const parsed = adminTrafficActionSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
+    const nowIso = new Date().toISOString();
 
-    const eq = await supabaseAdmin
+    const eqBefore = await supabaseAdmin
       .from("equipment_reservations")
-      .update({
-        status: "returned",
-        reviewed_by: actor.email,
-        reviewed_at: new Date().toISOString()
-      })
+      .select("id,equipment_item_id,status,end_at,requester_profile_id,requester_name,requester_email")
       .eq("id", id)
-      .select("id,equipment_item_id,status")
       .maybeSingle();
-    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
-    if (eq.data) {
+    if (eqBefore.error) return reply.code(500).send({ ok: false, error: eqBefore.error.message });
+    if (eqBefore.data) {
+      const before = eqBefore.data as Record<string, unknown>;
+      const currentStatus = String(before.status || "").toLowerCase();
+      if (!ON_LOAN_RES_STATUSES.includes(currentStatus)) {
+        return reply.code(400).send({ ok: false, error: `Checkin is only allowed for on-loan items. Current status: ${currentStatus || "unknown"}` });
+      }
+
+      const eq = await supabaseAdmin
+        .from("equipment_reservations")
+        .update({
+          status: "returned",
+          reviewed_by: actor.email,
+          reviewed_at: nowIso
+        })
+        .eq("id", id)
+        .select("id,equipment_item_id,status")
+        .single();
+      if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
       if (eqId) {
         const updItem = await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
       }
-      return { ok: true, success: true, id, status: "returned" };
+
+      let penalty: { action: string; is_ban: boolean; reason: string; expires_at: string; level?: string } | null = null;
+      try {
+        penalty = await applyLateReturnPenalty({
+          reservationId: String(before.id || id),
+          itemId: eqId,
+          itemName: "",
+          userId: String(before.requester_profile_id || ""),
+          userName: String(before.requester_name || before.requester_email || ""),
+          userEmail: String(before.requester_email || "").toLowerCase(),
+          dueAt: String(before.end_at || ""),
+          returnAt: nowIso,
+          actorId: String(actor.id || actor.email || "SYSTEM")
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: id }, "late return penalty application failed");
+      }
+
+      return { ok: true, success: true, id, status: "returned", penalty };
     }
 
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
         reviewed_by: actor.email,
-        reviewed_at: new Date().toISOString()
+        reviewed_at: nowIso
       })
       .eq("id", id)
       .select("id,status")
@@ -1010,6 +1612,63 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved") };
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
+  });
+
+  app.get("/admin/overdue-equipment", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {
+    try {
+      const list = await listOverdueEquipmentRows();
+      return { ok: true, list };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg, list: [] });
+    }
+  });
+
+  app.post("/admin/overdue-reminders", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminOverdueReminderSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten(), success: false });
+    const ids = Array.from(new Set((parsed.data.equipment_ids || []).map((x) => String(x || "").trim()).filter(Boolean)));
+    if (!ids.length) return { ok: true, success: false, error: "No equipment selected.", sent: 0, skipped: 0 };
+
+    try {
+      const list = await listOverdueEquipmentRows();
+      const byId = new Map(list.map((r) => [String(r.id || "").trim(), r]));
+      let sent = 0;
+      let skipped = 0;
+      for (const id of ids) {
+        const row = byId.get(id);
+        if (!row) {
+          skipped += 1;
+          continue;
+        }
+        const email = String(row.userEmail || row.emailHint || "").trim().toLowerCase();
+        if (!email || !email.includes("@")) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          await sendOverdueReminderEmail(email, { name: row.name, id: row.id, due: row.due });
+          sent += 1;
+        } catch (e) {
+          req.log.error({ err: e, equipmentId: row.id, email }, "send overdue reminder failed");
+          skipped += 1;
+        }
+      }
+      return { ok: true, success: true, sent, skipped };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, success: false, error: msg, sent: 0, skipped: ids.length });
+    }
+  });
+
+  app.get("/admin/penalties", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {
+    try {
+      const list = await listAdminPenalties();
+      return { ok: true, list };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg, list: [] });
+    }
   });
 
   app.post("/admin/traffic/cancel", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {

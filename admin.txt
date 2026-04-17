@@ -1173,6 +1173,36 @@
         }).catch(function() {
           return [];
         });
+      },
+      getAdminOverdueEquipmentList: function() {
+        return adminApiRequest('/admin/overdue-equipment', { method: 'GET' })
+          .then(function(res) { return (res && res.list) || []; })
+          .catch(function() { return []; });
+      },
+      adminSendOverdueReminderEmails: function(equipmentIds) {
+        var ids = Array.isArray(equipmentIds) ? equipmentIds.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [];
+        if (!ids.length) return Promise.resolve({ success: false, error: 'Seçim yok.', sent: 0, skipped: 0 });
+        return adminApiRequest('/admin/overdue-reminders', {
+          method: 'POST',
+          body: { equipment_ids: ids }
+        }).then(function(res) {
+          if (!res || res.ok === false || res.success === false) {
+            return {
+              success: false,
+              error: (res && res.error) || 'Hatırlatma gönderimi başarısız.',
+              sent: Number((res && res.sent) || 0),
+              skipped: Number((res && res.skipped) || 0)
+            };
+          }
+          return { success: true, sent: Number(res.sent || 0), skipped: Number(res.skipped || 0) };
+        }).catch(function(err) {
+          return { success: false, error: (err && err.message) || 'Hatırlatma gönderimi başarısız.', sent: 0, skipped: ids.length };
+        });
+      },
+      getAdminPenaltiesList: function() {
+        return adminApiRequest('/admin/penalties', { method: 'GET' })
+          .then(function(res) { return (res && res.list) || []; })
+          .catch(function() { return []; });
       }
       ,
       getTrafficData: function(dateIso) {

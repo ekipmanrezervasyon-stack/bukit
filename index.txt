@@ -899,7 +899,18 @@
           });
         },
         getUserDashboardExtras: function() {
-          return Promise.resolve({ appBlocked: false, loans: [], penalties: [] });
+          return apiRequest('/me/dashboard-extras', { method: 'GET' })
+            .then(function(res) {
+              return {
+                appBlocked: !!(res && res.appBlocked),
+                blockReason: String((res && res.blockReason) || ''),
+                loans: (res && Array.isArray(res.loans)) ? res.loans : [],
+                penalties: (res && Array.isArray(res.penalties)) ? res.penalties : []
+              };
+            })
+            .catch(function() {
+              return { appBlocked: false, blockReason: '', loans: [], penalties: [] };
+            });
         },
         getUnitsData: function() {
           return apiPublicRequest('/auth/onboarding/units')
