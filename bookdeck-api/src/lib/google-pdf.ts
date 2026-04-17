@@ -198,11 +198,11 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
 
   // Key picked up timestamp: print time of PDF generation (GMT+3 display format DD.MM / HH:MM).
   const printedAt = formatKeyPickedUpStamp(new Date());
-  if (printedAt) draw(printedAt, 355, 420, 9);
+  if (printedAt) draw(printedAt, 355, 430, 9);
 
   // "Depo Sorumlusu / Authorized Staff" alanı bilinçli olarak boş bırakılır.
   // Top "Reserved By" signature area: only name.
-  draw(clip(ctx.studentName, 24).toUpperCase(), 305, 333, 8.5);
+  draw(clip(ctx.studentName, 24).toUpperCase(), 305, 343, 8.5);
 
   return toDataUrl(await pdfDoc.save());
 };
