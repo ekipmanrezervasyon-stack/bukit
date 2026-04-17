@@ -864,12 +864,32 @@
       return false;
     }
     function trafficCanShowReturn_(status) {
-      var s = String(status || '').trim().toLowerCase();
-      if (!s) return false;
-      if (s === 'picked_up' || s === 'checked_out' || s === 'key_out') return true;
-      if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0) return true;
-      if (s.indexOf('key_out') >= 0) return true;
-      return false;
+      var raw = String(status || '').trim().toLowerCase();
+      if (!raw) return false;
+      var s = raw
+        .replace(/[çÇ]/g, 'c')
+        .replace(/[ğĞ]/g, 'g')
+        .replace(/[ıİ]/g, 'i')
+        .replace(/[öÖ]/g, 'o')
+        .replace(/[şŞ]/g, 's')
+        .replace(/[üÜ]/g, 'u')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      // Iade karti sadece fiilen teslim edilmis kayitlarda gorunsun.
+      // pending/approved kayitlarda (ayni gun olsa bile) iade akisi acilmamali.
+      var outStatuses = {
+        checked_out: true,
+        checkedout: true,
+        picked_up: true,
+        pickedup: true,
+        key_out: true,
+        keyout: true,
+        in_use: true,
+        disarida: true,
+        kullanimda: true,
+        teslim_edildi: true
+      };
+      return outStatuses[s] === true;
     }
     function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, dayIso, qNorm) {
       var all = [];
@@ -1208,10 +1228,15 @@
           return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
         }).catch(function() { return []; });
       },
-      adminProcessPartialCheckout: function(resId) {
+      adminProcessPartialCheckout: function(resId, checks, studioHandoverNote, checkoutConditionMap) {
         return adminApiRequest('/admin/traffic/checkout', {
           method: 'POST',
-          body: { id: String(resId || '').trim() }
+          body: {
+            id: String(resId || '').trim(),
+            item_ids: Array.isArray(checks) ? checks : [],
+            studio_handover_note: String(studioHandoverNote || ''),
+            checkout_condition_map: (checkoutConditionMap && typeof checkoutConditionMap === 'object') ? checkoutConditionMap : {}
+          }
         }).then(function(res) {
           if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
           return { success: true, url: String(res.url || '') };
@@ -1259,10 +1284,15 @@
           body: { query: String(eqQuery || '').trim() }
         });
       },
-      adminTrafficPrintPdf: function(resId) {
+      adminTrafficPrintPdf: function(resId, checks, note, checkoutConditionMap) {
         return adminApiRequest('/admin/traffic/checkout', {
           method: 'POST',
-          body: { id: String(resId || '').trim() }
+          body: {
+            id: String(resId || '').trim(),
+            item_ids: Array.isArray(checks) ? checks : [],
+            studio_handover_note: String(note || ''),
+            checkout_condition_map: (checkoutConditionMap && typeof checkoutConditionMap === 'object') ? checkoutConditionMap : {}
+          }
         }).then(function(res) {
           if (!res || res.ok === false) return { success: false, error: (res && res.error) || 'Checkout failed.' };
           return { success: true, url: String(res.url || '') };
@@ -1475,7 +1505,7 @@
     var m = {};
     (itemIds || []).forEach(function(eqId) {
       var sel = document.getElementById('traffic-co-' + actId + '-' + trafficSafeDomId(eqId));
-      m[eqId] = (sel && sel.value) ? sel.value : 'Excellent';
+      if (sel && sel.value) m[eqId] = sel.value;
     });
     return m;
   }

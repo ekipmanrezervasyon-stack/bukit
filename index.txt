@@ -271,20 +271,6 @@
       </div>
     </div>
 
-    <div id="otp-sent-success-modal" class="fixed inset-0 z-[120] hidden flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="otp-sent-success-title">
-      <div class="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onclick="closeOtpSentSuccessAlert()"></div>
-      <div class="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_0_0_4px_#16a34a,0_20px_60px_rgba(0,0,0,0.35)] overflow-hidden otp-alert-pop">
-        <div class="bg-emerald-600 px-5 py-4 flex items-start gap-3">
-          <span class="text-2xl sm:text-3xl font-black text-white leading-none shrink-0" aria-hidden="true">✓</span>
-          <h2 id="otp-sent-success-title" class="text-base sm:text-xl font-black text-white leading-snug pt-0.5"></h2>
-        </div>
-        <div class="px-5 py-5 sm:px-6 sm:py-6">
-          <p id="otp-sent-success-body" class="text-sm sm:text-base text-gray-900 leading-relaxed whitespace-pre-line font-semibold"></p>
-          <button type="button" id="otp-sent-success-ok" onclick="closeOtpSentSuccessAlert()" class="mt-6 w-full bg-emerald-700 hover:bg-emerald-800 text-white font-black py-4 rounded-xl text-sm shadow-lg border-2 border-transparent focus:outline-none focus:ring-4 focus:ring-emerald-200"></button>
-        </div>
-      </div>
-    </div>
-
   </div>
   <script>
   (function () {
@@ -1248,8 +1234,6 @@
         otpAlertOk: 'OK',
         otpDomainWarnTitle: 'Wrong email domain',
         otpDomainWarnBody: 'Only these university addresses are accepted:\n\n• Students → @bilgiedu.net\n• Staff → @bilgi.edu.tr\n\nPlease correct your email and try again.',
-        otpSentSuccessTitle: 'One-time password sent',
-        otpSentSuccessBody: 'Tek kullanımlık şifreniz e-posta adresinize gönderilmiştir. Şifreniz 24 saat geçerlidir. Ulaşmadıysa lütfen Önemsiz / Junk Mail klasörünüzü kontrol edin.\n\n—\n\nYour one-time password has been sent to your email address. It is valid for 24 hours. If you do not see it, please check your Junk / Spam folder.',
         otpRegStudentTitle: 'Student email required',
         otpRegStudentBody: 'Student sign-up must use an address ending with @bilgiedu.net.\n\nPersonal addresses (Gmail, Hotmail, etc.) are not accepted.',
         otpRegStaffTitle: 'Staff email required',
@@ -1355,8 +1339,6 @@
         otpAlertOk: 'Tamam',
         otpDomainWarnTitle: 'E-posta uzantisi gecersiz',
         otpDomainWarnBody: 'Yalnizca su kurumsal adresler kabul edilir:\n\n• Ogrenciler → @bilgiedu.net\n• Personel → @bilgi.edu.tr\n\nLutfen e-postanizi duzeltip tekrar deneyin.',
-        otpSentSuccessTitle: 'Tek kullanımlık şifre gönderildi',
-        otpSentSuccessBody: 'Tek kullanımlık şifreniz e-posta adresinize gönderilmiştir. Şifreniz 24 saat geçerlidir. Ulaşmadıysa lütfen Önemsiz / Junk Mail klasörünüzü kontrol edin.\n\n—\n\nYour one-time password has been sent to your email address. It is valid for 24 hours. If you do not see it, please check your Junk / Spam folder.',
         otpRegStudentTitle: 'Ogrenci e-postasi gerekli',
         otpRegStudentBody: 'Ogrenci kaydi icin adresiniz @bilgiedu.net ile bitmelidir.\n\nGmail, Hotmail vb. kisisel adresler kabul edilmez.',
         otpRegStaffTitle: 'Personel e-postasi gerekli',
@@ -1524,15 +1506,6 @@
       var domMod = document.getElementById('otp-domain-alert-modal');
       var domOk = document.getElementById('otp-domain-alert-ok');
       if (domMod && domOk && !domMod.classList.contains('hidden')) domOk.textContent = t('otpAlertOk');
-      var sucMod = document.getElementById('otp-sent-success-modal');
-      var sucTi = document.getElementById('otp-sent-success-title');
-      var sucBo = document.getElementById('otp-sent-success-body');
-      var sucOk = document.getElementById('otp-sent-success-ok');
-      if (sucMod && !sucMod.classList.contains('hidden')) {
-        if (sucTi) sucTi.textContent = t('otpSentSuccessTitle');
-        if (sucBo) sucBo.textContent = t('otpSentSuccessBody');
-        if (sucOk) sucOk.textContent = t('otpAlertOk');
-      }
       updateEquipmentCategoryHeadline();
       try {
         if (typeof scheduleEquipmentUiRefresh_ === 'function' && document.getElementById('equipment-grid') && allEquipmentData && allEquipmentData.length) scheduleEquipmentUiRefresh_('language-change');
@@ -1793,23 +1766,6 @@
         try{ if(ok) ok.focus(); }catch(e){}
       }
     }
-    function closeOtpSentSuccessAlert(){
-      var m=document.getElementById('otp-sent-success-modal');
-      if(m) m.classList.add('hidden');
-    }
-    function showOtpSentSuccessAlert(){
-      var m=document.getElementById('otp-sent-success-modal');
-      var h=document.getElementById('otp-sent-success-title');
-      var b=document.getElementById('otp-sent-success-body');
-      var ok=document.getElementById('otp-sent-success-ok');
-      if(h) h.textContent=t('otpSentSuccessTitle');
-      if(b) b.textContent=t('otpSentSuccessBody');
-      if(ok) ok.textContent=t('otpAlertOk');
-      if(m){
-        m.classList.remove('hidden');
-        try{ if(ok) ok.focus(); }catch(e){}
-      }
-    }
     function applyAuthenticatedSession(res){
       if(!res||!res.token||!res.user) return false;
       var rememberEl=document.getElementById('otp-remember-me');
@@ -2029,7 +1985,6 @@
           } else {
             setLoginMsg('');
           }
-          showOtpSentSuccessAlert();
         }).catch(function(err){ btn.disabled=false; btn.innerText=old; setLoginMsg((err&&err.message)||t('msgOtpRequestFailed'),true); });
       });
     }
@@ -4405,28 +4360,37 @@
       var tbody=document.getElementById('bookings-active-body');
       var loansEl=document.getElementById('bookings-loans');
       var penEl=document.getElementById('bookings-penalties');
+      var extrasLoans=[];
+      var bookingLoanFallback=[];
+      function renderLoansPanel_() {
+        if(!loansEl) return;
+        var loans = extrasLoans.length ? extrasLoans : bookingLoanFallback;
+        if(!loans.length){
+          loansEl.innerHTML='<p class="text-gray-400 text-sm">No checked-out equipment on your account.</p>';
+          return;
+        }
+        loansEl.innerHTML='<ul class="space-y-3">' + loans.map(function(L){
+          var warn=L.overdue?'<span class="text-red-600 font-black ml-1" title="Overdue">⚠</span>':'';
+          var timePart=formatRemainMs(L.msLeft);
+          var ext='';
+          if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
+            ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
+          }
+          return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqDisplayId||L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
+        }).join('')+'</ul>';
+      }
       if(tbody)tbody.innerHTML='<tr><td colspan="5" class="p-6 text-center text-blue-500 text-xs animate-pulse">Loading…</td></tr>';
       if(loansEl)loansEl.innerHTML='<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
       if(penEl)penEl.innerHTML='<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
       if (typeof google !== 'undefined' && google.script && google.script.run) {
         google.script.run.withSuccessHandler(function(ex){
           applyDashboardBlockState(ex);
-          var loans=(ex&&ex.loans)||[];
+          extrasLoans=(ex&&ex.loans)||[];
           var penalties=(ex&&ex.penalties)||[];
-          if(ex&&ex.error){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">'+(ex.error)+'</p>';}
-          else if(loansEl){
-            if(!loans.length){loansEl.innerHTML='<p class="text-gray-400 text-sm">No checked-out equipment on your account.</p>';}
-            else{
-              loansEl.innerHTML='<ul class="space-y-3">' + loans.map(function(L){
-                var warn=L.overdue?'<span class="text-red-600 font-black ml-1" title="Overdue">⚠</span>':'';
-                var timePart=formatRemainMs(L.msLeft);
-                var ext='';
-                if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
-                  ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
-                }
-                return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqDisplayId||L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
-              }).join('')+'</ul>';
-            }
+          if(ex&&ex.error&&(!extrasLoans||!extrasLoans.length)&&(!bookingLoanFallback||!bookingLoanFallback.length)){
+            if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">'+(ex.error)+'</p>';
+          } else {
+            renderLoansPanel_();
           }
           if(penEl){
             var activePen=(penalties||[]).filter(function(p){return p.active;});
@@ -4440,18 +4404,43 @@
               }).join('');
             }
           }
-        }).withFailureHandler(function(){if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">Could not load loans.</p>';if(penEl)penEl.innerHTML='<p class="text-red-500 text-xs">Could not load penalties.</p>';}).getUserDashboardExtras(currentTestToken);
+        }).withFailureHandler(function(){
+          if((bookingLoanFallback||[]).length){ renderLoansPanel_(); }
+          else if(loansEl)loansEl.innerHTML='<p class="text-red-500 text-xs">Could not load loans.</p>';
+          if(penEl)penEl.innerHTML='<p class="text-red-500 text-xs">Could not load penalties.</p>';
+        }).getUserDashboardExtras(currentTestToken);
       } else {
-        if(loansEl)loansEl.innerHTML='<p class="text-gray-400 text-sm">Loan summary is unavailable in this deployment.</p>';
         if(penEl)penEl.innerHTML='<p class="text-gray-400 text-sm">Penalty summary is unavailable in this deployment.</p>';
       }
 
       apiRequest('/me/bookings', { method: 'GET' }).then(function(payload){
         var data = (payload && payload.data) ? payload.data : [];
         if(!tbody)return;
+        var nowMs = Date.now();
+        bookingLoanFallback=(data||[]).filter(function(b){
+          var st=normalizeBookingStatus_(b.status);
+          var tp=String(b.type||'').toLowerCase();
+          return tp==='equipment' && (st==='checked out' || st==='checkedout');
+        }).map(function(b){
+          var dueRaw = String(b.end || b.return || b.due || '');
+          var dueMs = dueRaw ? new Date(dueRaw).getTime() : NaN;
+          var overdue = !isNaN(dueMs) && dueMs < nowMs;
+          return {
+            name: String(b.item || b.eqName || 'Equipment'),
+            eqDisplayId: String(b.eqId || b.equipment_id || ''),
+            eqId: String(b.eqId || b.equipment_id || ''),
+            due: dueRaw,
+            overdue: overdue,
+            msLeft: isNaN(dueMs) ? null : (dueMs - nowMs),
+            resGroupId: String(b.id || ''),
+            handover: String(b.start || ''),
+            resEnd: String(b.end || '')
+          };
+        });
+        renderLoansPanel_();
         var rows=(data||[]).filter(function(b){
           var s=normalizeBookingStatus_(b.status);
-          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='rejected'||s==='returned'||s==='picked up'||s==='pickedup'||s==='completed')return false;
+          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='rejected'||s==='returned'||s==='picked up'||s==='pickedup'||s==='completed'||s==='checked out'||s==='checkedout')return false;
           return true;
         });
         if(!rows.length){tbody.innerHTML='<tr><td colspan="5" class="p-6 text-center text-gray-400 text-xs md:text-sm">No active reservations.</td></tr>';return;}

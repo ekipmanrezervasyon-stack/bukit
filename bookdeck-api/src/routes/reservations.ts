@@ -91,7 +91,10 @@ const quickCheckoutSchema = z.object({
 });
 
 const adminTrafficActionSchema = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
+  item_ids: z.array(z.string().min(1)).max(50).optional().default([]),
+  studio_handover_note: z.string().max(500).optional().default(""),
+  checkout_condition_map: z.record(z.string(), z.string().max(120)).optional().default({})
 });
 const adminTrafficExtendSchema = z.object({
   id: z.string().min(1),
@@ -130,6 +133,42 @@ const iiwSaveHoursSchema = z.object({
 const reservationIsActive = (status: string): boolean => {
   const s = String(status || "").trim().toLowerCase();
   return ACTIVE_RES_STATUSES.includes(s) && !CLOSED_RES_STATUSES.includes(s);
+};
+
+const normalizeCheckoutConditionOut = (raw: unknown): "Excellent" | "Minor Scratch" | "Missing Part" => {
+  const s = String(raw || "").trim();
+  if (s === "Excellent" || s === "Minor Scratch" || s === "Missing Part") return s;
+  const low = s.toLowerCase();
+  if (low.includes("minor") && low.includes("scratch")) return "Minor Scratch";
+  if (low.includes("missing")) return "Missing Part";
+  return "Excellent";
+};
+
+const dedupeTrimmedIds = (raw: unknown): string[] => {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    const id = String(v || "").trim();
+    if (!id) continue;
+    const k = id.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(id);
+  }
+  return out;
+};
+
+const findMappedConditionOut = (conditionMap: Record<string, string>, eqId: string): string | null => {
+  const id = String(eqId || "").trim();
+  if (!id) return null;
+  const direct = conditionMap[id];
+  if (typeof direct === "string" && direct.trim()) return normalizeCheckoutConditionOut(direct);
+  const low = conditionMap[id.toLowerCase()];
+  if (typeof low === "string" && low.trim()) return normalizeCheckoutConditionOut(low);
+  const up = conditionMap[id.toUpperCase()];
+  if (typeof up === "string" && up.trim()) return normalizeCheckoutConditionOut(up);
+  return null;
 };
 
 const hasPrivilegedStudioAccess = (role: string): boolean =>
@@ -761,47 +800,128 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const parsed = adminTrafficActionSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
+    const selectedItemIds = dedupeTrimmedIds(parsed.data.item_ids);
+    const checkoutConditionMap = parsed.data.checkout_condition_map || {};
+    const studioHandoverNote = String(parsed.data.studio_handover_note || "").trim();
+    const nowIso = new Date().toISOString();
 
     const eq = await supabaseAdmin
       .from("equipment_reservations")
       .update({
         status: "checked_out",
         reviewed_by: actor.email,
-        reviewed_at: new Date().toISOString()
+        reviewed_at: nowIso
       })
       .eq("id", id)
-      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,note")
+      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,requester_profile_id,required_level,note")
       .maybeSingle();
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
-      const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      const eqRes = eq.data as Record<string, unknown>;
+      const eqId = String(eqRes.equipment_item_id || "").trim();
+      const allItemIds = dedupeTrimmedIds([eqId, ...selectedItemIds]);
       let pdfUrl: string | null = null;
-      if (eqId) {
-        const updItem = await supabaseAdmin
-          .from("equipment_items")
-          .update({ status: "IN_USE" })
-          .eq("id", eqId)
-          .select("id,name,equipment_id,condition_out")
-          .maybeSingle();
-        if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
-        const itemRow = updItem.data as Record<string, unknown> | null;
-        console.log("NOTE_DEBUG:", JSON.stringify((eq.data as Record<string, unknown>).note));
+      if (allItemIds.length) {
+        const itemsForPdf: Array<{ name: string; code: string; conditionOut: string }> = [];
+        const reservationStartAt = String(eqRes.start_at || "");
+        const reservationEndAt = String(eqRes.end_at || "");
+        const requesterProfileId = eqRes.requester_profile_id ? String(eqRes.requester_profile_id) : null;
+        const requiredLevelRaw = Number(eqRes.required_level);
+        const requiredLevel = Number.isFinite(requiredLevelRaw) ? requiredLevelRaw : 1;
+        const reservationNote = String(eqRes.note || "");
+        const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
+        const requesterName = String(eqRes.requester_name || "");
+
+        for (const itemId of allItemIds) {
+          const patch: Record<string, unknown> = { status: "IN_USE" };
+          const condOut = findMappedConditionOut(checkoutConditionMap, itemId);
+          if (condOut) patch.condition_out = condOut;
+
+          const updItem = await supabaseAdmin
+            .from("equipment_items")
+            .update(patch)
+            .eq("id", itemId)
+            .select("id,name,equipment_id,condition_out")
+            .maybeSingle();
+          if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+          const itemRow = updItem.data as Record<string, unknown> | null;
+          if (!itemRow) {
+            return reply.code(404).send({ ok: false, error: `Equipment item not found: ${itemId}` });
+          }
+
+          if (itemId !== eqId) {
+            const existingExtra = await supabaseAdmin
+              .from("equipment_reservations")
+              .select("id,status")
+              .eq("equipment_item_id", itemId)
+              .eq("requester_email", requesterEmail)
+              .eq("start_at", reservationStartAt)
+              .eq("end_at", reservationEndAt)
+              .in("status", ACTIVE_RES_STATUSES)
+              .limit(1);
+            if (existingExtra.error) {
+              return reply.code(500).send({ ok: false, error: existingExtra.error.message });
+            }
+            if ((existingExtra.data ?? []).length === 0) {
+              const createdExtra = await supabaseAdmin
+                .from("equipment_reservations")
+                .insert({
+                  equipment_item_id: itemId,
+                  requester_profile_id: requesterProfileId,
+                  requester_email: requesterEmail,
+                  requester_name: requesterName,
+                  required_level: requiredLevel,
+                  status: "checked_out",
+                  approval_required: false,
+                  start_at: reservationStartAt,
+                  end_at: reservationEndAt,
+                  note: reservationNote,
+                  reviewed_by: String(actor.email || ""),
+                  reviewed_at: nowIso
+                })
+                .select("id")
+                .single();
+              if (createdExtra.error) {
+                return reply.code(500).send({ ok: false, error: createdExtra.error.message });
+              }
+            } else {
+              const existingId = String((existingExtra.data?.[0] as Record<string, unknown> | undefined)?.id || "").trim();
+              if (existingId) {
+                const normalizedPatch: Record<string, unknown> = {
+                  status: "checked_out",
+                  reviewed_by: String(actor.email || ""),
+                  reviewed_at: nowIso
+                };
+                const updExisting = await supabaseAdmin
+                  .from("equipment_reservations")
+                  .update(normalizedPatch)
+                  .eq("id", existingId)
+                  .select("id")
+                  .single();
+                if (updExisting.error) {
+                  return reply.code(500).send({ ok: false, error: updExisting.error.message });
+                }
+              }
+            }
+          }
+
+          itemsForPdf.push({
+            name: String(itemRow.name || ""),
+            code: String(itemRow.equipment_id || itemId),
+            conditionOut: String(itemRow.condition_out || "")
+          });
+        }
+
         try {
           pdfUrl = await generateCheckoutPdf({
             kind: "equipment",
-            reservationId: String((eq.data as Record<string, unknown>).id || id),
-            studentName: String((eq.data as Record<string, unknown>).requester_name || ""),
-            studentEmail: String((eq.data as Record<string, unknown>).requester_email || ""),
-            startAt: String((eq.data as Record<string, unknown>).start_at || ""),
-            endAt: String((eq.data as Record<string, unknown>).end_at || ""),
-            projectExplanation: String((eq.data as Record<string, unknown>).note || ""),
-            items: [
-              {
-                name: String(itemRow?.name || ""),
-                code: String(itemRow?.equipment_id || eqId),
-                conditionOut: String(itemRow?.condition_out || "")
-              }
-            ]
+            reservationId: String(eqRes.id || id),
+            studentName: requesterName,
+            studentEmail: requesterEmail,
+            startAt: reservationStartAt,
+            endAt: reservationEndAt,
+            projectExplanation: reservationNote,
+            items: itemsForPdf
           });
         } catch (e) {
           req.log.error({ err: e }, "generate equipment checkout pdf failed");
@@ -816,7 +936,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .from("studio_reservations")
       .update({
         reviewed_by: actor.email,
-        reviewed_at: new Date().toISOString()
+        reviewed_at: nowIso
       })
       .eq("id", id)
       .select("id,status,start_at,end_at,requester_name,requester_email,studio_name")
@@ -832,7 +952,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           startAt: String((st.data as Record<string, unknown>).start_at || ""),
           endAt: String((st.data as Record<string, unknown>).end_at || ""),
           studioName: String((st.data as Record<string, unknown>).studio_name || ""),
-          handoverNote: ""
+          handoverNote: studioHandoverNote
         });
         return {
           ok: true,
