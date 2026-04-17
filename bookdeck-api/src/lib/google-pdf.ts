@@ -24,6 +24,7 @@ type StudioCheckoutContext = {
   startAt: string;
   endAt: string;
   studioName: string;
+  projectName?: string;
   handoverNote: string;
 };
 
@@ -46,6 +47,28 @@ const formatDate = (iso: string): string => {
     hour: "2-digit", minute: "2-digit", hour12: false
   }).format(d);
   return tz;
+};
+
+const formatDdMmSlashHm = (dateInput: Date): string => {
+  const d = new Date(dateInput.getTime());
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(d);
+    const map: Record<string, string> = {};
+    parts.forEach((p) => {
+      map[p.type] = p.value;
+    });
+    return `${map.day || "00"}.${map.month || "00"} / ${map.hour || "00"}:${map.minute || "00"}`;
+  } catch {
+    return "";
+  }
 };
 
 const safeText = (v: string): string => String(v || "").replace(/\s+/g, " ").trim();
@@ -137,16 +160,21 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
   const draw = (text: string, x: number, y: number, size = 9) =>
     page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
 
-  // Studio form overlay (TR/GMT+3 date labels are produced by formatDate).
-  draw(formatDate(ctx.startAt), 160, 722);
-  draw(formatDate(ctx.endAt), 160, 698);
-  draw(clip(ctx.studentName, 40), 160, 675);
-  draw(clip(ctx.reservationId, 30), 160, 651, 8);
-  draw(clip(ctx.studioName || "-", 48), 160, 628, 8);
-  draw(clip(ctx.handoverNote || "-", 60), 160, 605, 8);
+  // Table rows: keep value starts aligned with the form's left value column.
+  draw(`${clip(ctx.studentName, 26)} / ${clip(ctx.reservationId, 24)}`, 148, 676, 8.5); // Booking Name / ID
+  draw(clip(ctx.studioName || "-", 48), 148, 644, 8.5); // Studio
+  draw(clip(ctx.projectName || "-", 56), 148, 612, 8.5); // Project
+  draw(clip(ctx.handoverNote || "-", 56), 148, 580, 8.5); // Condition
+  draw("-", 148, 548, 8.5); // Repeat
+  draw("-", 148, 516, 8.5); // Usage
 
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80, 140, 8);
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`, 305, 140, 8);
+  // Key picked up timestamp: print time of PDF generation (GMT+3 display format DD.MM / HH:MM).
+  const printedAt = formatDdMmSlashHm(new Date());
+  if (printedAt) draw(printedAt, 355, 349, 8.5);
+
+  // "Depo Sorumlusu / Authorized Staff" alanı bilinçli olarak boş bırakılır.
+  // Reserved by (bottom-right) alanı.
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 305, 95, 8);
 
   return toDataUrl(await pdfDoc.save());
 };

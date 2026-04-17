@@ -1659,7 +1659,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: nowIso
       })
       .eq("id", id)
-      .select("id,status,studio_id,start_at,end_at,requester_name,requester_email")
+      .select("id,status,studio_id,start_at,end_at,requester_name,requester_email,purpose")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
     if (st.data) {
@@ -1683,6 +1683,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           startAt: String(stRow.start_at || ""),
           endAt: String(stRow.end_at || ""),
           studioName: String(studioName || studioId || "Studio"),
+          projectName: String(stRow.purpose || ""),
           handoverNote: studioHandoverNote
         });
         return {
