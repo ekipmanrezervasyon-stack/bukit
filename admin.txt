@@ -303,6 +303,12 @@
           <div class="mb-4">
             <input type="text" id="traffic-search-q" oninput="renderTrafficFromCache()" class="w-full max-w-xl bg-white border border-gray-200 px-4 py-2.5 rounded-xl text-sm outline-none focus:border-[#e30613]" placeholder="Ara (genel): ad-soyad veya öğrenci no…" autocomplete="off">
           </div>
+          <div class="mb-5">
+            <div class="inline-flex w-full sm:w-auto items-center gap-2 rounded-2xl border border-gray-200 bg-white p-1">
+              <button type="button" id="traffic-tab-pickup" onclick="setTrafficViewTab('pickup')" class="px-4 py-2 rounded-xl text-xs font-black transition">Depodan Çıkış <span id="traffic-tab-pickup-count" class="ml-1">0</span></button>
+              <button type="button" id="traffic-tab-return" onclick="setTrafficViewTab('return')" class="px-4 py-2 rounded-xl text-xs font-black transition">Depoya İade <span id="traffic-tab-return-count" class="ml-1">0</span></button>
+            </div>
+          </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="traffic-container"></div>
         </div>
       </section>
@@ -656,6 +662,7 @@
   var trafficSearchMode = 'daily'; // daily | global
   var trafficGlobalQuery = '';
   var trafficSearchTimer = null;
+  var trafficViewTab = 'pickup'; // pickup | return
   var userLookupDebounceTimer = null;
   var adminIsIiwOnly = false;
   var adminIsSuper = false;
@@ -1680,6 +1687,40 @@
     return m;
   }
 
+  function trafficCountByType_(type) {
+    return (trafficAllRows || []).filter(function(x) {
+      return String(x && x.type || '').toLowerCase() === String(type || '').toLowerCase();
+    }).length;
+  }
+
+  function trafficRefreshTabUi_() {
+    var pickupBtn = document.getElementById('traffic-tab-pickup');
+    var returnBtn = document.getElementById('traffic-tab-return');
+    var pickupCountEl = document.getElementById('traffic-tab-pickup-count');
+    var returnCountEl = document.getElementById('traffic-tab-return-count');
+    var pickupCount = trafficCountByType_('pickup');
+    var returnCount = trafficCountByType_('return');
+    if (pickupCountEl) pickupCountEl.textContent = String(pickupCount);
+    if (returnCountEl) returnCountEl.textContent = String(returnCount);
+    var baseBtn = 'px-4 py-2 rounded-xl text-xs font-black transition';
+    if (pickupBtn) {
+      pickupBtn.className = baseBtn + (trafficViewTab === 'pickup'
+        ? ' bg-gray-900 text-white shadow-sm'
+        : ' bg-white text-gray-600 hover:bg-gray-50');
+    }
+    if (returnBtn) {
+      returnBtn.className = baseBtn + (trafficViewTab === 'return'
+        ? ' bg-gray-900 text-white shadow-sm'
+        : ' bg-white text-gray-600 hover:bg-gray-50');
+    }
+  }
+
+  function setTrafficViewTab(tab) {
+    trafficViewTab = String(tab || '').toLowerCase() === 'return' ? 'return' : 'pickup';
+    trafficRefreshTabUi_();
+    renderTrafficFromCache();
+  }
+
   function renderTrafficFromCache() {
     var container = document.getElementById('traffic-container');
     if (!container) return;
@@ -1695,14 +1736,24 @@
       loadTraffic();
       return;
     }
-    var data = (trafficAllRows || []).filter(function(item) { return trafficRowMatchesQuery(item, q); });
+    trafficRefreshTabUi_();
+    var filteredByQuery = (trafficAllRows || []).filter(function(item) { return trafficRowMatchesQuery(item, q); });
+    var data = filteredByQuery.filter(function(item) {
+      var t = String(item && item.type || '').toLowerCase();
+      if (trafficViewTab === 'return') return t === 'return';
+      return t === 'pickup';
+    });
     trafficMetaByResId = {};
     if (!trafficAllRows.length) {
       container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">İşlem kaydı yok.</div>';
       return;
     }
-    if (!data.length) {
+    if (!filteredByQuery.length) {
       container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">Filtreye uygun kayıt yok.</div>';
+      return;
+    }
+    if (!data.length) {
+      container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">' + (trafficViewTab === 'pickup' ? 'Depodan çıkış sekmesinde kayıt yok.' : 'Depoya iade sekmesinde kayıt yok.') + '</div>';
       return;
     }
     container.innerHTML = '';
