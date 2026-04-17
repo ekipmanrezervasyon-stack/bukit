@@ -189,20 +189,20 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
 
   // Top table rows (reference file has the grid slightly higher).
   // Move all values ~48px up to land exactly inside their labeled rows.
-  draw(bookingNameId, 220, 692, 9); // Booking Name / ID
-  draw(clip(ctx.studioName || "-", 56), 220, 669, 9); // Studio
-  draw(clip(ctx.projectName || "-", 56), 220, 645, 9); // Project
-  draw(clip(ctx.handoverNote || "-", 56).toUpperCase(), 220, 621, 9); // Condition
-  draw("TEK SEFERLIK / ONE TIME", 220, 597, 9); // Repeat
-  draw(clip(usageLine, 56), 220, 573, 9); // Usage
+  draw(bookingNameId, 229, 692, 9); // Booking Name / ID
+  draw(clip(ctx.studioName || "-", 56), 229, 669, 9); // Studio
+  draw(clip(ctx.projectName || "-", 56), 229, 645, 9); // Project
+  draw(clip(ctx.handoverNote || "-", 56).toUpperCase(), 229, 621, 9); // Condition
+  draw("TEK SEFERLIK / ONE TIME", 229, 597, 9); // Repeat
+  draw(clip(usageLine, 56), 229, 573, 9); // Usage
 
   // Key picked up timestamp: print time of PDF generation (GMT+3 display format DD.MM / HH:MM).
   const printedAt = formatKeyPickedUpStamp(new Date());
-  if (printedAt) draw(printedAt, 355, 405, 9);
+  if (printedAt) draw(printedAt, 355, 420, 9);
 
   // "Depo Sorumlusu / Authorized Staff" alanı bilinçli olarak boş bırakılır.
   // Top "Reserved By" signature area: only name.
-  draw(clip(ctx.studentName, 24).toUpperCase(), 305, 315, 8.5);
+  draw(clip(ctx.studentName, 24).toUpperCase(), 305, 333, 8.5);
 
   return toDataUrl(await pdfDoc.save());
 };
