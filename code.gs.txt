@@ -128,25 +128,27 @@ const STATUS = {
   AVAILABLE:'available', IN_USE:'in_use', RESERVED:'reserved', BROKEN:'broken', MAINTENANCE:'maintenance',
   KEY_OUT:'key_out'
 };
-const STUDIO_STATUS_CHECKED_OUT = 'checked_out';
-const STUDIO_STATUS_RETURNED = 'returned';
 
 function normalizeStudioStatusForDb_(raw) {
   var s = String(raw || '').trim().toLowerCase();
   if (!s) return s;
-  if (s === STATUS.KEY_OUT || s === 'picked up' || s === 'picked_up' || s === 'picked') return STUDIO_STATUS_CHECKED_OUT;
-  if (s === STATUS.COMPLETED) return STUDIO_STATUS_RETURNED;
+  if (s === STATUS.KEY_OUT || s === 'checked_out' || s === 'picked up' || s === 'picked_up' || s === 'picked') return STATUS.APPROVED;
+  if (s === STATUS.COMPLETED || s === 'returned') return STATUS.COMPLETED;
   return s;
 }
 
-function isStudioCheckedOutStatus_(raw) {
-  var s = normalizeStudioStatusForDb_(raw);
-  return s === STUDIO_STATUS_CHECKED_OUT;
+function isStudioPickedUpState_(row) {
+  var rawStatus = String((row && row.status) || '').trim().toLowerCase();
+  if (rawStatus === STATUS.KEY_OUT || rawStatus === 'checked_out' || rawStatus === 'picked_up' || rawStatus === 'picked up') return true;
+  var s = normalizeStudioStatusForDb_(rawStatus);
+  if (s !== STATUS.APPROVED) return false;
+  var handover = String((row && row.studio_handover_note) || '').trim();
+  return handover.length > 0;
 }
 
 function isStudioReturnedStatus_(raw) {
   var s = normalizeStudioStatusForDb_(raw);
-  return s === STUDIO_STATUS_RETURNED;
+  return s === STATUS.COMPLETED;
 }
 
 // ── PERFORMANCE CACHE HELPERS ───────────────────────────────
@@ -818,7 +820,7 @@ function lookupUserEmailById_(uid) {
 }
 
 function studioStatusesBlockingKey_() {
-  return [STATUS.PENDING, STATUS.APPROVED, STUDIO_STATUS_CHECKED_OUT, STATUS.KEY_OUT];
+  return [STATUS.PENDING, STATUS.APPROVED, STATUS.KEY_OUT];
 }
 
 function formatStudioTekrar_(row) {
@@ -3283,7 +3285,7 @@ function canonicalFromStudioSheetRow_(raw) {
     var lowL = lTekrar.toLowerCase();
     if (
       lowL !== 'pending' && lowL !== 'approved' && lowL !== 'rejected' && lowL !== 'cancelled' &&
-      lowL !== STATUS.KEY_OUT && lowL !== 'completed' && lowL !== STUDIO_STATUS_CHECKED_OUT && lowL !== STUDIO_STATUS_RETURNED
+      lowL !== STATUS.KEY_OUT && lowL !== 'completed' && lowL !== 'checked_out' && lowL !== 'returned'
     ) {
       var kpd = new Date(lTekrar);
       if (!isNaN(kpd.getTime())) key_pickup_dt = kpd.toISOString();
@@ -3295,7 +3297,7 @@ function canonicalFromStudioSheetRow_(raw) {
     var wrongL = String(raw['Tekrar Bitiş Tarihi'] || '').trim().toLowerCase();
     if (
       wrongL === 'pending' || wrongL === 'approved' || wrongL === 'rejected' || wrongL === 'cancelled' ||
-      wrongL === STATUS.KEY_OUT || wrongL === 'completed' || wrongL === STUDIO_STATUS_CHECKED_OUT || wrongL === STUDIO_STATUS_RETURNED
+      wrongL === STATUS.KEY_OUT || wrongL === 'completed' || wrongL === 'checked_out' || wrongL === 'returned'
     ) {
       status = normalizeStudioStatusForDb_(wrongL);
     } else {
@@ -6935,7 +6937,7 @@ function adminUpdateInventoryMetaBridge(itemId, payload, testToken) {
 // 🔄 GÜNCELLENMİŞ TRAFİK VE PDF MOTORU (KESİN ÇÖZÜM)
 // =================================================================
 
-/** Günlük trafik: stüdyo anahtarı teslim (approved + teslim günü) / iade (checked_out + bitiş günü). */
+/** Günlük trafik: stüdyo anahtarı teslim (approved + teslim günü) / iade (pickup tamamlanmış approved + bitiş günü). */
 function getStudioTrafficForDate_(dateStr) {
   var targetDate = new Date(dateStr).toDateString();
   var rows = toObjsStudioReservations_();
@@ -6956,7 +6958,8 @@ function getStudioTrafficForDate_(dateStr) {
     } catch (e2) {
       continue;
     }
-    if (st === STATUS.APPROVED && pickupDay === targetDate) {
+    var pickedUp = isStudioPickedUpState_(r);
+    if (st === STATUS.APPROVED && !pickedUp && pickupDay === targetDate) {
       var pdt = r.key_pickup_dt || r.start_dt;
       var uidS = String(r.user_id || '').trim();
       var emS = lookupUserEmailById_(r.user_id) || '';
@@ -6984,7 +6987,7 @@ function getStudioTrafficForDate_(dateStr) {
       });
       continue;
     }
-    if (isStudioCheckedOutStatus_(st) && endDay === targetDate) {
+    if (pickedUp && endDay === targetDate) {
       var uidR = String(r.user_id || '').trim();
       var emR = lookupUserEmailById_(r.user_id) || '';
       var phR = lookupPhoneFromDirectory_(uidR) || (emR ? lookupPhoneFromDirectory_(emR) : '');
@@ -7189,8 +7192,9 @@ function getTrafficDataByNameOrStudent(query, adminToken) {
           var rs = stRows[si];
           if (!_isPodcastStudioTrafficRow_(rs)) continue;
           var st = normalizeStudioStatusForDb_(rs.status);
-          var isPickupS = (st === STATUS.APPROVED);
-          var isReturnS = isStudioCheckedOutStatus_(st);
+          var pickedUpS = isStudioPickedUpState_(rs);
+          var isPickupS = (st === STATUS.APPROVED && !pickedUpS);
+          var isReturnS = pickedUpS;
           if (!isPickupS && !isReturnS) continue;
           var uidS = String(rs.user_id || '').trim();
           var emS = lookupUserEmailById_(uidS) || '';
@@ -7279,7 +7283,7 @@ function adminStudioProcessKeyHandover_(resId, itemIds, studioHandoverNote) {
   if (!ok) throw new Error('Anahtar seçimi eşleşmedi.');
   var pdfUrl = generateDeliveryPDF(CONFIG.STUDIO_FORM_DOC_ID, buildStudioUsageFormMergeData_(row, studioHandoverNote));
   var up = Object.assign({}, row, {
-    status: STUDIO_STATUS_CHECKED_OUT,
+    status: STATUS.APPROVED,
     studio_handover_note: studioHandoverNote,
     studio_usage_form_url: pdfUrl,
     updated_at: now()
@@ -7311,7 +7315,7 @@ function adminStudioProcessKeyReturn_(resId, itemIds, returnNote) {
     if (String(rows[i].id) === String(resId)) { row = rows[i]; break; }
   }
   if (!row) throw new Error('Kayıt bulunamadı.');
-  if (!isStudioCheckedOutStatus_(row.status)) throw new Error('Anahtar henüz teslim edilmemiş veya zaten iade alınmış.');
+  if (!isStudioPickedUpState_(row)) throw new Error('Anahtar henüz teslim edilmemiş veya zaten iade alınmış.');
   var kid = String(row.key_id || '').trim();
   var ok = false;
   var ids = itemIds || [];
@@ -7320,7 +7324,7 @@ function adminStudioProcessKeyReturn_(resId, itemIds, returnNote) {
   }
   if (!ok) throw new Error('Anahtar seçimi eşleşmedi.');
   var up = Object.assign({}, row, {
-    status: STUDIO_STATUS_RETURNED,
+    status: STATUS.COMPLETED,
     return_handover_note: returnNote,
     updated_at: now()
   });
@@ -10767,14 +10771,12 @@ function qaSmokeTestReport() {
       add('reservation columns distinct', false, e1.message || String(e1));
     }
 
-    // 2) Studio blocking statuses should include pending/approved/checked_out
+    // 2) Studio blocking statuses should include pending/approved
     try {
       var bs = (studioStatusesBlockingKey_() || []).map(function(x) { return String(x || '').toLowerCase(); });
       var hasPending = bs.indexOf('pending') >= 0;
       var hasApproved = bs.indexOf('approved') >= 0;
-      var hasCheckedOut = bs.indexOf(String(STUDIO_STATUS_CHECKED_OUT || '').toLowerCase()) >= 0 ||
-        bs.indexOf(String(STATUS.KEY_OUT || '').toLowerCase()) >= 0;
-      add('studio blocking statuses', hasPending && hasApproved && hasCheckedOut, bs.join(', '));
+      add('studio blocking statuses', hasPending && hasApproved, bs.join(', '));
     } catch (e2) {
       add('studio blocking statuses', false, e2.message || String(e2));
     }
