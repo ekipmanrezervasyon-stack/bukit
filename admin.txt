@@ -671,6 +671,62 @@
     'DUBBING': { border: 'border-amber-600', bg: 'bg-amber-50', chip: 'Dublaj' },
     'BLUE': { border: 'border-blue-600', bg: 'bg-blue-50', chip: 'Mavi stüdyo' }
   };
+  var STUDIO_NAME_BY_CANONICAL = {
+    'GREEN': 'Green Stüdyo',
+    'RED': 'Red Stüdyo',
+    'PODCAST': 'Podcast Stüdyo',
+    'DUBBING': 'Dublaj Stüdyo',
+    'BLUE': 'Blue Stüdyo'
+  };
+  var STUDIO_KEY_CODE_BY_CANONICAL = {
+    'GREEN': 'GKEY-01',
+    'RED': 'RKEY-01',
+    'PODCAST': 'PKEY-01',
+    'DUBBING': 'DKEY-01',
+    'BLUE': 'BKEY-01'
+  };
+
+  function normalizeAdmAscii_(raw) {
+    return String(raw || '')
+      .toLowerCase()
+      .replace(/[çÇ]/g, 'c')
+      .replace(/[ğĞ]/g, 'g')
+      .replace(/[ıİ]/g, 'i')
+      .replace(/[öÖ]/g, 'o')
+      .replace(/[şŞ]/g, 's')
+      .replace(/[üÜ]/g, 'u');
+  }
+
+  function normalizeStudioCanonical_(raw) {
+    var s = normalizeAdmAscii_(raw);
+    if (!s) return '';
+    if (s.indexOf('green') >= 0 || s.indexOf('gkey') >= 0 || s.indexOf('yesil') >= 0) return 'GREEN';
+    if (s.indexOf('red') >= 0 || s.indexOf('rkey') >= 0 || s.indexOf('kirmizi') >= 0) return 'RED';
+    if (s.indexOf('podcast') >= 0 || s.indexOf('pkey') >= 0) return 'PODCAST';
+    if (s.indexOf('dubbing') >= 0 || s.indexOf('dublaj') >= 0 || s.indexOf('dkey') >= 0) return 'DUBBING';
+    if (s.indexOf('blue') >= 0 || s.indexOf('bkey') >= 0 || s.indexOf('mavi') >= 0) return 'BLUE';
+    return '';
+  }
+
+  function studioNameFromCanonical_(studioCanonical) {
+    var k = String(studioCanonical || '').trim().toUpperCase();
+    return STUDIO_NAME_BY_CANONICAL[k] || '';
+  }
+
+  function studioKeyCodeFromCanonical_(studioCanonical) {
+    var k = String(studioCanonical || '').trim().toUpperCase();
+    return STUDIO_KEY_CODE_BY_CANONICAL[k] || '';
+  }
+
+  function looksLikeStudioKey_(name, type, code) {
+    var blob = normalizeAdmAscii_([name, type, code].join(' '));
+    if (!blob) return false;
+    if (/(\b|_)(gkey|rkey|pkey|dkey|bkey)[-_ ]?\d*/.test(blob)) return true;
+    if (blob.indexOf('studio key') >= 0) return true;
+    if (blob.indexOf('studyo anahtar') >= 0 || blob.indexOf('stüdyo anahtar') >= 0) return true;
+    if (blob.indexOf('anahtar') >= 0 && normalizeStudioCanonical_(blob)) return true;
+    return false;
+  }
 
   function escAdm(s) {
     if (s == null || s === undefined) return '';
@@ -704,7 +760,6 @@
     try {
       var parts = new Intl.DateTimeFormat('tr-TR', {
         timeZone: 'Europe/Istanbul',
-        year: 'numeric',
         month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
@@ -713,7 +768,7 @@
       }).formatToParts(d);
       var map = {};
       parts.forEach(function(p) { map[p.type] = p.value; });
-      return String(map.day || '00') + '.' + String(map.month || '00') + '.' + String(map.year || '0000') + ' / ' + String(map.hour || '00') + ':' + String(map.minute || '00');
+      return String(map.day || '00') + '.' + String(map.month || '00') + ' / ' + String(map.hour || '00') + ':' + String(map.minute || '00');
     } catch (_eFmt) {
       return s;
     }
@@ -891,8 +946,9 @@
       };
       return outStatuses[s] === true;
     }
-    function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, dayIso, qNorm) {
+    function buildTrafficRows_(equipmentRows, studioRows, itemMetaById, studioMetaById, dayIso, qNorm) {
       var all = [];
+      var studioMap = studioMetaById || {};
       (equipmentRows || []).forEach(function(r) {
         if (!trafficActiveStatus_(r && r.status)) return;
         var eqId = String((r && r.equipment_item_id) || '').trim();
@@ -900,17 +956,37 @@
         var prettyCode = publicEquipmentId_(meta.code, eqId);
         var prettyName = String(meta.name || '').trim();
         if (!prettyName || isUuidLike_(prettyName)) prettyName = prettyCode || 'Ekipman';
+        var studioCanonical = normalizeStudioCanonical_([
+          meta.studioKey,
+          meta.studioName,
+          meta.name,
+          meta.type,
+          meta.code,
+          (r && r.note),
+          (r && r.purpose)
+        ].join(' '));
+        var isStudioKeyRow = Boolean(meta.isStudioKey) || looksLikeStudioKey_(meta.name, meta.type, meta.code) || Boolean(studioCanonical);
+        var keyCode = studioKeyCodeFromCanonical_(studioCanonical);
+        if (!keyCode && /^[A-Z]KEY-\d+/i.test(String(prettyCode || ''))) keyCode = String(prettyCode || '').toUpperCase();
+        if (!keyCode && /^[A-Z]KEY-\d+/i.test(String(meta.code || ''))) keyCode = String(meta.code || '').toUpperCase();
+        var studioName = String(meta.studioName || '').trim() || studioNameFromCanonical_(studioCanonical) || 'Stüdyo';
         var item = {
           id: eqId,
-          name: prettyName,
+          name: isStudioKeyRow ? (keyCode || 'STUDIO KEY') : prettyName,
           eqId: eqId,
-          eqCode: prettyCode || '',
-          eqType: String(meta.type || ''),
-          isStudioKey: false
+          eqCode: isStudioKeyRow ? (keyCode || prettyCode || '') : (prettyCode || ''),
+          eqType: isStudioKeyRow ? 'studio key' : String(meta.type || ''),
+          isStudioKey: isStudioKeyRow,
+          kind: isStudioKeyRow ? 'studio_key' : 'equipment_item',
+          studioName: studioName,
+          studioId: studioCanonical
         };
         var base = {
           id: String((r && r.id) || ''),
-          trafficKind: 'equipment',
+          kind: isStudioKeyRow ? 'studio' : 'equipment',
+          trafficKind: isStudioKeyRow ? 'studio' : 'equipment',
+          studioId: isStudioKeyRow ? studioCanonical : '',
+          studioName: isStudioKeyRow ? studioName : '',
           userName: String((r && (r.requester_name || r.requester_email)) || '—'),
           email: String((r && r.requester_email) || ''),
           phone: '',
@@ -920,27 +996,43 @@
           status: String((r && r.status) || ''),
           items: [item]
         };
-        all.push(Object.assign({}, base, { type: 'pickup', time: hhmmFromIso_(base.handoverLabel) }));
+        all.push(Object.assign({}, base, { type: 'pickup', time: formatAdminCardDtTr_(base.handoverLabel) }));
         if (trafficCanShowReturn_(base.status)) {
-          all.push(Object.assign({}, base, { type: 'return', time: hhmmFromIso_(base.returnLabel) }));
+          all.push(Object.assign({}, base, { type: 'return', time: formatAdminCardDtTr_(base.returnLabel) }));
         }
       });
       (studioRows || []).forEach(function(r) {
         if (!trafficActiveStatus_(r && r.status)) return;
         var sId = String((r && r.studio_id) || '').trim();
-        var sName = String((r && (r.studio_name || r.studio_id)) || '').trim();
+        var sMeta = studioMap[sId] || studioMap[String(sId || '').toUpperCase()] || {};
+        var studioCanonical = normalizeStudioCanonical_([
+          (sMeta && sMeta.canonical),
+          sId,
+          (r && r.studio_name),
+          (sMeta && sMeta.name),
+          (sMeta && sMeta.code)
+        ].join(' '));
+        var sName = String((r && (r.studio_name || r.studio_id)) || '').trim()
+          || String((sMeta && sMeta.name) || '').trim()
+          || studioNameFromCanonical_(studioCanonical)
+          || 'Stüdyo';
+        var sKeyCode = String((sMeta && sMeta.keyCode) || '').trim() || studioKeyCodeFromCanonical_(studioCanonical);
         var sItem = {
           id: sId || String((r && r.id) || ''),
-          name: sName || sId || 'Stüdyo',
+          name: sKeyCode || 'STUDIO KEY',
           eqId: sId || String((r && r.id) || ''),
-          eqCode: sId || 'STUDIO',
-          eqType: 'studio',
-          isStudioKey: true
+          eqCode: sKeyCode || sId || 'STUDIO',
+          eqType: 'studio key',
+          isStudioKey: true,
+          kind: 'studio_key',
+          studioId: studioCanonical || sId,
+          studioName: sName
         };
         var baseSt = {
           id: String((r && r.id) || ''),
+          kind: 'studio',
           trafficKind: 'studio',
-          studioId: sId,
+          studioId: studioCanonical || sId,
           studioName: sName,
           userName: String((r && (r.requester_name || r.requester_email)) || '—'),
           email: String((r && r.requester_email) || ''),
@@ -951,9 +1043,9 @@
           status: String((r && r.status) || ''),
           items: [sItem]
         };
-        all.push(Object.assign({}, baseSt, { type: 'pickup', time: hhmmFromIso_(baseSt.handoverLabel) }));
+        all.push(Object.assign({}, baseSt, { type: 'pickup', time: formatAdminCardDtTr_(baseSt.handoverLabel) }));
         if (trafficCanShowReturn_(baseSt.status)) {
-          all.push(Object.assign({}, baseSt, { type: 'return', time: hhmmFromIso_(baseSt.returnLabel) }));
+          all.push(Object.assign({}, baseSt, { type: 'return', time: formatAdminCardDtTr_(baseSt.returnLabel) }));
         }
       });
       if (dayIso) {
@@ -1210,11 +1302,13 @@
         return Promise.all([
           adminApiRequest('/equipment-reservations', { method: 'GET' }),
           adminApiRequest('/studio-reservations', { method: 'GET' }),
-          adminApiRequest('/equipment-items', { method: 'GET' })
+          adminApiRequest('/equipment-items', { method: 'GET' }),
+          adminApiRequest('/studios', { method: 'GET' })
         ]).then(function(arr) {
           var eqRows = (arr[0] && arr[0].data) || [];
           var stRows = (arr[1] && arr[1].data) || [];
           var invRows = (arr[2] && arr[2].data) || [];
+          var studioRows = (arr[3] && arr[3].data) || [];
           var itemMetaById = {};
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
@@ -1222,13 +1316,32 @@
             var meta = {
               name: String((it && it.name) || iid),
               type: String((it && (it.category || it.type)) || ''),
-              code: String((it && (it.equipment_id || it.id)) || iid)
+              code: String((it && (it.equipment_id || it.id)) || iid),
+              isStudioKey: looksLikeStudioKey_(it && it.name, it && (it.category || it.type), it && (it.equipment_id || it.id)),
+              studioKey: normalizeStudioCanonical_([
+                (it && it.name),
+                (it && (it.category || it.type)),
+                (it && (it.equipment_id || it.id))
+              ].join(' ')),
+              studioName: ''
             };
             itemMetaById[iid] = meta;
             var publicCode = String((it && it.equipment_id) || '').trim();
             if (publicCode) itemMetaById[publicCode] = meta;
           });
-          return buildTrafficRows_(eqRows, stRows, itemMetaById, dayIso, '');
+          var studioMetaById = {};
+          (studioRows || []).forEach(function(st) {
+            var sid = String((st && st.id) || '').trim();
+            var canonical = normalizeStudioCanonical_([
+              (st && st.id),
+              (st && (st.studio_id || st.code || st.name))
+            ].join(' '));
+            var name = String((st && (st.name || st.studio_name || st.code || st.id)) || '').trim() || studioNameFromCanonical_(canonical) || 'Stüdyo';
+            var metaSt = { canonical: canonical, name: name, keyCode: studioKeyCodeFromCanonical_(canonical), code: String((st && (st.code || st.studio_id || st.id)) || '').trim() };
+            if (sid) studioMetaById[sid] = metaSt;
+            if (canonical) studioMetaById[canonical] = metaSt;
+          });
+          return buildTrafficRows_(eqRows, stRows, itemMetaById, studioMetaById, dayIso, '');
         }).catch(function() { return []; });
       },
       getTrafficDataByNameOrStudent: function(q) {
@@ -1237,11 +1350,13 @@
         return Promise.all([
           adminApiRequest('/equipment-reservations', { method: 'GET' }),
           adminApiRequest('/studio-reservations', { method: 'GET' }),
-          adminApiRequest('/equipment-items', { method: 'GET' })
+          adminApiRequest('/equipment-items', { method: 'GET' }),
+          adminApiRequest('/studios', { method: 'GET' })
         ]).then(function(arr) {
           var eqRows = (arr[0] && arr[0].data) || [];
           var stRows = (arr[1] && arr[1].data) || [];
           var invRows = (arr[2] && arr[2].data) || [];
+          var studioRows = (arr[3] && arr[3].data) || [];
           var itemMetaById = {};
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
@@ -1249,13 +1364,32 @@
             var meta = {
               name: String((it && it.name) || iid),
               type: String((it && (it.category || it.type)) || ''),
-              code: String((it && (it.equipment_id || it.id)) || iid)
+              code: String((it && (it.equipment_id || it.id)) || iid),
+              isStudioKey: looksLikeStudioKey_(it && it.name, it && (it.category || it.type), it && (it.equipment_id || it.id)),
+              studioKey: normalizeStudioCanonical_([
+                (it && it.name),
+                (it && (it.category || it.type)),
+                (it && (it.equipment_id || it.id))
+              ].join(' ')),
+              studioName: ''
             };
             itemMetaById[iid] = meta;
             var publicCode = String((it && it.equipment_id) || '').trim();
             if (publicCode) itemMetaById[publicCode] = meta;
           });
-          return buildTrafficRows_(eqRows, stRows, itemMetaById, '', qNorm);
+          var studioMetaById = {};
+          (studioRows || []).forEach(function(st) {
+            var sid = String((st && st.id) || '').trim();
+            var canonical = normalizeStudioCanonical_([
+              (st && st.id),
+              (st && (st.studio_id || st.code || st.name))
+            ].join(' '));
+            var name = String((st && (st.name || st.studio_name || st.code || st.id)) || '').trim() || studioNameFromCanonical_(canonical) || 'Stüdyo';
+            var metaSt = { canonical: canonical, name: name, keyCode: studioKeyCodeFromCanonical_(canonical), code: String((st && (st.code || st.studio_id || st.id)) || '').trim() };
+            if (sid) studioMetaById[sid] = metaSt;
+            if (canonical) studioMetaById[canonical] = metaSt;
+          });
+          return buildTrafficRows_(eqRows, stRows, itemMetaById, studioMetaById, '', qNorm);
         }).catch(function() { return []; });
       },
       adminProcessPartialCheckout: function(resId, checks, studioHandoverNote, checkoutConditionMap) {
@@ -1567,7 +1701,8 @@
     }
     container.innerHTML = '';
     data.forEach(function(item) {
-      var tKind = (item.kind === 'studio') ? 'studio' : 'equipment';
+      var kindRaw = String(item.kind || item.trafficKind || '').trim().toLowerCase();
+      var tKind = (kindRaw === 'studio' || kindRaw === 'studio_key') ? 'studio' : 'equipment';
       trafficMetaByResId[String(item.id || '')] = { kind: tKind };
       var isPickup = (item.type === 'pickup');
       var color = isPickup ? 'border-red-500' : 'border-green-500';
@@ -1607,7 +1742,7 @@
         else statusBadge = '<span class="text-gray-500 bg-gray-100 px-2 py-0.5 rounded">' + statusStr + '</span>';
         var rawVid = String(i.id || '');
         var vid = rawVid.replace(/"/g, '&quot;');
-        var isStudioKeyItem = (i.kind === 'studio_key');
+        var isStudioKeyItem = (i.kind === 'studio_key') || (tKind === 'studio');
         var showCondOut = isPickup && isCheckable && !isStudioKeyItem;
         var coBlock = '';
         if (showCondOut) {
@@ -1622,7 +1757,9 @@
             '</select></div>';
         }
         var rowName = String(i.name || '').trim();
-        if (!rowName || isUuidLike_(rowName)) rowName = 'Ekipman';
+        if (!rowName || isUuidLike_(rowName)) {
+          rowName = isStudioKeyItem ? (String(i.eqCode || '').trim() || 'STUDIO KEY') : 'Ekipman';
+        }
         var rowCode = String(i.eqCode || '').trim();
         return '<div class="rounded-lg border border-gray-100 bg-gray-50/50 p-2">' +
           '<label class="flex items-center gap-3 text-xs bg-white p-2 rounded-lg border border-gray-100 ' + (isCheckable ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50') + '">' +
@@ -1660,17 +1797,30 @@
       var studioPurposeLine = '';
       if (tKind === 'studio') {
         var stItem = (item.items && item.items.length) ? item.items[0] : null;
-        var stNameRaw = stItem && stItem.name ? String(stItem.name) : String(item.userName || '');
-        var stName = stNameRaw.split('·')[0];
-        var stKeyId = stItem && stItem.id ? String(stItem.id) : '';
+        var stCanonical = normalizeStudioCanonical_([
+          item.studioId,
+          item.studioName,
+          (stItem && stItem.studioId),
+          (stItem && stItem.studioName),
+          (stItem && stItem.eqCode),
+          (stItem && stItem.name)
+        ].join(' '));
+        var stName = String(item.studioName || (stItem && stItem.studioName) || '').trim()
+          || studioNameFromCanonical_(stCanonical)
+          || 'Stüdyo';
+        var stKeyId = String((stItem && (stItem.eqCode || stItem.name)) || '').trim();
+        if (!stKeyId || isUuidLike_(stKeyId)) stKeyId = studioKeyCodeFromCanonical_(stCanonical) || 'STUDIO KEY';
         var stFlow = isPickup ? 'Anahtar Teslimi' : 'Anahtar İadesi';
         studioKeyLine = '<p class="text-[10px] font-black text-indigo-700 mt-1.5">🎬 ' + escAdm(stName) + (stKeyId ? ' · 🔑 ' + escAdm(stKeyId) : '') + ' · ' + stFlow + '</p>';
         if (String(item.purpose || '').trim()) {
           studioPurposeLine = '<p class="text-[10px] font-bold text-gray-700 mt-1">📝 Proje: ' + escAdm(String(item.purpose || '').trim()) + '</p>';
         }
       }
-      var trafSched = (item.handoverLabel || item.returnLabel) ? '<p class="text-[9px] text-gray-500 mt-1"><span class="font-black">Teslim:</span> ' + escAdm(item.handoverLabel || '—') + ' <span class="font-black">· İade:</span> ' + escAdm(item.returnLabel || '—') + '</p>' : '';
-      container.innerHTML += '<div class="bg-gray-50 p-6 rounded-3xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-4"><div><h4 class="font-bold text-sm text-gray-900">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="text-[10px] font-black text-gray-500 bg-white px-3 py-1 rounded-md border border-gray-200">' + escAdm(item.time) + '</span></div><div class="space-y-2 mb-5" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-2" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
+      var handFmt = formatAdminCardDtTr_(item.handoverLabel || '');
+      var retFmt = formatAdminCardDtTr_(item.returnLabel || '');
+      var trafSched = (item.handoverLabel || item.returnLabel) ? '<p class="text-[9px] text-gray-500 mt-1"><span class="font-black">Teslim (GMT+3):</span> ' + escAdm(handFmt || '—') + ' <span class="font-black">· İade (GMT+3):</span> ' + escAdm(retFmt || '—') + '</p>' : '';
+      var topTime = String(item.time || '').trim() || (isPickup ? handFmt : retFmt) || '—';
+      container.innerHTML += '<div class="bg-gray-50 p-6 rounded-3xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-4"><div><h4 class="font-bold text-sm text-gray-900">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="text-[10px] font-black text-gray-500 bg-white px-3 py-1 rounded-md border border-gray-200">' + escAdm(topTime + ' GMT+3') + '</span></div><div class="space-y-2 mb-5" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-2" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
   }
