@@ -49,14 +49,15 @@ const formatDate = (iso: string): string => {
   return tz;
 };
 
-const formatDdMmSlashHm = (dateInput: Date): string => {
-  const d = new Date(dateInput.getTime());
-  if (Number.isNaN(d.getTime())) return "";
+const formatDdMmYyyyDashHm = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
   try {
     const parts = new Intl.DateTimeFormat("tr-TR", {
       timeZone: "Europe/Istanbul",
-      day: "2-digit",
+      year: "numeric",
       month: "2-digit",
+      day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false
@@ -65,7 +66,30 @@ const formatDdMmSlashHm = (dateInput: Date): string => {
     parts.forEach((p) => {
       map[p.type] = p.value;
     });
-    return `${map.day || "00"}.${map.month || "00"} / ${map.hour || "00"}:${map.minute || "00"}`;
+    return `${map.day || "00"}.${map.month || "00"}.${map.year || "0000"} - ${map.hour || "00"}:${map.minute || "00"}`;
+  } catch {
+    return iso;
+  }
+};
+
+const formatKeyPickedUpStamp = (dateInput: Date): string => {
+  const d = new Date(dateInput.getTime());
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(d);
+    const map: Record<string, string> = {};
+    parts.forEach((p) => {
+      map[p.type] = p.value;
+    });
+    return `${map.day || "00"} / ${map.month || "00"} / ${map.year || "0000"} - ${map.hour || "00"} : ${map.minute || "00"}`;
   } catch {
     return "";
   }
@@ -160,21 +184,24 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
   const draw = (text: string, x: number, y: number, size = 9) =>
     page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
 
-  // Table rows: keep value starts aligned with the form's left value column.
-  draw(`${clip(ctx.studentName, 26)} / ${clip(ctx.reservationId, 24)}`, 148, 676, 8.5); // Booking Name / ID
-  draw(clip(ctx.studioName || "-", 48), 148, 644, 8.5); // Studio
-  draw(clip(ctx.projectName || "-", 56), 148, 612, 8.5); // Project
-  draw(clip(ctx.handoverNote || "-", 56), 148, 580, 8.5); // Condition
-  draw("-", 148, 548, 8.5); // Repeat
-  draw("-", 148, 516, 8.5); // Usage
+  const bookingNameId = `${clip(ctx.studentName, 26)} / ${clip(ctx.reservationId, 20)}`;
+  const usageLine = `${clip(formatDdMmYyyyDashHm(ctx.startAt), 22)} / ${clip(formatDdMmYyyyDashHm(ctx.endAt), 22)}`;
+
+  // Top table rows (aligned to reference sample).
+  draw(bookingNameId, 220, 644, 9); // Booking Name / ID
+  draw(clip(ctx.studioName || "-", 56), 220, 621, 9); // Studio
+  draw(clip(ctx.projectName || "-", 56), 220, 597, 9); // Project
+  draw(clip(ctx.handoverNote || "-", 56).toUpperCase(), 220, 573, 9); // Condition
+  draw("TEK SEFERLIK / ONE TIME", 220, 549, 9); // Repeat
+  draw(clip(usageLine, 56), 220, 525, 9); // Usage
 
   // Key picked up timestamp: print time of PDF generation (GMT+3 display format DD.MM / HH:MM).
-  const printedAt = formatDdMmSlashHm(new Date());
-  if (printedAt) draw(printedAt, 355, 349, 8.5);
+  const printedAt = formatKeyPickedUpStamp(new Date());
+  if (printedAt) draw(printedAt, 355, 349, 9);
 
   // "Depo Sorumlusu / Authorized Staff" alanı bilinçli olarak boş bırakılır.
-  // Reserved by (bottom-right) alanı.
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 305, 95, 8);
+  // Top "Reserved By" signature area: only name.
+  draw(clip(ctx.studentName, 24).toUpperCase(), 305, 285, 8.5);
 
   return toDataUrl(await pdfDoc.save());
 };
