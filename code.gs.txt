@@ -128,6 +128,26 @@ const STATUS = {
   AVAILABLE:'available', IN_USE:'in_use', RESERVED:'reserved', BROKEN:'broken', MAINTENANCE:'maintenance',
   KEY_OUT:'key_out'
 };
+const STUDIO_STATUS_CHECKED_OUT = 'checked_out';
+const STUDIO_STATUS_RETURNED = 'returned';
+
+function normalizeStudioStatusForDb_(raw) {
+  var s = String(raw || '').trim().toLowerCase();
+  if (!s) return s;
+  if (s === STATUS.KEY_OUT || s === 'picked up' || s === 'picked_up' || s === 'picked') return STUDIO_STATUS_CHECKED_OUT;
+  if (s === STATUS.COMPLETED) return STUDIO_STATUS_RETURNED;
+  return s;
+}
+
+function isStudioCheckedOutStatus_(raw) {
+  var s = normalizeStudioStatusForDb_(raw);
+  return s === STUDIO_STATUS_CHECKED_OUT;
+}
+
+function isStudioReturnedStatus_(raw) {
+  var s = normalizeStudioStatusForDb_(raw);
+  return s === STUDIO_STATUS_RETURNED;
+}
 
 // ── PERFORMANCE CACHE HELPERS ───────────────────────────────
 function _digestHex_(input) {
@@ -798,7 +818,7 @@ function lookupUserEmailById_(uid) {
 }
 
 function studioStatusesBlockingKey_() {
-  return [STATUS.PENDING, STATUS.APPROVED, STATUS.KEY_OUT];
+  return [STATUS.PENDING, STATUS.APPROVED, STUDIO_STATUS_CHECKED_OUT, STATUS.KEY_OUT];
 }
 
 function formatStudioTekrar_(row) {
@@ -3189,7 +3209,7 @@ function canonicalFromStudioSheetRowLegacyUnderTurkishHeaders_(raw) {
   }
   var status = String(raw['Tekrar Bitiş Tarihi'] || raw.status || '').trim().toLowerCase();
   if (!status || status === 'false') status = STATUS.PENDING;
-  if (status === 'completed') status = STATUS.COMPLETED;
+  status = normalizeStudioStatusForDb_(status);
   var iw = raw['is_weekend'];
   if (iw === '' || iw == null) iw = raw.is_weekend;
   var isWeekendBool = iw === true || String(iw).toLowerCase() === 'true';
@@ -3261,7 +3281,10 @@ function canonicalFromStudioSheetRow_(raw) {
   var lTekrar = String(raw['Tekrar Bitiş Tarihi'] || '').trim();
   if (lTekrar) {
     var lowL = lTekrar.toLowerCase();
-    if (lowL !== 'pending' && lowL !== 'approved' && lowL !== 'rejected' && lowL !== 'cancelled' && lowL !== STATUS.KEY_OUT && lowL !== 'completed') {
+    if (
+      lowL !== 'pending' && lowL !== 'approved' && lowL !== 'rejected' && lowL !== 'cancelled' &&
+      lowL !== STATUS.KEY_OUT && lowL !== 'completed' && lowL !== STUDIO_STATUS_CHECKED_OUT && lowL !== STUDIO_STATUS_RETURNED
+    ) {
       var kpd = new Date(lTekrar);
       if (!isNaN(kpd.getTime())) key_pickup_dt = kpd.toISOString();
     }
@@ -3270,12 +3293,16 @@ function canonicalFromStudioSheetRow_(raw) {
   var status = String(raw.status != null && String(raw.status).trim() !== '' ? raw.status : '').trim().toLowerCase();
   if (!status) {
     var wrongL = String(raw['Tekrar Bitiş Tarihi'] || '').trim().toLowerCase();
-    if (wrongL === 'pending' || wrongL === 'approved' || wrongL === 'rejected' || wrongL === 'cancelled' || wrongL === STATUS.KEY_OUT || wrongL === 'completed') {
-      status = wrongL === 'completed' ? STATUS.COMPLETED : wrongL;
+    if (
+      wrongL === 'pending' || wrongL === 'approved' || wrongL === 'rejected' || wrongL === 'cancelled' ||
+      wrongL === STATUS.KEY_OUT || wrongL === 'completed' || wrongL === STUDIO_STATUS_CHECKED_OUT || wrongL === STUDIO_STATUS_RETURNED
+    ) {
+      status = normalizeStudioStatusForDb_(wrongL);
     } else {
       status = STATUS.PENDING;
     }
   }
+  status = normalizeStudioStatusForDb_(status);
 
   var iw = raw['is_weekend'];
   if (iw === '' || iw == null) iw = raw.is_weekend;
@@ -4380,7 +4407,7 @@ function supabaseMirrorStudioRowPayload_(row) {
     pdf_url: r.pdf_url != null ? String(r.pdf_url) : null,
     key_id: r.key_id != null ? String(r.key_id) : null,
     key_pickup_dt: supabaseMirrorStudioIso_(r.key_pickup_dt),
-    status: r.status != null ? String(r.status) : null,
+    status: r.status != null ? normalizeStudioStatusForDb_(String(r.status)) : null,
     approved_by: r.approved_by != null ? String(r.approved_by) : null,
     approved_at: supabaseMirrorStudioIso_(r.approved_at),
     rejected_reason: r.rejected_reason != null ? String(r.rejected_reason) : null,
@@ -6908,15 +6935,15 @@ function adminUpdateInventoryMetaBridge(itemId, payload, testToken) {
 // 🔄 GÜNCELLENMİŞ TRAFİK VE PDF MOTORU (KESİN ÇÖZÜM)
 // =================================================================
 
-/** Günlük trafik: stüdyo anahtarı teslim (approved + teslim günü) / iade (key_out + bitiş günü). */
+/** Günlük trafik: stüdyo anahtarı teslim (approved + teslim günü) / iade (checked_out + bitiş günü). */
 function getStudioTrafficForDate_(dateStr) {
   var targetDate = new Date(dateStr).toDateString();
   var rows = toObjsStudioReservations_();
   var out = [];
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    var st = String(r.status || '').toLowerCase();
-    if (st === STATUS.CANCELLED || st === STATUS.REJECTED || st === STATUS.PENDING || st === STATUS.COMPLETED) continue;
+    var st = normalizeStudioStatusForDb_(r.status);
+    if (st === STATUS.CANCELLED || st === STATUS.REJECTED || st === STATUS.PENDING || isStudioReturnedStatus_(st)) continue;
     var pickupDay;
     try {
       pickupDay = r.key_pickup_dt ? new Date(r.key_pickup_dt).toDateString() : new Date(r.start_dt).toDateString();
@@ -6957,7 +6984,7 @@ function getStudioTrafficForDate_(dateStr) {
       });
       continue;
     }
-    if (st === STATUS.KEY_OUT && endDay === targetDate) {
+    if (isStudioCheckedOutStatus_(st) && endDay === targetDate) {
       var uidR = String(r.user_id || '').trim();
       var emR = lookupUserEmailById_(r.user_id) || '';
       var phR = lookupPhoneFromDirectory_(uidR) || (emR ? lookupPhoneFromDirectory_(emR) : '');
@@ -7161,9 +7188,9 @@ function getTrafficDataByNameOrStudent(query, adminToken) {
         for (var si = 0; si < stRows.length; si++) {
           var rs = stRows[si];
           if (!_isPodcastStudioTrafficRow_(rs)) continue;
-          var st = String(rs.status || '').toLowerCase();
+          var st = normalizeStudioStatusForDb_(rs.status);
           var isPickupS = (st === STATUS.APPROVED);
-          var isReturnS = (st === STATUS.KEY_OUT);
+          var isReturnS = isStudioCheckedOutStatus_(st);
           if (!isPickupS && !isReturnS) continue;
           var uidS = String(rs.user_id || '').trim();
           var emS = lookupUserEmailById_(uidS) || '';
@@ -7252,7 +7279,7 @@ function adminStudioProcessKeyHandover_(resId, itemIds, studioHandoverNote) {
   if (!ok) throw new Error('Anahtar seçimi eşleşmedi.');
   var pdfUrl = generateDeliveryPDF(CONFIG.STUDIO_FORM_DOC_ID, buildStudioUsageFormMergeData_(row, studioHandoverNote));
   var up = Object.assign({}, row, {
-    status: STATUS.KEY_OUT,
+    status: STUDIO_STATUS_CHECKED_OUT,
     studio_handover_note: studioHandoverNote,
     studio_usage_form_url: pdfUrl,
     updated_at: now()
@@ -7284,7 +7311,7 @@ function adminStudioProcessKeyReturn_(resId, itemIds, returnNote) {
     if (String(rows[i].id) === String(resId)) { row = rows[i]; break; }
   }
   if (!row) throw new Error('Kayıt bulunamadı.');
-  if (String(row.status).toLowerCase() !== STATUS.KEY_OUT) throw new Error('Anahtar henüz teslim edilmemiş veya zaten iade alınmış.');
+  if (!isStudioCheckedOutStatus_(row.status)) throw new Error('Anahtar henüz teslim edilmemiş veya zaten iade alınmış.');
   var kid = String(row.key_id || '').trim();
   var ok = false;
   var ids = itemIds || [];
@@ -7293,7 +7320,7 @@ function adminStudioProcessKeyReturn_(resId, itemIds, returnNote) {
   }
   if (!ok) throw new Error('Anahtar seçimi eşleşmedi.');
   var up = Object.assign({}, row, {
-    status: STATUS.COMPLETED,
+    status: STUDIO_STATUS_RETURNED,
     return_handover_note: returnNote,
     updated_at: now()
   });
@@ -10740,13 +10767,14 @@ function qaSmokeTestReport() {
       add('reservation columns distinct', false, e1.message || String(e1));
     }
 
-    // 2) Studio blocking statuses should include pending/approved/key_out
+    // 2) Studio blocking statuses should include pending/approved/checked_out
     try {
       var bs = (studioStatusesBlockingKey_() || []).map(function(x) { return String(x || '').toLowerCase(); });
       var hasPending = bs.indexOf('pending') >= 0;
       var hasApproved = bs.indexOf('approved') >= 0;
-      var hasKeyOut = bs.indexOf(String(STATUS.KEY_OUT || '').toLowerCase()) >= 0;
-      add('studio blocking statuses', hasPending && hasApproved && hasKeyOut, bs.join(', '));
+      var hasCheckedOut = bs.indexOf(String(STUDIO_STATUS_CHECKED_OUT || '').toLowerCase()) >= 0 ||
+        bs.indexOf(String(STATUS.KEY_OUT || '').toLowerCase()) >= 0;
+      add('studio blocking statuses', hasPending && hasApproved && hasCheckedOut, bs.join(', '));
     } catch (e2) {
       add('studio blocking statuses', false, e2.message || String(e2));
     }
