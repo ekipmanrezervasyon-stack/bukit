@@ -3352,14 +3352,11 @@
         var d0 = detailsSorted.length ? detailsSorted[0] : { equipment_id: String(item.id || ''), name: String(item.name || ''), status: String(item.status || ''), returnDate: String(item.returnDate || ''), returnDateMs: null, conditionIn: '–', photo: String(imgSrc || '') };
         var idStr = String(d0.equipment_code != null && d0.equipment_code !== '' ? d0.equipment_code : (d0.equipment_id == null ? '' : d0.equipment_id));
         var dAvail = __eqUnitAvailable(d0);
-        var preferredBookId = (Array.isArray(item.availableIds) && item.availableIds.length) ? String(item.availableIds[0]) : idStr;
-        var effectiveCartId = dAvail ? preferredBookId : idStr;
+        var preferredBookId = (Array.isArray(item.availableIds) && item.availableIds.length) ? String(item.availableIds[0]) : '';
+        if (!preferredBookId && dAvail) preferredBookId = idStr;
+        var effectiveCartId = preferredBookId || idStr;
         var inCartRow = eqCart.some(function(x) { return String(x).trim().toUpperCase() === String(effectiveCartId).trim().toUpperCase(); });
         var needDatesRow = !hasRange && !inCartRow;
-        var canAddRow = inCartRow || (hasRange && dAvail);
-        var grpDisabled = !canAddRow && !inCartRow && !needDatesRow;
-        var stx = String(d0.status || '').toUpperCase();
-        var dInUse = (stx === 'IN_USE' || stx === 'IN USE' || stx === 'KULLANIMDA' || stx === 'DIŞARIDA' || stx === 'DISARIDA' || stx === 'TAKEN' || stx === 'OVERDUE');
         var condLine = hideUseDetails ? '' : '<p class="text-[9px] text-gray-400">' + (currentLang === 'tr' ? 'Giriş' : 'Condition') + ': ' + escHtml(d0.conditionIn || '–') + '</p>';
         var retRaw = String(d0.returnDate == null ? '' : d0.returnDate).trim();
         var retMeaningful = retRaw && retRaw !== '–' && retRaw !== '-' && retRaw !== '—';
@@ -3399,60 +3396,25 @@
             firstReturn = '<p class="text-base md:text-lg font-black text-rose-700 mt-2">First Return: ' + escHtml(fr) + '</p>';
           }
         }
-        var btnClass = inCartRow
-          ? 'font-bold py-3 rounded-xl text-xs transition bg-gray-800 text-white hover:bg-gray-900 flex items-center justify-center min-h-[44px]'
-          : (needDatesRow
-            ? 'font-bold py-3 rounded-xl text-xs transition bg-gray-300 text-white cursor-not-allowed flex items-center justify-center min-h-[44px]'
-            : 'font-bold py-3 rounded-xl text-xs transition bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center min-h-[44px]');
-        var bt = inCartRow
-          ? (currentLang === 'tr' ? 'Çıkar' : 'Remove')
-          : (needDatesRow ? 'First Pick Date' : (currentLang === 'tr' ? 'REZERVE ET' : 'BOOK IT'));
         var actionBtn = '';
-        if (!hasPhysicalAvailable && !isCheckingRange && (item.notifyGroupKey || item.groupKey)) {
+        var cartIdJs = String(effectiveCartId || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        if (hasPhysicalAvailable) {
+          if (inCartRow && effectiveCartId) {
+            actionBtn = '<button type="button" onclick="if(window.toggleCart){window.toggleCart(\'' + cartIdJs + '\', this);}" class="w-full min-w-[130px] font-bold py-3 rounded-xl text-xs bg-gray-800 text-white hover:bg-gray-900 transition shadow-sm tap-highlight-transparent min-h-[44px]">' + escHtml(currentLang === 'tr' ? 'Çıkar' : 'Remove') + '</button>';
+          } else if (!hasRange) {
+            actionBtn = '<button type="button" onclick="if(window.jumpToPickupDateSelection){window.jumpToPickupDateSelection();}" class="w-full min-w-[130px] font-bold py-3 rounded-xl text-xs bg-gray-300 text-white hover:bg-gray-400 transition shadow-sm tap-highlight-transparent min-h-[44px]">First Pick Date</button>';
+          } else if (isCheckingRange || !rangeReady) {
+            actionBtn = '<div class="w-full min-w-[130px] shrink-0 font-bold py-3 rounded-xl text-xs text-center bg-gray-100 text-gray-600 min-h-[44px] flex items-center justify-center">' + (currentLang === 'tr' ? 'Kontrol ediliyor…' : 'Checking…') + '</div>';
+          } else if (effectiveCartId) {
+            actionBtn = '<button type="button" onclick="if(window.toggleCart){window.toggleCart(\'' + cartIdJs + '\', this);}" class="w-full min-w-[130px] font-bold py-3 rounded-xl text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-sm tap-highlight-transparent min-h-[44px]">' + escHtml(currentLang === 'tr' ? 'REZERVE ET' : 'BOOK IT') + '</button>';
+          } else {
+            actionBtn = '<div class="w-full min-w-[130px] shrink-0 font-bold py-3 rounded-xl text-xs text-center bg-gray-100 text-gray-600 min-h-[44px] flex items-center justify-center">' + (currentLang === 'tr' ? 'Uygun ünite yok' : 'No available unit') + '</div>';
+          }
+        } else if (!isCheckingRange && (item.notifyGroupKey || item.groupKey)) {
           actionBtn = '<button type="button" class="eq-notify-btn w-full min-w-[130px] font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-1 bg-red-600 text-white hover:bg-red-700 active:scale-[0.98] transition shadow-sm tap-highlight-transparent min-h-[44px]" data-group-key="' + escAttr(String(item.notifyGroupKey || item.groupKey)) + '" data-notify-label="' + escAttr(String(item.typeLabel || item.name || d0.name || '').slice(0, 140)) + '">✉️ ' + escHtml(t('notifyMe')) + '</button>';
         } else {
-          actionBtn = '<div class="w-full min-w-[130px] shrink-0 font-bold py-3 rounded-xl text-xs text-center bg-gray-100 text-gray-600 min-h-[44px] flex items-center justify-center">' + (isCheckingRange ? (currentLang === 'tr' ? 'Kontrol ediliyor…' : 'Checking…') : (currentLang === 'tr' ? 'Aşağıdan ünite seçin' : 'Select unit below')) + '</div>';
+          actionBtn = '<div class="w-full min-w-[130px] shrink-0 font-bold py-3 rounded-xl text-xs text-center bg-gray-100 text-gray-600 min-h-[44px] flex items-center justify-center">' + (currentLang === 'tr' ? 'Kontrol ediliyor…' : 'Checking…') + '</div>';
         }
-        var unitRowsHtml = detailsSorted.map(function(du){
-          var uid = String(du.equipment_id || '').trim();
-          var uidDisplay = String((du && (du.equipment_code || du.equipment_id)) || '').trim();
-          if (!uid) return '';
-          var uidJs = uid.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-          var inCartU = eqCart.some(function(x){ return String(x).trim().toUpperCase() === uid.toUpperCase(); });
-          var availPhysicalU = __eqUnitAvailable(du);
-          var availU = availPhysicalU;
-          var sU = String(du.status || '');
-          var rtU = String(du.returnDate || '').trim();
-          var bTxt = inCartU ? (currentLang === 'tr' ? 'Çıkar' : 'Remove') : (hasRange ? (currentLang === 'tr' ? 'REZERVE ET' : 'BOOK IT') : 'First Pick Date');
-          if (!inCartU && hasRange && !rangeReady) bTxt = (currentLang === 'tr' ? 'Kontrol…' : 'Checking…');
-          var bCls = inCartU
-            ? 'bg-gray-800 text-white hover:bg-gray-900'
-            : (!hasRange ? 'bg-gray-300 text-white cursor-pointer' : ((availU && rangeReady) ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'));
-          var bDisabled = (!inCartU && hasRange && !availU) ? 'disabled' : '';
-          var clickU = !hasRange
-            ? "if(window.jumpToPickupDateSelection){window.jumpToPickupDateSelection();}"
-            : ("if(window.toggleCart){window.toggleCart('" + uidJs + "', this);}");
-          var unitActionHtml = '';
-          if (!inCartU && isCheckingRange) {
-            unitActionHtml = '<div class="px-3 py-2 rounded-lg text-[10px] font-bold bg-gray-200 text-gray-500 cursor-wait">' + (currentLang === 'tr' ? 'Kontrol…' : 'Checking…') + '</div>';
-          } else if (!inCartU && !availPhysicalU) {
-            var nKeyU = String(item.notifyGroupKey || item.groupKey || '').trim();
-            if (nKeyU) {
-              unitActionHtml = '<button type="button" class="eq-notify-btn px-3 py-2 rounded-lg text-[10px] font-bold transition bg-red-600 text-white hover:bg-red-700 active:scale-[0.98]" data-group-key="' + escAttr(nKeyU) + '" data-notify-label="' + escAttr(String(du.name || item.typeLabel || item.name || uid).slice(0, 140)) + '">✉️ ' + escHtml(t('notifyMe')) + '</button>';
-            } else {
-              unitActionHtml = '<div class="px-3 py-2 rounded-lg text-[10px] font-bold bg-gray-200 text-gray-500 cursor-not-allowed">' + escHtml(t('notifyMe')) + '</div>';
-            }
-          } else {
-            unitActionHtml = '<button type="button" ' + bDisabled + ' onclick="' + clickU + '" class="eq-cart-add-btn px-3 py-2 rounded-lg text-[10px] font-bold transition ' + bCls + '">' + escHtml(bTxt) + '</button>';
-          }
-          return '<div class="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-white">' +
-            '<div class="flex-1 min-w-0">' +
-            '<p class="text-[10px] font-mono font-black text-gray-800">' + escHtml(uidDisplay || uid) + '</p>' +
-            '<p class="text-[9px] text-gray-500">' + escHtml(sU || '—') + (rtU ? (' · ' + escHtml(rtU)) : '') + '</p>' +
-            '</div>' +
-            unitActionHtml +
-            '</div>';
-        }).join('');
         var cardHtml = '<div id="' + detailKey + '" class="min-w-0 bg-white rounded-xl md:rounded-2xl shadow-sm border border-gray-100 overflow-hidden ' + (!isA ? 'opacity-90' : '') + '">' +
           '<div class="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-gray-50">' +
           sumImg +
@@ -3468,10 +3430,6 @@
           '<p class="text-[9px] md:text-[11px] font-semibold text-gray-600 mt-1.5 leading-snug">' + statusLine + '</p>' +
           '</div>' +
           '<div class="shrink-0 w-[130px] md:w-[150px]">' + actionBtn + '</div>' +
-          '</div>' +
-          '<div class="px-3 pb-3 md:px-4 md:pb-4">' +
-          '<p class="text-[9px] font-black text-gray-400 uppercase mb-1.5">' + (currentLang === 'tr' ? 'Ünite seçimi' : 'Unit selection') + '</p>' +
-          '<div class="space-y-1.5">' + unitRowsHtml + '</div>' +
           '</div>' +
           '</div>';
         var sectionLabel = equipmentTypeSectionLabel(item);
