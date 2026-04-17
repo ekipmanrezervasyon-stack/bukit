@@ -30,7 +30,8 @@ type StudioCheckoutContext = {
 type CheckoutContext = EquipmentCheckoutContext | StudioCheckoutContext;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TEMPLATE_PATH = resolve(__dirname, "../../assets/Equipment Handover Form.pdf");
+const DEFAULT_EQUIPMENT_TEMPLATE_PATH = resolve(__dirname, "../../assets/Equipment Handover Form.pdf");
+const DEFAULT_STUDIO_TEMPLATE_PATH = resolve(__dirname, "../../assets/Studio Usage Form.pdf");
 const DEFAULT_UNICODE_FONT_PATH = resolve(
   __dirname,
   "../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf"
@@ -64,10 +65,10 @@ const loadOverlayFont = async (pdfDoc: LibPdfDocument) => {
   }
 };
 
-const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<string | null> => {
+const generateEquipmentFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<string | null> => {
   let bytes: Uint8Array;
   try {
-    bytes = await fs.readFile(DEFAULT_TEMPLATE_PATH);
+    bytes = await fs.readFile(DEFAULT_EQUIPMENT_TEMPLATE_PATH);
   } catch {
     return null;
   }
@@ -119,9 +120,43 @@ const generateFromTemplate = async (ctx: EquipmentCheckoutContext): Promise<stri
   return toDataUrl(await pdfDoc.save());
 };
 
+const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<string | null> => {
+  let bytes: Uint8Array;
+  try {
+    bytes = await fs.readFile(DEFAULT_STUDIO_TEMPLATE_PATH);
+  } catch {
+    return null;
+  }
+
+  const pdfDoc = await LibPdfDocument.load(bytes);
+  pdfDoc.registerFontkit(fontkit);
+  const page = pdfDoc.getPages()[0];
+  if (!page) return null;
+  const font = await loadOverlayFont(pdfDoc);
+
+  const draw = (text: string, x: number, y: number, size = 9) =>
+    page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
+
+  // Studio form overlay (TR/GMT+3 date labels are produced by formatDate).
+  draw(formatDate(ctx.startAt), 160, 722);
+  draw(formatDate(ctx.endAt), 160, 698);
+  draw(clip(ctx.studentName, 40), 160, 675);
+  draw(clip(ctx.reservationId, 30), 160, 651, 8);
+  draw(clip(ctx.studioName || "-", 48), 160, 628, 8);
+  draw(clip(ctx.handoverNote || "-", 60), 160, 605, 8);
+
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80, 140, 8);
+  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`, 305, 140, 8);
+
+  return toDataUrl(await pdfDoc.save());
+};
+
 export const generateCheckoutPdf = async (ctx: CheckoutContext): Promise<string | null> => {
   if (ctx.kind === "equipment") {
-    const result = await generateFromTemplate(ctx);
+    const result = await generateEquipmentFromTemplate(ctx);
+    if (result) return result;
+  } else {
+    const result = await generateStudioFromTemplate(ctx);
     if (result) return result;
   }
 
