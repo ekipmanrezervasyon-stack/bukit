@@ -1438,7 +1438,7 @@
       h += '<optgroup label="Ekipman (Condition In)">';
       h += '<option value="Excellent">Excellent</option>';
       h += '<option value="Minor Scratch">Minor Scratch</option>';
-      h += '<option value="Damaged">Damaged</option>';
+      h += '<option value="DAMAGED">DAMAGED</option>';
       h += '</optgroup>';
     }
     if (isStudio) {
@@ -1618,6 +1618,7 @@
             '<option value="Excellent" selected>Excellent</option>' +
             '<option value="Minor Scratch">Minor Scratch</option>' +
             '<option value="Missing Part">Missing Part</option>' +
+            '<option value="DAMAGED">DAMAGED</option>' +
             '</select></div>';
         }
         var rowName = String(i.name || '').trim();
@@ -2269,7 +2270,7 @@
               '<option value="">Condition In (boş)</option>' +
               '<option value="Excellent"' + ((String(data.conditionIn || '').trim() === 'Excellent') ? ' selected' : '') + '>Excellent</option>' +
               '<option value="Minor Scratch"' + ((String(data.conditionIn || '').trim() === 'Minor Scratch') ? ' selected' : '') + '>Minor Scratch</option>' +
-              '<option value="Damaged"' + ((String(data.conditionIn || '').trim() === 'Damaged') ? ' selected' : '') + '>Damaged</option>' +
+              '<option value="DAMAGED"' + ((String(data.conditionIn || '').trim().toUpperCase() === 'DAMAGED') ? ' selected' : '') + '>DAMAGED</option>' +
             '</select>' +
             '<select id="inv-edit-status" class="w-full text-xs border rounded-lg p-2">' +
               '<option value="">Status (değiştirme)</option>' +
@@ -2277,6 +2278,7 @@
               '<option value="IN_USE"' + ((String(data.status || '').toUpperCase() === 'IN_USE') ? ' selected' : '') + '>IN_USE</option>' +
               '<option value="BROKEN"' + ((String(data.status || '').toUpperCase() === 'BROKEN') ? ' selected' : '') + '>BROKEN</option>' +
               '<option value="MAINTENANCE"' + ((String(data.status || '').toUpperCase() === 'MAINTENANCE') ? ' selected' : '') + '>MAINTENANCE</option>' +
+              '<option value="MAINTANENCE"' + ((String(data.status || '').toUpperCase() === 'MAINTANENCE') ? ' selected' : '') + '>MAINTANENCE</option>' +
             '</select>' +
             '<button type="button" onclick="saveInvMetaChanges()" class="w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Kaydet</button>' +
             '<p id="inv-edit-result" class="text-[10px] text-gray-600"></p>' +
@@ -2676,10 +2678,13 @@
   function trafficNormalizeConditionOut_(v) {
     var s = String(v || '').trim();
     if (!s) return 'Excellent';
-    if (s === 'Excellent' || s === 'Minor Scratch' || s === 'Missing Part') return s;
+    if (s === 'Excellent' || s === 'Minor Scratch' || s === 'Missing Part' || s === 'DAMAGED' || s === 'Damaged') {
+      return (s === 'Damaged') ? 'DAMAGED' : s;
+    }
     var low = s.toLowerCase();
     if (low.indexOf('minor') >= 0 && low.indexOf('scratch') >= 0) return 'Minor Scratch';
     if (low.indexOf('missing') >= 0) return 'Missing Part';
+    if (low.indexOf('damage') >= 0 || low.indexOf('hasar') >= 0) return 'DAMAGED';
     return 'Excellent';
   }
 
@@ -2739,6 +2744,7 @@
         '<option value="Excellent"' + (condSel === 'Excellent' ? ' selected' : '') + '>Excellent</option>' +
         '<option value="Minor Scratch"' + (condSel === 'Minor Scratch' ? ' selected' : '') + '>Minor Scratch</option>' +
         '<option value="Missing Part"' + (condSel === 'Missing Part' ? ' selected' : '') + '>Missing Part</option>' +
+        '<option value="DAMAGED"' + (condSel === 'DAMAGED' ? ' selected' : '') + '>DAMAGED</option>' +
         '</select></div>' +
         '<div class="pl-7 pt-1"><button type="button" onclick="trafficRemoveExtraItem(\'' + ridJs + '\',\'' + idJs + '\')" class="text-red-600 text-[10px] font-black px-1">Çıkar</button></div>' +
         '</div>';

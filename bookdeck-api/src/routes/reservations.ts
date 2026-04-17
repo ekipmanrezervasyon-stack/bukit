@@ -71,7 +71,7 @@ const inventoryMetaSchema = z.object({
   location: z.string().max(190).optional(),
   responsible: z.string().max(190).optional(),
   condition_in: z.string().max(120).optional(),
-  status: z.enum(["AVAILABLE", "IN_USE", "BROKEN", "MAINTENANCE"]).optional()
+  status: z.enum(["AVAILABLE", "IN_USE", "BROKEN", "MAINTENANCE", "MAINTANENCE"]).optional()
 });
 
 const ticketDecisionSchema = z.object({
@@ -141,12 +141,15 @@ const reservationIsActive = (status: string): boolean => {
   return ACTIVE_RES_STATUSES.includes(s) && !CLOSED_RES_STATUSES.includes(s);
 };
 
-const normalizeCheckoutConditionOut = (raw: unknown): "Excellent" | "Minor Scratch" | "Missing Part" => {
+const normalizeCheckoutConditionOut = (raw: unknown): "Excellent" | "Minor Scratch" | "Missing Part" | "DAMAGED" => {
   const s = String(raw || "").trim();
-  if (s === "Excellent" || s === "Minor Scratch" || s === "Missing Part") return s;
+  if (s === "Excellent" || s === "Minor Scratch" || s === "Missing Part" || s === "DAMAGED" || s === "Damaged") {
+    return s.toUpperCase() === "DAMAGED" || s === "Damaged" ? "DAMAGED" : (s as "Excellent" | "Minor Scratch" | "Missing Part");
+  }
   const low = s.toLowerCase();
   if (low.includes("minor") && low.includes("scratch")) return "Minor Scratch";
   if (low.includes("missing")) return "Missing Part";
+  if (low.includes("damage") || low.includes("hasar")) return "DAMAGED";
   return "Excellent";
 };
 
@@ -312,6 +315,7 @@ const normalizeInvStatusEnglish = (status: string): string => {
   const s = String(status || "").trim().toUpperCase();
   if (s === "AVAILABLE" || s === "MUSAIT" || s === "MÜSAİT" || s === "UYGUN") return "Available";
   if (s === "IN_USE" || s === "IN USE" || s === "KULLANIMDA" || s === "DISARIDA" || s === "DIŞARIDA") return "In Use";
+  if (s === "MAINTENANCE" || s === "MAINTANENCE") return "Maintenance";
   if (s.includes("DAMAGE") || s === "BOZUK" || s === "HASARLI" || s === "BROKEN") return "Damaged";
   return status || "Unknown";
 };
