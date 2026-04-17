@@ -931,6 +931,110 @@ const sendEquipmentAvailableNotifyEmail = async (
   }
 };
 
+const parsePdfDataUrl = (raw: string): { mimeType: string; base64: string } | null => {
+  const value = String(raw || "").trim();
+  if (!value) return null;
+  const match = value.match(/^data:(application\/pdf)(?:;[^,]*)?;base64,([\s\S]+)$/i);
+  if (!match) return null;
+  const mimeType = String(match[1] || "application/pdf").toLowerCase();
+  const base64 = String(match[2] || "").replace(/\s+/g, "");
+  if (!base64) return null;
+  return { mimeType, base64 };
+};
+
+const formatMailDateTimeTR = (iso: string): string => {
+  const ms = new Date(String(iso || "")).getTime();
+  if (Number.isNaN(ms)) return String(iso || "");
+  return new Date(ms).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+};
+
+const sendCheckoutPdfAttachmentEmail = async (
+  toEmail: string,
+  payload: {
+    kind: "equipment" | "studio";
+    reservationId: string;
+    studentName: string;
+    startAt: string;
+    endAt: string;
+    pdfDataUrl: string;
+    studioName?: string;
+  }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Checkout PDF mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const pdf = parsePdfDataUrl(payload.pdfDataUrl);
+  if (!pdf) {
+    throw new Error("Checkout PDF is not a valid base64 data URL.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const startLabel = formatMailDateTimeTR(payload.startAt);
+  const endLabel = formatMailDateTimeTR(payload.endAt);
+  const reservationId = String(payload.reservationId || "").trim();
+  const studentName = String(payload.studentName || "").trim();
+  const scopeLabelTr = payload.kind === "studio" ? "Stüdyo kullanım" : "Ekipman teslim";
+  const scopeLabelEn = payload.kind === "studio" ? "Studio usage" : "Equipment handover";
+  const studioLine = payload.kind === "studio" && payload.studioName
+    ? `<p><strong>Stüdyo / Studio:</strong> ${escapeHtml(String(payload.studioName || ""))}</p>`
+    : "";
+  const safeId = (reservationId || "reservation").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "reservation";
+  const filename = payload.kind === "studio"
+    ? `studio-usage-form-${safeId}.pdf`
+    : `equipment-handover-form-${safeId}.pdf`;
+  const subject = `[${appName}] ${scopeLabelTr} formu / ${scopeLabelEn} form`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba${studentName ? ` ${escapeHtml(studentName)}` : ""},</p>
+      <p>Rezervasyonunuz için ${scopeLabelTr.toLowerCase()} PDF formu ektedir.</p>
+      <p><strong>Rezervasyon ID:</strong> ${escapeHtml(reservationId || "-")}</p>
+      <p><strong>Teslim:</strong> ${escapeHtml(startLabel)}<br><strong>İade:</strong> ${escapeHtml(endLabel)}</p>
+      ${studioLine}
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello${studentName ? ` ${escapeHtml(studentName)}` : ""},</p>
+      <p>Your ${scopeLabelEn.toLowerCase()} PDF form is attached for this reservation.</p>
+      <p><strong>Reservation ID:</strong> ${escapeHtml(reservationId || "-")}</p>
+      <p><strong>Checkout:</strong> ${escapeHtml(startLabel)}<br><strong>Return:</strong> ${escapeHtml(endLabel)}</p>
+      ${studioLine}
+    </div>
+  `;
+  const text =
+    `TR: ${scopeLabelTr} formu ektedir.\n` +
+    `Rezervasyon ID: ${reservationId || "-"}\n` +
+    `Teslim: ${startLabel}\n` +
+    `İade: ${endLabel}\n\n` +
+    `EN: ${scopeLabelEn} form is attached.\n` +
+    `Reservation ID: ${reservationId || "-"}\n` +
+    `Checkout: ${startLabel}\n` +
+    `Return: ${endLabel}`;
+  const body: Record<string, unknown> = {
+    from,
+    to: [toEmail],
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename,
+        content: pdf.base64
+      }
+    ]
+  };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
 const triggerNotifyForAvailableEquipment = async (
   item: { id?: unknown; equipment_id?: unknown; name?: unknown },
   logger?: { error: (payload: unknown, msg: string) => void }
@@ -1648,6 +1752,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           const msg = e instanceof Error ? e.message : String(e);
           return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
         }
+        if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
+          try {
+            await sendCheckoutPdfAttachmentEmail(requesterEmail, {
+              kind: "equipment",
+              reservationId: String(eqRes.id || id),
+              studentName: requesterName,
+              startAt: reservationStartAt,
+              endAt: reservationEndAt,
+              pdfDataUrl: pdfUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
+          }
+        }
       }
       return { ok: true, success: true, id, status: "checked_out", url: pdfUrl || "" };
     }
@@ -1686,6 +1804,22 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           projectName: String(stRow.purpose || ""),
           handoverNote: studioHandoverNote
         });
+        const requesterEmail = String(stRow.requester_email || "").trim().toLowerCase();
+        if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
+          try {
+            await sendCheckoutPdfAttachmentEmail(requesterEmail, {
+              kind: "studio",
+              reservationId: String(stRow.id || id),
+              studentName: String(stRow.requester_name || ""),
+              startAt: String(stRow.start_at || ""),
+              endAt: String(stRow.end_at || ""),
+              studioName: String(studioName || studioId || "Studio"),
+              pdfDataUrl: pdfUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(stRow.id || id), requesterEmail }, "send studio checkout pdf mail failed");
+          }
+        }
         return {
           ok: true,
           success: true,
@@ -2588,6 +2722,21 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
+      const quickEmail = String(p.email || "").trim().toLowerCase();
+      if (pdfUrl && quickEmail && quickEmail.includes("@")) {
+        try {
+          await sendCheckoutPdfAttachmentEmail(quickEmail, {
+            kind: "equipment",
+            reservationId: results[0] || "quick",
+            studentName: name,
+            startAt,
+            endAt,
+            pdfDataUrl: pdfUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: results[0] || "quick", requesterEmail: quickEmail }, "send quick checkout pdf mail failed");
+        }
       }
     }
 
