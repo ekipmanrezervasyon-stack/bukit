@@ -996,8 +996,11 @@
           status: String((r && r.status) || ''),
           items: [item]
         };
-        all.push(Object.assign({}, base, { type: 'pickup', time: formatAdminCardDtTr_(base.handoverLabel) }));
-        if (trafficCanShowReturn_(base.status)) {
+        var eqNeedsReturn = trafficCanShowReturn_(base.status);
+        if (!eqNeedsReturn) {
+          all.push(Object.assign({}, base, { type: 'pickup', time: formatAdminCardDtTr_(base.handoverLabel) }));
+        }
+        if (eqNeedsReturn) {
           all.push(Object.assign({}, base, { type: 'return', time: formatAdminCardDtTr_(base.returnLabel) }));
         }
       });
@@ -1043,8 +1046,11 @@
           status: String((r && r.status) || ''),
           items: [sItem]
         };
-        all.push(Object.assign({}, baseSt, { type: 'pickup', time: formatAdminCardDtTr_(baseSt.handoverLabel) }));
-        if (trafficCanShowReturn_(baseSt.status)) {
+        var stNeedsReturn = trafficCanShowReturn_(baseSt.status);
+        if (!stNeedsReturn) {
+          all.push(Object.assign({}, baseSt, { type: 'pickup', time: formatAdminCardDtTr_(baseSt.handoverLabel) }));
+        }
+        if (stNeedsReturn) {
           all.push(Object.assign({}, baseSt, { type: 'return', time: formatAdminCardDtTr_(baseSt.returnLabel) }));
         }
       });
@@ -2943,6 +2949,32 @@
     return document.getElementById('action-container-' + trafficSafeDomId(resId));
   }
 
+  function trafficPickedUpToastText_(resId) {
+    var rid = String(resId || '').trim();
+    if (!rid) return 'PICKED UP';
+    var row = (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid && String(x.type || '') === 'pickup'; })
+      || (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid; });
+    if (!row) return 'PICKED UP';
+    var kindRaw = String(row.kind || row.trafficKind || '').trim().toLowerCase();
+    if (kindRaw === 'studio' || kindRaw === 'studio_key') {
+      var first = (row.items && row.items.length) ? row.items[0] : null;
+      var keyCode = String((first && (first.eqCode || first.name)) || '').trim().toUpperCase();
+      if (!keyCode) keyCode = 'GKEY';
+      return keyCode + ' PICKED UP';
+    }
+    return 'PICKED UP';
+  }
+
+  function trafficDropPickedUpRows_(resId) {
+    var rid = String(resId || '').trim();
+    if (!rid) return false;
+    var before = (trafficAllRows || []).length;
+    trafficAllRows = (trafficAllRows || []).filter(function(x) {
+      return !(String(x.id || '') === rid && String(x.type || '') === 'pickup');
+    });
+    return before !== (trafficAllRows || []).length;
+  }
+
   function loadTraffic() {
     var date = document.getElementById('traffic-date').value;
     var container = document.getElementById('traffic-container');
@@ -3083,23 +3115,14 @@
     container.innerHTML = '<div class="text-center p-3 text-xs font-bold text-blue-600 animate-pulse">PDF Hazırlanıyor...</div>';
     google.script.run.withSuccessHandler(function(r) {
       if (r.success) {
-        showToast("Çıkış Başarılı!");
-        var actId = trafficSafeDomId(resId);
-        var iframeId = 'traffic-pdf-iframe-' + actId;
+        showToast(trafficPickedUpToastText_(resId));
+        trafficDropPickedUpRows_(resId);
+        renderTrafficFromCache();
         if (r.url) {
-          container.innerHTML =
-            '<div class="space-y-2">' +
-            '<iframe id="' + iframeId + '" class="w-full h-[280px] max-h-[50vh] border border-gray-200 rounded-xl bg-gray-100" title="PDF"></iframe>' +
-            '<div class="flex flex-col sm:flex-row gap-2">' +
-            '<button type="button" onclick="printAdminPdfIframe(\'' + iframeId + '\')" class="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl text-xs hover:bg-black">YAZDIR</button>' +
-            '<button type="button" onclick="loadTraffic()" class="flex-1 bg-white border border-gray-200 text-gray-800 font-black py-3 rounded-xl text-xs hover:bg-gray-50">Listeyi Yenile</button>' +
-            '</div></div>';
-          var ifr = document.getElementById(iframeId);
-          if (ifr) ifr.src = r.url;
-          setTimeout(function() { try { printAdminPdfIframe(iframeId); } catch (_e) {} }, 600);
+          openAdminStudentPdfView(r.url);
+          setTimeout(function() { loadTraffic(); }, 500);
         } else {
-          container.innerHTML = '<button type="button" class="w-full bg-green-600 text-white text-[11px] font-black py-4 rounded-xl opacity-80 cursor-default">✅ ÇIKIŞ İŞLENDİ</button>' +
-            '<button onclick="loadTraffic()" class="w-full mt-3 text-[10px] font-bold text-gray-500 hover:text-gray-800 transition">Listeyi Yenile</button>';
+          loadTraffic();
         }
         refreshInventoryData();
       } else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
