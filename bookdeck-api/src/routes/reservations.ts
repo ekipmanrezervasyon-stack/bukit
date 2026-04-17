@@ -38,6 +38,7 @@ const ACTIVE_RES_STATUSES = ["pending", "approved", "checked_out", "picked_up", 
 const CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
 const ON_LOAN_RES_STATUSES = ["checked_out", "picked_up", "key_out"];
+const NOTIFY_TABLE_CANDIDATES = ["equipment_notify_subscriptions", "equipment_notify", "notify_subscriptions"];
 
 const notifySubscribeSchema = z.object({
   group_key: z.string().min(1).max(190),
@@ -318,6 +319,47 @@ const normalizeInvStatusEnglish = (status: string): string => {
   if (s === "MAINTENANCE" || s === "MAINTANENCE") return "Maintenance";
   if (s.includes("DAMAGE") || s === "BOZUK" || s === "HASARLI" || s === "BROKEN") return "Damaged";
   return status || "Unknown";
+};
+
+const normalizeEquipmentNameKeyForNotify = (raw: unknown): string =>
+  String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/\s+/g, " ");
+
+const equipmentNotifyGroupKeyByName = (rawName: unknown): string => {
+  const slug = normalizeEquipmentNameKeyForNotify(rawName)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `name:${slug || "unknown"}`;
+};
+
+const buildNotifyGroupKeyCandidates = (item: { id?: unknown; equipment_id?: unknown; name?: unknown }): string[] => {
+  const set = new Set<string>();
+  const id = String(item.id || "").trim();
+  const code = String(item.equipment_id || "").trim();
+  const name = String(item.name || "").trim();
+  if (id) set.add(id);
+  if (code) {
+    set.add(code);
+    set.add(code.toLowerCase());
+    set.add(code.toUpperCase());
+  }
+  if (name) set.add(equipmentNotifyGroupKeyByName(name));
+  return Array.from(set.values()).filter(Boolean);
+};
+
+let notifyTableCache: string | null | undefined;
+const resolveNotifyTable = async (): Promise<string | null> => {
+  if (notifyTableCache !== undefined) return notifyTableCache;
+  notifyTableCache = await firstExistingTable(NOTIFY_TABLE_CANDIDATES);
+  return notifyTableCache;
 };
 
 const firstExistingTable = async (candidates: string[]): Promise<string | null> => {
@@ -837,6 +879,110 @@ const sendOverdueReminderEmail = async (toEmail: string, payload: { name: string
     const raw = await resp.text();
     throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
   }
+};
+
+const sendEquipmentAvailableNotifyEmail = async (
+  toEmail: string,
+  payload: { name: string; code: string; availableAtIso: string }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Notify mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const ts = new Date(String(payload.availableAtIso || "")).getTime();
+  const availableAtLabel = Number.isNaN(ts)
+    ? String(payload.availableAtIso || "")
+    : new Date(ts).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+  const title = String(payload.name || payload.code || "Equipment").trim();
+  const code = String(payload.code || "").trim();
+  const subject = `[${appName}] Ekipman musait / Equipment available: ${title}`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba,</p>
+      <p>Bildirim istediginiz ekipman su an musait:</p>
+      <p><strong>${escapeHtml(title)}</strong>${code ? ` (${escapeHtml(code)})` : ""}<br>Müsait oldugu saat: ${escapeHtml(availableAtLabel)}</p>
+      <p>Rezervasyon icin BookDeck'e giris yapabilirsiniz.</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello,</p>
+      <p>The equipment you requested notifications for is now available:</p>
+      <p><strong>${escapeHtml(title)}</strong>${code ? ` (${escapeHtml(code)})` : ""}<br>Available at: ${escapeHtml(availableAtLabel)}</p>
+      <p>You can sign in to BookDeck to place your reservation.</p>
+    </div>
+  `;
+  const text =
+    `TR: Bildirim istediginiz ekipman su an musait: ${title}${code ? ` (${code})` : ""}\n` +
+    `Saat: ${availableAtLabel}\n\n` +
+    `EN: The equipment you requested notifications for is now available: ${title}${code ? ` (${code})` : ""}\n` +
+    `Available at: ${availableAtLabel}`;
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
+const triggerNotifyForAvailableEquipment = async (
+  item: { id?: unknown; equipment_id?: unknown; name?: unknown },
+  logger?: { error: (payload: unknown, msg: string) => void }
+): Promise<{ table: string | null; matched: number; sent: number; failed: number; keys: string[] }> => {
+  const table = await resolveNotifyTable();
+  const keys = buildNotifyGroupKeyCandidates(item);
+  if (!table || !keys.length) return { table, matched: 0, sent: 0, failed: 0, keys };
+  const pending = await supabaseAdmin
+    .from(table)
+    .select("email,group_key")
+    .in("group_key", keys)
+    .is("notified_at", null)
+    .limit(2000);
+  if (pending.error) {
+    if (isMissingTableError(pending.error)) return { table: null, matched: 0, sent: 0, failed: 0, keys };
+    throw new Error(pending.error.message);
+  }
+  const rows = (pending.data ?? []) as Array<Record<string, unknown>>;
+  const grouped = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const email = String(row.email || "").trim().toLowerCase();
+    const groupKey = String(row.group_key || "").trim();
+    if (!email || !email.includes("@") || !groupKey) continue;
+    const set = grouped.get(email) || new Set<string>();
+    set.add(groupKey);
+    grouped.set(email, set);
+  }
+  let sent = 0;
+  let failed = 0;
+  const nowIso = new Date().toISOString();
+  const eqName = String(item.name || item.equipment_id || item.id || "Equipment");
+  const eqCode = String(item.equipment_id || item.id || "").trim();
+  for (const [email, groupSet] of grouped.entries()) {
+    const groupKeys = Array.from(groupSet.values());
+    try {
+      await sendEquipmentAvailableNotifyEmail(email, { name: eqName, code: eqCode, availableAtIso: nowIso });
+      const marked = await supabaseAdmin
+        .from(table)
+        .update({ notified_at: nowIso })
+        .eq("email", email)
+        .in("group_key", groupKeys)
+        .is("notified_at", null);
+      if (marked.error && !isMissingTableError(marked.error)) {
+        throw new Error(marked.error.message);
+      }
+      sent += 1;
+    } catch (e) {
+      failed += 1;
+      if (logger) logger.error({ err: e, table, email, groupKeys, item }, "send available notify mail failed");
+    }
+  }
+  return { table, matched: rows.length, sent, failed, keys };
 };
 
 const listAdminPenalties = async (): Promise<Array<{
@@ -1578,9 +1724,22 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
 
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
+      let notify: { table: string | null; matched: number; sent: number; failed: number; keys: string[] } | null = null;
       if (eqId) {
-        const updItem = await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
+        const updItem = await supabaseAdmin
+          .from("equipment_items")
+          .update({ status: "AVAILABLE" })
+          .eq("id", eqId)
+          .select("id,equipment_id,name")
+          .maybeSingle();
         if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+        if (updItem.data) {
+          try {
+            notify = await triggerNotifyForAvailableEquipment(updItem.data, req.log);
+          } catch (e) {
+            req.log.error({ err: e, equipmentItemId: eqId }, "trigger available notify failed (checkin)");
+          }
+        }
       }
 
       let penalty: { action: string; is_ban: boolean; reason: string; expires_at: string; level?: string } | null = null;
@@ -1600,7 +1759,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         req.log.error({ err: e, reservationId: id }, "late return penalty application failed");
       }
 
-      return { ok: true, success: true, id, status: "returned", penalty };
+      return { ok: true, success: true, id, status: "returned", penalty, notify };
     }
 
     const st = await supabaseAdmin
@@ -1694,8 +1853,24 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
     if (eq.data) {
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
-      if (eqId) await supabaseAdmin.from("equipment_items").update({ status: "AVAILABLE" }).eq("id", eqId);
-      return { ok: true, success: true, id, status: "cancelled" };
+      let notify: { table: string | null; matched: number; sent: number; failed: number; keys: string[] } | null = null;
+      if (eqId) {
+        const updItem = await supabaseAdmin
+          .from("equipment_items")
+          .update({ status: "AVAILABLE" })
+          .eq("id", eqId)
+          .select("id,equipment_id,name")
+          .maybeSingle();
+        if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+        if (updItem.data) {
+          try {
+            notify = await triggerNotifyForAvailableEquipment(updItem.data, req.log);
+          } catch (e) {
+            req.log.error({ err: e, equipmentItemId: eqId }, "trigger available notify failed (cancel)");
+          }
+        }
+      }
+      return { ok: true, success: true, id, status: "cancelled", notify };
     }
 
     const st = await supabaseAdmin
@@ -1825,8 +2000,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const { group_key, label } = parsed.data;
     const email = String(profile.email || "").trim().toLowerCase();
-    const candidates = ["equipment_notify_subscriptions", "equipment_notify", "notify_subscriptions"];
-    for (const table of candidates) {
+    for (const table of NOTIFY_TABLE_CANDIDATES) {
       const existing = await supabaseAdmin
         .from(table)
         .select("id")
@@ -2127,9 +2301,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (incoming.status !== undefined && Object.prototype.hasOwnProperty.call(item, "status")) patch.status = incoming.status;
     if (!Object.keys(patch).length) return { ok: true, success: true };
 
-    const updated = await supabaseAdmin.from("equipment_items").update(patch).eq("id", id).select("id").single();
+    const wasAvailable = String(item.status || "").trim().toUpperCase() === "AVAILABLE";
+    const nowAvailable = incoming.status !== undefined && String(incoming.status || "").trim().toUpperCase() === "AVAILABLE";
+    const updated = await supabaseAdmin.from("equipment_items").update(patch).eq("id", id).select("id,equipment_id,name").single();
     if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
-    return { ok: true, success: true };
+    let notify: { table: string | null; matched: number; sent: number; failed: number; keys: string[] } | null = null;
+    if (!wasAvailable && nowAvailable) {
+      try {
+        notify = await triggerNotifyForAvailableEquipment(updated.data as Record<string, unknown>, req.log);
+      } catch (e) {
+        req.log.error({ err: e, equipmentItemId: id }, "trigger available notify failed (meta patch)");
+      }
+    }
+    return { ok: true, success: true, notify };
   });
 
   app.get("/admin/tickets", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {

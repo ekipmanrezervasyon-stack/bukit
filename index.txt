@@ -1118,6 +1118,22 @@
       'Light':['lgh','light','ışık','isik','lighting','led'],
       'Grip':['grp','grip','tripod','ayak','stand','gimbal']
     };
+    function normalizeEquipmentNameKey_(raw) {
+      var s = String(raw || '').trim().toLowerCase();
+      s = s
+        .replace(/ğ/g, 'g')
+        .replace(/ü/g, 'u')
+        .replace(/ş/g, 's')
+        .replace(/ı/g, 'i')
+        .replace(/ö/g, 'o')
+        .replace(/ç/g, 'c');
+      s = s.replace(/\s+/g, ' ');
+      return s;
+    }
+    function equipmentNotifyGroupKeyByName_(rawName) {
+      var slug = normalizeEquipmentNameKey_(rawName).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      return 'name:' + (slug || 'unknown');
+    }
     /** All sekmesi: sheet etiketleri tam eşleşmese bile anahtar kelime sırası (DSLR → Optics → ENG video → …). */
     function normEquipTypeLabel(s) {
       return String(s || '').toUpperCase().replace(/\s+/g, ' ').trim();
@@ -2734,7 +2750,7 @@
             id: id,
             displayId: code || id,
             groupKey: id,
-            notifyGroupKey: id,
+            notifyGroupKey: equipmentNotifyGroupKeyByName_(name),
             name: name,
             typeLabel: typeLabel,
             category: typeLabel,
@@ -2804,12 +2820,12 @@
           var unitName=String(d.name||item.name||'').trim();
           if(!unitName) return;
           var parentTypeLabel = String(item.typeLabel || item.category || '').trim();
-          var key=(String(getBaseCategory(item)||'All').toLowerCase()+'::'+unitName.toLowerCase());
+          var key = normalizeEquipmentNameKey_(unitName);
           if(!map[key]){
             map[key]={
               id:String(item.id||d.equipment_id||'').trim(),
               groupKey:'nm-'+key.replace(/[^a-z0-9]+/g,'-'),
-              notifyGroupKey:String(item.notifyGroupKey||item.groupKey||'').trim(),
+              notifyGroupKey:String(item.notifyGroupKey||equipmentNotifyGroupKeyByName_(unitName)).trim(),
               name:unitName,
               typeLabel:parentTypeLabel || unitName,
               modelNames:[unitName],
@@ -3309,8 +3325,7 @@
         var sumImg = (!compactMode && imgSrc)
           ? '<img src="' + imgSrc + '" alt="" class="h-11 w-11 md:h-14 md:w-14 rounded-xl object-cover shrink-0 border border-gray-200 ' + (!isA ? 'grayscale opacity-90' : '') + '" loading="lazy" decoding="async">'
           : '';
-        var stockLine = '<span class="text-[11px] md:text-sm font-black text-emerald-700">' + (currentLang === 'tr' ? 'Müsait' : 'Available') + ': ' + stockCnt + '</span>'
-          + (outCnt > 0 ? '<span class="text-[11px] md:text-sm font-black text-rose-600 ml-2">' + (currentLang === 'tr' ? 'Kullanımda' : 'In use') + ': ' + outCnt + '</span>' : '');
+        var stockLine = '<span class="text-[11px] md:text-sm font-black text-emerald-700">' + (currentLang === 'tr' ? 'Müsait' : 'Available') + ': ' + stockCnt + '/' + totalCnt + '</span>';
         var bigTitle = escHtml(equipmentDisplayTitle(item));
         var subModels = (Array.isArray(item.modelNames) && item.modelNames.length > 1)
           ? escHtml(item.modelNames.slice(0, 4).join(' · ') + (item.modelNames.length > 4 ? ' · …' : ''))
@@ -3352,16 +3367,35 @@
           ? '<p class="text-xs md:text-sm font-black text-red-600 leading-snug mt-1">' + (currentLang === 'tr' ? 'İade: ' : 'Return: ') + escHtml(retRaw) + '</p>'
           : '<p class="text-[9px] text-gray-400">' + (currentLang === 'tr' ? 'İade' : 'Return') + ': ' + escHtml(retRaw || '–') + '</p>';
         var firstReturn = '';
-        if (!isA) {
-          var frRaw = String(item.earliestReturnLabel || d0.returnDate || '').trim();
-          var fr = frRaw;
-          var mDot = frRaw.match(/(\d{2}\.\d{2}\.\d{4})/);
-          if (mDot) fr = mDot[1];
-          else {
-            var mIso = frRaw.match(/(\d{4})-(\d{2})-(\d{2})/);
-            if (mIso) fr = mIso[3] + '.' + mIso[2] + '.' + mIso[1];
+        function formatFirstReturnLabel_(rawValue) {
+          var raw = String(rawValue || '').trim();
+          if (!raw || raw === '–' || raw === '-' || raw === '—') return '';
+          var mLocal = raw.match(/(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2})[:.](\d{2}))?/);
+          if (mLocal) {
+            var hh0 = mLocal[4] || '00';
+            var mm0 = mLocal[5] || '00';
+            return mLocal[1] + '.' + mLocal[2] + ' / ' + hh0 + '.' + mm0;
           }
-          if (fr && fr !== '–' && fr !== '-' && fr !== '—') {
+          var mIso = raw.match(/(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);
+          if (mIso) {
+            var hh1 = mIso[4] || '00';
+            var mm1 = mIso[5] || '00';
+            return mIso[3] + '.' + mIso[2] + ' / ' + hh1 + '.' + mm1;
+          }
+          var t = new Date(raw).getTime();
+          if (!isNaN(t)) {
+            var d = new Date(t);
+            var dd = String(d.getDate()).padStart(2, '0');
+            var mo = String(d.getMonth() + 1).padStart(2, '0');
+            var hh2 = String(d.getHours()).padStart(2, '0');
+            var mm2 = String(d.getMinutes()).padStart(2, '0');
+            return dd + '.' + mo + ' / ' + hh2 + '.' + mm2;
+          }
+          return '';
+        }
+        if (!isA) {
+          var fr = formatFirstReturnLabel_(item.earliestReturnLabel || d0.returnDate || '');
+          if (fr) {
             firstReturn = '<p class="text-base md:text-lg font-black text-rose-700 mt-2">First Return: ' + escHtml(fr) + '</p>';
           }
         }
@@ -3431,7 +3465,6 @@
           retLine +
           condLine +
           firstReturn +
-          '<p class="text-[8px] md:text-[10px] text-gray-400 mt-1">' + (currentLang === 'tr' ? 'Toplam' : 'Total') + ': ' + totalCnt + '</p>' +
           '<p class="text-[9px] md:text-[11px] font-semibold text-gray-600 mt-1.5 leading-snug">' + statusLine + '</p>' +
           '</div>' +
           '<div class="shrink-0 w-[130px] md:w-[150px]">' + actionBtn + '</div>' +
