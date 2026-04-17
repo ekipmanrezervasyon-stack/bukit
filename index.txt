@@ -2074,7 +2074,9 @@
     // HELPERS
     // ═══════════════════════════════════════
     function getBaseCategory(item){
-      var haystack=(item.category+' '+(item.displayId || item.id || '')).toLowerCase();
+      var haystack=(String(item.category||'')+' '+String(item.typeLabel||'')+' '+String(item.name||'')+' '+String(item.displayId||item.id||'')).toLowerCase();
+      // Light Stand/Ligthing Stand kalemleri her zaman GRIP altında listelenmeli.
+      if (gripMatchesLightingStandBlob_(haystack)) return 'Grip';
       for(var key in catMap){ if(catMap[key].some(function(w){return haystack.includes(w);})) return key; }
       return 'Other';
     }
