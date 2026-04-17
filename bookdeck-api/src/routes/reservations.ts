@@ -1659,26 +1659,37 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         reviewed_at: nowIso
       })
       .eq("id", id)
-      .select("id,status,start_at,end_at,requester_name,requester_email,studio_name")
+      .select("id,status,studio_id,start_at,end_at,requester_name,requester_email")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
     if (st.data) {
+      const stRow = st.data as Record<string, unknown>;
+      const studioId = String(stRow.studio_id || "").trim();
+      let studioName = studioId;
+      if (studioId) {
+        const stMeta = await supabaseAdmin.from("studios").select("id,name").eq("id", studioId).limit(1).maybeSingle();
+        if (stMeta.error) {
+          req.log.error({ err: stMeta.error, studioId }, "resolve studio name failed on checkout");
+        } else if (stMeta.data) {
+          studioName = String((stMeta.data as Record<string, unknown>).name || studioId);
+        }
+      }
       try {
         const pdfUrl = await generateCheckoutPdf({
           kind: "studio",
-          reservationId: String((st.data as Record<string, unknown>).id || id),
-          studentName: String((st.data as Record<string, unknown>).requester_name || ""),
-          studentEmail: String((st.data as Record<string, unknown>).requester_email || ""),
-          startAt: String((st.data as Record<string, unknown>).start_at || ""),
-          endAt: String((st.data as Record<string, unknown>).end_at || ""),
-          studioName: String((st.data as Record<string, unknown>).studio_name || ""),
+          reservationId: String(stRow.id || id),
+          studentName: String(stRow.requester_name || ""),
+          studentEmail: String(stRow.requester_email || ""),
+          startAt: String(stRow.start_at || ""),
+          endAt: String(stRow.end_at || ""),
+          studioName: String(studioName || studioId || "Studio"),
           handoverNote: studioHandoverNote
         });
         return {
           ok: true,
           success: true,
           id,
-          status: String((st.data as Record<string, unknown>).status || "approved"),
+          status: String(stRow.status || "approved"),
           url: pdfUrl || ""
         };
       } catch (e) {
