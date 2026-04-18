@@ -1862,9 +1862,10 @@
           (stItem && stItem.eqCode),
           (stItem && stItem.name)
         ].join(' '));
-        var stName = String(item.studioName || (stItem && stItem.studioName) || '').trim()
-          || studioNameFromCanonical_(stCanonical)
-          || 'Stüdyo';
+        var stNameRaw = String(item.studioName || (stItem && stItem.studioName) || '').trim();
+        var stName = (!stNameRaw || isUuidLike_(stNameRaw))
+          ? (studioNameFromCanonical_(stCanonical) || 'Stüdyo')
+          : stNameRaw;
         var stKeyId = String((stItem && (stItem.eqCode || stItem.name)) || '').trim();
         if (!stKeyId || isUuidLike_(stKeyId)) stKeyId = studioKeyCodeFromCanonical_(stCanonical) || 'STUDIO KEY';
         var stFlow = isPickup ? 'Anahtar Teslimi' : 'Anahtar İadesi';
