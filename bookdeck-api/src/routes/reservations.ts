@@ -472,6 +472,7 @@ const safeDiffMinutes = (aIso: string, bIso: string): number => {
 };
 
 type DashboardLoan = {
+  kind?: "equipment" | "studio_key";
   eqId: string;
   eqDisplayId: string;
   name: string;
@@ -481,6 +482,27 @@ type DashboardLoan = {
   resGroupId: string;
   handover: string;
   resEnd: string;
+};
+
+const resolveStudioCanonicalKey = (raw: unknown): string => {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (!s) return "";
+  if (s === "GREEN" || s.includes("GREEN")) return "GREEN";
+  if (s === "RED" || s.includes("RED")) return "RED";
+  if (s === "BLUE" || s.includes("BLUE")) return "BLUE";
+  if (s === "PODCAST" || s.includes("PODCAST")) return "PODCAST";
+  if (s === "DUBBING" || s.includes("DUBBING")) return "DUBBING";
+  return "";
+};
+
+const studioKeyCodeFromCanonical = (raw: unknown): string => {
+  const key = resolveStudioCanonicalKey(raw);
+  if (key === "GREEN") return "GKEY-01";
+  if (key === "RED") return "RKEY-01";
+  if (key === "BLUE") return "BKEY-01";
+  if (key === "PODCAST") return "PKEY-01";
+  if (key === "DUBBING") return "DKEY-01";
+  return "";
 };
 
 type DashboardPenalty = {
@@ -544,20 +566,39 @@ const getUserDashboardExtrasForProfile = async (
       : `requester_email.eq.${email}`;
   const now = Date.now();
 
-  const loanRowsRes = await supabaseAdmin
-    .from("equipment_reservations")
-    .select("id,equipment_item_id,start_at,end_at,status")
-    .or(ownerFilter)
-    .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
-    .order("end_at", { ascending: true });
-  if (loanRowsRes.error) throw new Error(loanRowsRes.error.message);
+  const [eqLoanRowsRes, stLoanRowsRes] = await Promise.all([
+    supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,start_at,end_at,status")
+      .or(ownerFilter)
+      .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
+      .order("end_at", { ascending: true }),
+    supabaseAdmin
+      .from("studio_reservations")
+      .select("id,studio_id,start_at,end_at,status")
+      .or(ownerFilter)
+      .eq("status", STUDIO_PICKED_STATUS)
+      .order("end_at", { ascending: true })
+  ]);
+  if (eqLoanRowsRes.error) throw new Error(eqLoanRowsRes.error.message);
+  if (stLoanRowsRes.error) throw new Error(stLoanRowsRes.error.message);
 
-  const loanRows = (loanRowsRes.data ?? []) as Record<string, unknown>[];
-  const eqIds = Array.from(new Set(loanRows.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
-  const eqMetaRes = eqIds.length
-    ? await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
-    : { data: [], error: null };
+  const eqLoanRows = (eqLoanRowsRes.data ?? []) as Record<string, unknown>[];
+  const stLoanRows = (stLoanRowsRes.data ?? []) as Record<string, unknown>[];
+
+  const eqIds = Array.from(new Set(eqLoanRows.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
+  const studioIds = Array.from(new Set(stLoanRows.map((r) => String(r.studio_id || "")).filter(Boolean)));
+  const [eqMetaRes, studiosRes] = await Promise.all([
+    eqIds.length
+      ? supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
+      : Promise.resolve({ data: [], error: null }),
+    studioIds.length
+      ? supabaseAdmin.from("studios").select("id,name").in("id", studioIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
   if (eqMetaRes.error) throw new Error(eqMetaRes.error.message);
+  if (studiosRes.error) throw new Error(studiosRes.error.message);
+
   const eqMetaById = new Map(
     ((eqMetaRes.data ?? []) as Record<string, unknown>[]).map((r) => [
       String(r.id || ""),
@@ -567,12 +608,16 @@ const getUserDashboardExtrasForProfile = async (
       }
     ])
   );
+  const studioNameById = new Map(
+    ((studiosRes.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || ""), String(r.name || r.id || "")])
+  );
 
-  const loans: DashboardLoan[] = loanRows.map((r) => {
+  const equipmentLoans: DashboardLoan[] = eqLoanRows.map((r) => {
     const due = String(r.end_at || "");
     const dueMs = due ? new Date(due).getTime() : NaN;
     const meta = eqMetaById.get(String(r.equipment_item_id || "")) || { name: String(r.equipment_item_id || ""), code: String(r.equipment_item_id || "") };
     return {
+      kind: "equipment",
       eqId: String(r.equipment_item_id || ""),
       eqDisplayId: String(meta.code || r.equipment_item_id || ""),
       name: String(meta.name || r.equipment_item_id || ""),
@@ -583,6 +628,35 @@ const getUserDashboardExtrasForProfile = async (
       handover: String(r.start_at || ""),
       resEnd: due
     };
+  });
+
+  const studioLoans: DashboardLoan[] = stLoanRows.map((r) => {
+    const due = String(r.end_at || "");
+    const dueMs = due ? new Date(due).getTime() : NaN;
+    const studioId = String(r.studio_id || "");
+    const studioName = studioNameById.get(studioId) || studioId || "Studio";
+    const keyCode = studioKeyCodeFromCanonical(`${studioId} ${studioName}`) || "STUDIO-KEY";
+    return {
+      kind: "studio_key",
+      eqId: studioId,
+      eqDisplayId: keyCode,
+      name: `${studioName} Studio Key`,
+      due,
+      overdue: !Number.isNaN(dueMs) && dueMs < now,
+      msLeft: Number.isNaN(dueMs) ? null : dueMs - now,
+      resGroupId: String(r.id || ""),
+      handover: String(r.start_at || ""),
+      resEnd: due
+    };
+  });
+
+  const loans: DashboardLoan[] = [...equipmentLoans, ...studioLoans].sort((a, b) => {
+    const am = new Date(String(a.due || "")).getTime();
+    const bm = new Date(String(b.due || "")).getTime();
+    if (Number.isNaN(am) && Number.isNaN(bm)) return 0;
+    if (Number.isNaN(am)) return 1;
+    if (Number.isNaN(bm)) return -1;
+    return am - bm;
   });
 
   const penaltiesRaw = await listUserBanRows(profileId, email);

@@ -534,8 +534,8 @@
       </div>
     </section>
     <section>
-      <h2 class="text-sm md:text-base font-black text-gray-800 mb-2 md:mb-3">Equipment on me</h2>
-      <p class="text-[10px] md:text-xs text-gray-500 mb-2">Checked-out kit from the depot. Time left until due is shown in parentheses.</p>
+      <h2 class="text-sm md:text-base font-black text-gray-800 mb-2 md:mb-3">Equipments &amp; Studio Keys on Me</h2>
+      <p class="text-[10px] md:text-xs text-gray-500 mb-2">Checked-out kit and picked studio keys. Time left until due is shown in parentheses.</p>
       <div id="bookings-loans" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 md:p-5 text-sm text-gray-600">Loading…</div>
     </section>
     <section>
@@ -4377,7 +4377,9 @@
           var warn=L.overdue?'<span class="text-red-600 font-black ml-1" title="Overdue">⚠</span>':'';
           var timePart=formatRemainMs(L.msLeft);
           var ext='';
-          if(bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover){
+          var loanKind=String(L.kind||'equipment').toLowerCase();
+          var canExtendLoan=loanKind!=='studio_key'&&bookingLimits.canExtendActiveLoan&&L.resGroupId&&L.eqId&&L.handover;
+          if(canExtendLoan){
             ext='<button type="button" class="extend-row-btn text-[10px] font-bold text-[#e30613] hover:underline ml-2" data-group="'+escAttr(L.resGroupId)+'" data-eqid="'+escAttr(L.eqId)+'" data-start="'+escAttr(L.handover)+'" data-end="'+escAttr(L.resEnd||L.due)+'">Extend</button>';
           }
           return '<li class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2 last:border-0"><span class="font-bold text-gray-900 text-sm">'+escHtml(L.name)+' <span class="text-[10px] font-mono text-gray-400">'+escHtml(L.eqDisplayId||L.eqId)+'</span>'+warn+ext+'</span><span class="text-xs '+(L.overdue?'text-red-600 font-bold':'text-gray-500')+'">Due '+escHtml(formatMyDate(L.due))+(timePart?' <span class="text-gray-500">'+timePart+'</span>':'')+'</span></li>';
@@ -4424,14 +4426,21 @@
         bookingLoanFallback=(data||[]).filter(function(b){
           var st=normalizeBookingStatus_(b.status);
           var tp=String(b.type||'').toLowerCase();
-          return tp==='equipment' && (st==='checked out' || st==='checkedout');
+          var eqOnMe=(tp==='equipment' && (st==='checked out' || st==='checkedout' || st==='in use'));
+          var studioOnMe=(tp==='studio' && (st==='key picked'));
+          return eqOnMe || studioOnMe;
         }).map(function(b){
           var dueRaw = String(b.end || b.return || b.due || '');
           var dueMs = dueRaw ? new Date(dueRaw).getTime() : NaN;
           var overdue = !isNaN(dueMs) && dueMs < nowMs;
+          var tp=String(b.type||'').toLowerCase();
+          var isStudioKey = tp==='studio';
+          var studioLabel = String(b.item || b.eqName || 'Studio');
+          var fallbackCode = isStudioKey ? 'STUDIO-KEY' : String(b.eqId || b.equipment_id || '');
           return {
-            name: String(b.item || b.eqName || 'Equipment'),
-            eqDisplayId: String(b.eqId || b.equipment_id || ''),
+            kind: isStudioKey ? 'studio_key' : 'equipment',
+            name: isStudioKey ? (studioLabel + ' Studio Key') : String(b.item || b.eqName || 'Equipment'),
+            eqDisplayId: fallbackCode,
             eqId: String(b.eqId || b.equipment_id || ''),
             due: dueRaw,
             overdue: overdue,
@@ -4444,7 +4453,7 @@
         renderLoansPanel_();
         var rows=(data||[]).filter(function(b){
           var s=normalizeBookingStatus_(b.status);
-          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='cancelled by user'||s==='rejected'||s==='rejected by admin'||s==='returned'||s==='key returned'||s==='picked up'||s==='pickedup'||s==='completed'||s==='checked out'||s==='checkedout'||s==='in use')return false;
+          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='cancelled by user'||s==='rejected'||s==='rejected by admin'||s==='returned'||s==='key returned'||s==='key picked'||s==='picked up'||s==='pickedup'||s==='completed'||s==='checked out'||s==='checkedout'||s==='in use')return false;
           return true;
         });
         if(!rows.length){tbody.innerHTML='<tr><td colspan="5" class="p-6 text-center text-gray-400 text-xs md:text-sm">No active reservations.</td></tr>';return;}
