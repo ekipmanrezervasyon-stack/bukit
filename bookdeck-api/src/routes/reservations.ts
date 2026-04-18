@@ -391,6 +391,16 @@ const isMissingTableError = (err: unknown): boolean => {
   return msg.includes("Could not find the table") || msg.includes("relation") || msg.includes("does not exist");
 };
 
+const isMissingColumnError = (err: unknown): boolean => {
+  const msg =
+    typeof err === "string"
+      ? err
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message?: string }).message || "")
+        : "";
+  return msg.includes("Could not find the") && msg.includes("column");
+};
+
 const parseIsoDate = (v: string): string => {
   const t = new Date(String(v || "")).getTime();
   if (Number.isNaN(t)) return "";
@@ -1900,7 +1910,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           handoverNote: studioHandoverNote
         });
         const requesterEmail = String(stRow.requester_email || "").trim().toLowerCase();
-        const stMark = await supabaseAdmin
+        let stMark = await supabaseAdmin
           .from("studio_reservations")
           .update({
             status: STUDIO_PICKED_STATUS,
@@ -1911,6 +1921,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           .eq("id", id)
           .select("id,status")
           .single();
+        if (stMark.error && isMissingColumnError(stMark.error)) {
+          req.log.warn({ err: stMark.error }, "studio_handover_note column missing, retrying checkout update without note");
+          stMark = await supabaseAdmin
+            .from("studio_reservations")
+            .update({
+              status: STUDIO_PICKED_STATUS,
+              reviewed_by: actor.email,
+              reviewed_at: nowIso
+            })
+            .eq("id", id)
+            .select("id,status")
+            .single();
+        }
         if (stMark.error) return reply.code(500).send({ ok: false, error: stMark.error.message });
         if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
           try {
@@ -2015,7 +2038,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return { ok: true, success: true, id, status: "returned", penalty, notify };
     }
 
-    const st = await supabaseAdmin
+    let st = await supabaseAdmin
       .from("studio_reservations")
       .update({
         status: STUDIO_RETURNED_STATUS,
@@ -2026,6 +2049,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .eq("id", id)
       .select("id,status")
       .maybeSingle();
+    if (st.error && isMissingColumnError(st.error)) {
+      req.log.warn({ err: st.error }, "return_handover_note column missing, retrying checkin update without note");
+      st = await supabaseAdmin
+        .from("studio_reservations")
+        .update({
+          status: STUDIO_RETURNED_STATUS,
+          reviewed_by: actor.email,
+          reviewed_at: nowIso
+        })
+        .eq("id", id)
+        .select("id,status")
+        .maybeSingle();
+    }
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
     if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || STUDIO_RETURNED_STATUS) };
 
