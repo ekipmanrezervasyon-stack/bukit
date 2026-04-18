@@ -2151,7 +2151,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const eq = await supabaseAdmin
       .from("equipment_reservations")
-      .update({ end_at: newEndAt, updated_at: new Date().toISOString() })
+      .update({ end_at: newEndAt })
       .eq("id", id)
       .select("id,end_at")
       .maybeSingle();
@@ -2160,7 +2160,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const st = await supabaseAdmin
       .from("studio_reservations")
-      .update({ end_at: newEndAt, updated_at: new Date().toISOString() })
+      .update({ end_at: newEndAt })
       .eq("id", id)
       .select("id,end_at")
       .maybeSingle();
@@ -2757,7 +2757,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const updated = await supabaseAdmin
       .from("equipment_reservations")
-      .update({ end_at: payload.new_end_at, updated_at: new Date().toISOString() })
+      .update({ end_at: payload.new_end_at })
       .eq("id", payload.id)
       .select("id,end_at")
       .single();
