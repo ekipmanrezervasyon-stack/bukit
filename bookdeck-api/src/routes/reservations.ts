@@ -858,6 +858,10 @@ const TR_RELIGIOUS_HOLIDAYS_BY_YEAR: Record<string, string[]> = {
   "2026": ["2026-03-19", "2026-03-20", "2026-03-21", "2026-03-22", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30"],
   "2027": ["2027-03-08", "2027-03-09", "2027-03-10", "2027-03-11", "2027-05-16", "2027-05-17", "2027-05-18", "2027-05-19"]
 };
+const DEPOT_SLOT_DEFAULT_MAX_BOOKINGS = 4;
+const DEPOT_SLOT_CONFIG_KEY = "depot_slot_max_bookings";
+const DEPOT_SLOT_CONFIG_CACHE_MS = 60_000;
+let depotSlotConfigCache: { value: number; ts: number } | null = null;
 
 const toIsoDayLocal = (d: Date): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -884,6 +888,171 @@ const hasPublicHolidayInRange = (startAt: string, endAt: string): boolean => {
     cursor.setDate(cursor.getDate() + 1);
   }
   return false;
+};
+
+const resolveDepotSlotMaxBookings = async (): Promise<number> => {
+  const now = Date.now();
+  if (depotSlotConfigCache && now - depotSlotConfigCache.ts <= DEPOT_SLOT_CONFIG_CACHE_MS) {
+    return depotSlotConfigCache.value;
+  }
+  const q = await supabaseAdmin
+    .from("app_config")
+    .select("value")
+    .eq("key", DEPOT_SLOT_CONFIG_KEY)
+    .limit(1)
+    .maybeSingle();
+  if (q.error) {
+    if (isMissingTableError(q.error) || isMissingColumnError(q.error)) {
+      depotSlotConfigCache = { value: DEPOT_SLOT_DEFAULT_MAX_BOOKINGS, ts: now };
+      return DEPOT_SLOT_DEFAULT_MAX_BOOKINGS;
+    }
+    throw new Error(q.error.message);
+  }
+  const rawNum = Number((q.data as Record<string, unknown> | null)?.value);
+  const parsed = Number.isFinite(rawNum) && rawNum >= 1 ? Math.floor(rawNum) : DEPOT_SLOT_DEFAULT_MAX_BOOKINGS;
+  depotSlotConfigCache = { value: parsed, ts: now };
+  return parsed;
+};
+
+const floorToHalfHourUtc = (isoRaw: string): { slotStartIso: string; slotEndIso: string } | null => {
+  const ms = new Date(String(isoRaw || "")).getTime();
+  if (Number.isNaN(ms)) return null;
+  const d = new Date(ms);
+  const m = d.getUTCMinutes();
+  d.setUTCMinutes(m < 30 ? 0 : 30, 0, 0);
+  const slotStartIso = d.toISOString();
+  const slotEndIso = new Date(d.getTime() + 30 * 60 * 1000).toISOString();
+  return { slotStartIso, slotEndIso };
+};
+
+const slotGroupKey = (row: Record<string, unknown>): string => {
+  const id = String(row.id || "").trim();
+  const ownerId = String(row.requester_profile_id || "").trim().toLowerCase();
+  const ownerEmail = String(row.requester_email || "").trim().toLowerCase();
+  const owner = ownerId || ownerEmail || `res:${id}`;
+  const startAt = String(row.start_at || "");
+  const endAt = String(row.end_at || "");
+  return `${owner}|${startAt}|${endAt}`;
+};
+
+const getDepotSlotUsage = async (
+  slotStartIso: string,
+  slotEndIso: string,
+  excludeReservationIds: Set<string>
+): Promise<{ pickupCount: number; returnCount: number; totalDistinct: number }> => {
+  const selectCols = "id,requester_profile_id,requester_email,start_at,end_at";
+  const [pickupRes, returnRes] = await Promise.all([
+    supabaseAdmin
+      .from("equipment_reservations")
+      .select(selectCols)
+      .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+      .gte("start_at", slotStartIso)
+      .lt("start_at", slotEndIso),
+    supabaseAdmin
+      .from("equipment_reservations")
+      .select(selectCols)
+      .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+      .gte("end_at", slotStartIso)
+      .lt("end_at", slotEndIso)
+  ]);
+  if (pickupRes.error) throw new Error(pickupRes.error.message);
+  if (returnRes.error) throw new Error(returnRes.error.message);
+
+  const pickup = new Set<string>();
+  const returns = new Set<string>();
+  for (const r of (pickupRes.data ?? []) as Record<string, unknown>[]) {
+    const id = String(r.id || "").trim();
+    if (id && excludeReservationIds.has(id)) continue;
+    pickup.add(slotGroupKey(r));
+  }
+  for (const r of (returnRes.data ?? []) as Record<string, unknown>[]) {
+    const id = String(r.id || "").trim();
+    if (id && excludeReservationIds.has(id)) continue;
+    returns.add(slotGroupKey(r));
+  }
+  const all = new Set<string>([...pickup, ...returns]);
+  return {
+    pickupCount: pickup.size,
+    returnCount: returns.size,
+    totalDistinct: all.size
+  };
+};
+
+const formatDepotSlotLabel = (slotStartIso: string): string => {
+  const ms = new Date(String(slotStartIso || "")).getTime();
+  if (Number.isNaN(ms)) return slotStartIso;
+  const str = new Date(ms).toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    hour12: false,
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const parts = String(str || "").split(" ");
+  if (parts.length < 2) return str;
+  const ddmm = String(parts[0] || "")
+    .split(".")
+    .slice(0, 2)
+    .join(".");
+  return `${ddmm} / ${parts[1]}`;
+};
+
+const buildDepotSlotCapacityError = (
+  slotStartIso: string,
+  role: "handover" | "return" | "both",
+  usage: { pickupCount: number; returnCount: number; totalDistinct: number },
+  maxBookings: number
+): string => {
+  const slotLabel = formatDepotSlotLabel(slotStartIso);
+  const roleLabel = role === "handover" ? "teslim" : role === "return" ? "iade" : "teslim/iade";
+  return (
+    `Depo ${roleLabel} yoğunluğu nedeniyle ${slotLabel} slotu dolu. ` +
+    `Bu 30 dakikalık pencerede toplam ${usage.totalDistinct}/${maxBookings} işlem var ` +
+    `(teslim: ${usage.pickupCount}, iade: ${usage.returnCount}). Lütfen farklı bir saat seçin.`
+  );
+};
+
+const assertDepotSlotCapacity = async (params: {
+  startAt: string;
+  endAt: string;
+  excludeReservationId?: string;
+  checkStart?: boolean;
+  checkEnd?: boolean;
+}) => {
+  const checkStart = params.checkStart !== false;
+  const checkEnd = params.checkEnd !== false;
+  if (!checkStart && !checkEnd) return;
+  const startSlot = floorToHalfHourUtc(params.startAt);
+  const endSlot = floorToHalfHourUtc(params.endAt);
+  if (!startSlot || !endSlot) return;
+  const maxBookings = await resolveDepotSlotMaxBookings();
+  if (!Number.isFinite(maxBookings) || maxBookings <= 0) return;
+
+  const exclude = new Set<string>();
+  const excludeId = String(params.excludeReservationId || "").trim();
+  if (excludeId) exclude.add(excludeId);
+
+  const sameSlot = startSlot.slotStartIso === endSlot.slotStartIso;
+  if (checkStart && checkEnd && sameSlot) {
+    const usage = await getDepotSlotUsage(startSlot.slotStartIso, startSlot.slotEndIso, exclude);
+    if (usage.totalDistinct >= maxBookings) {
+      throw new Error(buildDepotSlotCapacityError(startSlot.slotStartIso, "both", usage, maxBookings));
+    }
+    return;
+  }
+  if (checkStart) {
+    const usageStart = await getDepotSlotUsage(startSlot.slotStartIso, startSlot.slotEndIso, exclude);
+    if (usageStart.totalDistinct >= maxBookings) {
+      throw new Error(buildDepotSlotCapacityError(startSlot.slotStartIso, "handover", usageStart, maxBookings));
+    }
+  }
+  if (checkEnd) {
+    const usageEnd = await getDepotSlotUsage(endSlot.slotStartIso, endSlot.slotEndIso, exclude);
+    if (usageEnd.totalDistinct >= maxBookings) {
+      throw new Error(buildDepotSlotCapacityError(endSlot.slotStartIso, "return", usageEnd, maxBookings));
+    }
+  }
 };
 
 const listOverdueEquipmentRows = async (): Promise<Array<{
@@ -1551,6 +1720,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (hasPublicHolidayInRange(start_at, end_at)) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
     }
+    try {
+      await assertDepotSlotCapacity({ startAt: start_at, endAt: end_at });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(409).send({ ok: false, error: msg });
+    }
 
     const { data: item, error: itemErr } = await supabaseAdmin
       .from("equipment_items")
@@ -2185,14 +2360,40 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const id = String(parsed.data.id || "").trim();
     const newEndAt = String(parsed.data.new_end_at || "");
 
-    const eq = await supabaseAdmin
+    const eqBefore = await supabaseAdmin
       .from("equipment_reservations")
-      .update({ end_at: newEndAt })
+      .select("id,start_at,end_at")
       .eq("id", id)
-      .select("id,end_at")
       .maybeSingle();
-    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
-    if (eq.data) return { ok: true, success: true, id, end_at: newEndAt };
+    if (eqBefore.error) return reply.code(500).send({ ok: false, error: eqBefore.error.message });
+    if (eqBefore.data) {
+      const startAt = String((eqBefore.data as Record<string, unknown>).start_at || "");
+      const startMs = new Date(startAt).getTime();
+      const endMs = new Date(newEndAt).getTime();
+      if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+        return reply.code(400).send({ ok: false, error: "Invalid extension range." });
+      }
+      try {
+        await assertDepotSlotCapacity({
+          startAt,
+          endAt: newEndAt,
+          excludeReservationId: id,
+          checkStart: false,
+          checkEnd: true
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(409).send({ ok: false, error: msg });
+      }
+      const eq = await supabaseAdmin
+        .from("equipment_reservations")
+        .update({ end_at: newEndAt })
+        .eq("id", id)
+        .select("id,end_at")
+        .single();
+      if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
+      return { ok: true, success: true, id, end_at: newEndAt };
+    }
 
     const st = await supabaseAdmin
       .from("studio_reservations")
@@ -2776,6 +2977,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (hasPublicHolidayInRange(String(existing.data.start_at || ""), String(payload.new_end_at || ""))) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
     }
+    try {
+      await assertDepotSlotCapacity({
+        startAt: String(existing.data.start_at || ""),
+        endAt: String(payload.new_end_at || ""),
+        excludeReservationId: String(payload.id || ""),
+        checkStart: false,
+        checkEnd: true
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(409).send({ ok: false, error: msg });
+    }
 
     const overlap = await supabaseAdmin
       .from("equipment_reservations")
@@ -2810,6 +3023,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
     if (hasPublicHolidayInRange(startAt, endAt)) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
+    try {
+      await assertDepotSlotCapacity({ startAt, endAt });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(409).send({ ok: false, error: msg });
     }
     const name = String(p.display_name || "").trim() || String(p.email.split("@")[0] || p.email);
     const results: string[] = [];
