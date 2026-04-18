@@ -34,10 +34,11 @@ const myBookingCancelSchema = z.object({
 });
 
 const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "iiw_admin"];
-const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "checked_out", "picked_up", "key_out"];
+const EQUIPMENT_CHECKED_OUT_STATUS = "IN_USE";
+const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
-const EQUIPMENT_ON_LOAN_RES_STATUSES = ["checked_out", "picked_up", "key_out"];
+const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const STUDIO_PENDING_STATUS = "pending";
 const STUDIO_APPROVED_STATUS = "approved_by_admin";
 const STUDIO_REJECTED_STATUS = "rejected_by_admin";
@@ -1490,7 +1491,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .from("equipment_reservations")
       .select("id,status,requester_profile_id,requester_email,start_at,end_at")
       .eq("equipment_item_id", equipment_item_id)
-      .in("status", ["pending", "approved", "checked_out"])
+      .in("status", ["pending", "approved", EQUIPMENT_CHECKED_OUT_STATUS, "checked_out"])
       .lt("start_at", end_at)
       .gt("end_at", start_at)
       .limit(1);
@@ -1641,161 +1642,167 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const studioHandoverNote = String(parsed.data.studio_handover_note || "").trim();
     const nowIso = new Date().toISOString();
 
-    const eq = await supabaseAdmin
+    const eqLookup = await supabaseAdmin
       .from("equipment_reservations")
-      .update({
-        status: "checked_out",
-        reviewed_by: actor.email,
-        reviewed_at: nowIso
-      })
-      .eq("id", id)
       .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,requester_profile_id,required_level,note")
+      .eq("id", id)
       .maybeSingle();
-    if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
-    if (eq.data) {
-      const eqRes = eq.data as Record<string, unknown>;
+    if (eqLookup.error) return reply.code(500).send({ ok: false, error: eqLookup.error.message });
+    if (eqLookup.data) {
+      const eqRes = eqLookup.data as Record<string, unknown>;
       const eqId = String(eqRes.equipment_item_id || "").trim();
       const allItemIds = dedupeTrimmedIds([eqId, ...selectedItemIds]);
+      if (!allItemIds.length) return reply.code(400).send({ ok: false, error: "No equipment item selected for checkout." });
+
+      const reservationStartAt = String(eqRes.start_at || "");
+      const reservationEndAt = String(eqRes.end_at || "");
+      const requesterProfileId = eqRes.requester_profile_id ? String(eqRes.requester_profile_id) : null;
+      const requiredLevelRaw = Number(eqRes.required_level);
+      const requiredLevel = Number.isFinite(requiredLevelRaw) ? requiredLevelRaw : 1;
+      const reservationNote = String(eqRes.note || "");
+      const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
+      const requesterName = String(eqRes.requester_name || "");
+
+      const itemMetaRes = await supabaseAdmin
+        .from("equipment_items")
+        .select("id,name,equipment_id,condition_out")
+        .in("id", allItemIds);
+      if (itemMetaRes.error) return reply.code(500).send({ ok: false, error: itemMetaRes.error.message });
+      const itemMetaById = new Map(
+        ((itemMetaRes.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || "").trim(), r])
+      );
+
+      const itemsForPdf: Array<{ name: string; code: string; conditionOut: string }> = [];
+      for (const itemId of allItemIds) {
+        const itemRow = itemMetaById.get(itemId);
+        if (!itemRow) return reply.code(404).send({ ok: false, error: `Equipment item not found: ${itemId}` });
+        const mappedCond = findMappedConditionOut(checkoutConditionMap, itemId);
+        itemsForPdf.push({
+          name: String(itemRow.name || ""),
+          code: String(itemRow.equipment_id || itemId),
+          conditionOut: String(mappedCond || itemRow.condition_out || "")
+        });
+      }
+
       let pdfUrl: string | null = null;
-      if (allItemIds.length) {
-        const itemsForPdf: Array<{ name: string; code: string; conditionOut: string }> = [];
-        const reservationStartAt = String(eqRes.start_at || "");
-        const reservationEndAt = String(eqRes.end_at || "");
-        const requesterProfileId = eqRes.requester_profile_id ? String(eqRes.requester_profile_id) : null;
-        const requiredLevelRaw = Number(eqRes.required_level);
-        const requiredLevel = Number.isFinite(requiredLevelRaw) ? requiredLevelRaw : 1;
-        const reservationNote = String(eqRes.note || "");
-        const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
-        const requesterName = String(eqRes.requester_name || "");
+      try {
+        pdfUrl = await generateCheckoutPdf({
+          kind: "equipment",
+          reservationId: String(eqRes.id || id),
+          studentName: requesterName,
+          studentEmail: requesterEmail,
+          startAt: reservationStartAt,
+          endAt: reservationEndAt,
+          projectExplanation: reservationNote,
+          items: itemsForPdf
+        });
+      } catch (e) {
+        req.log.error({ err: e }, "generate equipment checkout pdf failed");
+        const msg = e instanceof Error ? e.message : String(e);
+        return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
 
-        for (const itemId of allItemIds) {
-          const patch: Record<string, unknown> = { status: "IN_USE" };
-          const condOut = findMappedConditionOut(checkoutConditionMap, itemId);
-          if (condOut) patch.condition_out = condOut;
+      const eqMark = await supabaseAdmin
+        .from("equipment_reservations")
+        .update({
+          status: EQUIPMENT_CHECKED_OUT_STATUS,
+          reviewed_by: actor.email,
+          reviewed_at: nowIso
+        })
+        .eq("id", id)
+        .select("id")
+        .single();
+      if (eqMark.error) return reply.code(500).send({ ok: false, error: eqMark.error.message });
 
-          const updItem = await supabaseAdmin
-            .from("equipment_items")
-            .update(patch)
-            .eq("id", itemId)
-            .select("id,name,equipment_id,condition_out")
-            .maybeSingle();
-          if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
-          const itemRow = updItem.data as Record<string, unknown> | null;
-          if (!itemRow) {
-            return reply.code(404).send({ ok: false, error: `Equipment item not found: ${itemId}` });
-          }
+      for (const itemId of allItemIds) {
+        const patch: Record<string, unknown> = { status: "IN_USE" };
+        const condOut = findMappedConditionOut(checkoutConditionMap, itemId);
+        if (condOut) patch.condition_out = condOut;
+        const updItem = await supabaseAdmin
+          .from("equipment_items")
+          .update(patch)
+          .eq("id", itemId)
+          .select("id")
+          .maybeSingle();
+        if (updItem.error) return reply.code(500).send({ ok: false, error: updItem.error.message });
+        if (!updItem.data) return reply.code(404).send({ ok: false, error: `Equipment item not found: ${itemId}` });
 
-          if (itemId !== eqId) {
-            const existingExtra = await supabaseAdmin
+        if (itemId !== eqId) {
+          const existingExtra = await supabaseAdmin
+            .from("equipment_reservations")
+            .select("id,status")
+            .eq("equipment_item_id", itemId)
+            .eq("requester_email", requesterEmail)
+            .eq("start_at", reservationStartAt)
+            .eq("end_at", reservationEndAt)
+            .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+            .limit(1);
+          if (existingExtra.error) return reply.code(500).send({ ok: false, error: existingExtra.error.message });
+
+          if ((existingExtra.data ?? []).length === 0) {
+            const createdExtra = await supabaseAdmin
               .from("equipment_reservations")
-              .select("id,status")
-              .eq("equipment_item_id", itemId)
-              .eq("requester_email", requesterEmail)
-              .eq("start_at", reservationStartAt)
-              .eq("end_at", reservationEndAt)
-              .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
-              .limit(1);
-            if (existingExtra.error) {
-              return reply.code(500).send({ ok: false, error: existingExtra.error.message });
-            }
-            if ((existingExtra.data ?? []).length === 0) {
-              const createdExtra = await supabaseAdmin
+              .insert({
+                equipment_item_id: itemId,
+                requester_profile_id: requesterProfileId,
+                requester_email: requesterEmail,
+                requester_name: requesterName,
+                required_level: requiredLevel,
+                status: EQUIPMENT_CHECKED_OUT_STATUS,
+                approval_required: false,
+                start_at: reservationStartAt,
+                end_at: reservationEndAt,
+                note: reservationNote,
+                reviewed_by: String(actor.email || ""),
+                reviewed_at: nowIso
+              })
+              .select("id")
+              .single();
+            if (createdExtra.error) return reply.code(500).send({ ok: false, error: createdExtra.error.message });
+          } else {
+            const existingId = String((existingExtra.data?.[0] as Record<string, unknown> | undefined)?.id || "").trim();
+            if (existingId) {
+              const updExisting = await supabaseAdmin
                 .from("equipment_reservations")
-                .insert({
-                  equipment_item_id: itemId,
-                  requester_profile_id: requesterProfileId,
-                  requester_email: requesterEmail,
-                  requester_name: requesterName,
-                  required_level: requiredLevel,
-                  status: "checked_out",
-                  approval_required: false,
-                  start_at: reservationStartAt,
-                  end_at: reservationEndAt,
-                  note: reservationNote,
+                .update({
+                  status: EQUIPMENT_CHECKED_OUT_STATUS,
                   reviewed_by: String(actor.email || ""),
                   reviewed_at: nowIso
                 })
+                .eq("id", existingId)
                 .select("id")
                 .single();
-              if (createdExtra.error) {
-                return reply.code(500).send({ ok: false, error: createdExtra.error.message });
-              }
-            } else {
-              const existingId = String((existingExtra.data?.[0] as Record<string, unknown> | undefined)?.id || "").trim();
-              if (existingId) {
-                const normalizedPatch: Record<string, unknown> = {
-                  status: "checked_out",
-                  reviewed_by: String(actor.email || ""),
-                  reviewed_at: nowIso
-                };
-                const updExisting = await supabaseAdmin
-                  .from("equipment_reservations")
-                  .update(normalizedPatch)
-                  .eq("id", existingId)
-                  .select("id")
-                  .single();
-                if (updExisting.error) {
-                  return reply.code(500).send({ ok: false, error: updExisting.error.message });
-                }
-              }
+              if (updExisting.error) return reply.code(500).send({ ok: false, error: updExisting.error.message });
             }
-          }
-
-          itemsForPdf.push({
-            name: String(itemRow.name || ""),
-            code: String(itemRow.equipment_id || itemId),
-            conditionOut: String(itemRow.condition_out || "")
-          });
-        }
-
-        try {
-          pdfUrl = await generateCheckoutPdf({
-            kind: "equipment",
-            reservationId: String(eqRes.id || id),
-            studentName: requesterName,
-            studentEmail: requesterEmail,
-            startAt: reservationStartAt,
-            endAt: reservationEndAt,
-            projectExplanation: reservationNote,
-            items: itemsForPdf
-          });
-        } catch (e) {
-          req.log.error({ err: e }, "generate equipment checkout pdf failed");
-          const msg = e instanceof Error ? e.message : String(e);
-          return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
-        }
-        if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
-          try {
-            await sendCheckoutPdfAttachmentEmail(requesterEmail, {
-              kind: "equipment",
-              reservationId: String(eqRes.id || id),
-              studentName: requesterName,
-              startAt: reservationStartAt,
-              endAt: reservationEndAt,
-              pdfDataUrl: pdfUrl
-            });
-          } catch (e) {
-            req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
           }
         }
       }
-      return { ok: true, success: true, id, status: "checked_out", url: pdfUrl || "" };
+
+      if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
+        try {
+          await sendCheckoutPdfAttachmentEmail(requesterEmail, {
+            kind: "equipment",
+            reservationId: String(eqRes.id || id),
+            studentName: requesterName,
+            startAt: reservationStartAt,
+            endAt: reservationEndAt,
+            pdfDataUrl: pdfUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
+        }
+      }
+      return { ok: true, success: true, id, status: EQUIPMENT_CHECKED_OUT_STATUS, url: pdfUrl || "" };
     }
 
-    const st = await supabaseAdmin
+    const stLookup = await supabaseAdmin
       .from("studio_reservations")
-      .update({
-        status: STUDIO_PICKED_STATUS,
-        studio_handover_note: studioHandoverNote || null,
-        reviewed_by: actor.email,
-        reviewed_at: nowIso
-      })
-      .eq("id", id)
       .select("id,status,studio_id,start_at,end_at,requester_name,requester_email,purpose")
+      .eq("id", id)
       .maybeSingle();
-    if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) {
-      const stRow = st.data as Record<string, unknown>;
+    if (stLookup.error) return reply.code(500).send({ ok: false, error: stLookup.error.message });
+    if (stLookup.data) {
+      const stRow = stLookup.data as Record<string, unknown>;
       const studioId = String(stRow.studio_id || "").trim();
       let studioName = studioId;
       if (studioId) {
@@ -1819,6 +1826,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           handoverNote: studioHandoverNote
         });
         const requesterEmail = String(stRow.requester_email || "").trim().toLowerCase();
+        const stMark = await supabaseAdmin
+          .from("studio_reservations")
+          .update({
+            status: STUDIO_PICKED_STATUS,
+            studio_handover_note: studioHandoverNote || null,
+            reviewed_by: actor.email,
+            reviewed_at: nowIso
+          })
+          .eq("id", id)
+          .select("id,status")
+          .single();
+        if (stMark.error) return reply.code(500).send({ ok: false, error: stMark.error.message });
         if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
           try {
             await sendCheckoutPdfAttachmentEmail(requesterEmail, {
@@ -1838,7 +1857,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           ok: true,
           success: true,
           id,
-          status: String(stRow.status || STUDIO_PICKED_STATUS),
+          status: String((stMark.data as Record<string, unknown> | null)?.status || STUDIO_PICKED_STATUS),
           url: pdfUrl || ""
         };
       } catch (e) {
@@ -2403,7 +2422,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }));
     const active = rows.find((r) => {
       const s = String(r.status || "").toLowerCase();
-      return s === "approved" || s === "checked_out" || s === "picked_up" || s === "key_out";
+      return s === "approved" || s === "in_use" || s === "checked_out" || s === "picked_up" || s === "key_out";
     });
     const previous = rows.length > 1 ? rows[1] : null;
     const item = itemRes.data as Record<string, unknown>;
@@ -2652,7 +2671,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .from("equipment_reservations")
       .select("id")
       .eq("equipment_item_id", payload.equipment_item_id)
-      .in("status", ["pending", "approved", "checked_out", "picked_up", "key_out"])
+      .in("status", ["pending", "approved", EQUIPMENT_CHECKED_OUT_STATUS, "checked_out", "picked_up", "key_out"])
       .lt("start_at", payload.new_end_at)
       .gt("end_at", String(existing.data.start_at || ""))
       .neq("id", payload.id)
@@ -2689,14 +2708,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const eqId = String(rawId || "").trim();
       if (!eqId) continue;
       const created = await supabaseAdmin
-        .from("equipment_reservations")
-        .insert({
+                .from("equipment_reservations")
+                .insert({
           equipment_item_id: eqId,
           requester_profile_id: null,
           requester_email: p.email.toLowerCase(),
           requester_name: name,
           required_level: 1,
-          status: "checked_out",
+                  status: EQUIPMENT_CHECKED_OUT_STATUS,
           approval_required: false,
           start_at: startAt,
           end_at: endAt,
@@ -2804,7 +2823,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const overdue = eqRows
       .filter((r) => {
         const st = String(r.status || "").toLowerCase();
-        return ["approved", "checked_out", "picked_up", "key_out"].includes(st);
+        return ["approved", "in_use", "checked_out", "picked_up", "key_out"].includes(st);
       })
       .filter((r) => {
         const endMs = new Date(String(r.end_at || "")).getTime();

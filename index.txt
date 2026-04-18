@@ -885,7 +885,7 @@
       }
       function isActiveReservationStatus_(s) {
         var st = String(s || '').trim().toLowerCase();
-        return st === 'pending' || st === 'approved' || st === 'checked_out' || st === 'picked_up' || st === 'key_out';
+        return st === 'pending' || st === 'approved' || st === 'approved_by_admin' || st === 'in_use' || st === 'in use' || st === 'checked_out' || st === 'picked_up' || st === 'key_out' || st === 'key_picked';
       }
       var methods = {
         getBookingLimits: function() {
@@ -4176,7 +4176,7 @@
               cells[key] = isClosedDay ? 'closed' : 'free';
             });
           });
-          var activeStatuses = { pending:1, approved:1, checked_out:1, picked_up:1, key_out:1 };
+          var activeStatuses = { pending:1, approved:1, approved_by_admin:1, key_picked:1, checked_out:1, picked_up:1, key_out:1 };
           var sid = String(studioId || '').trim().toUpperCase();
           rows.forEach(function(r){
             var rid = String((r && r.studio_id) || '').trim().toUpperCase();
@@ -4444,17 +4444,17 @@
         renderLoansPanel_();
         var rows=(data||[]).filter(function(b){
           var s=normalizeBookingStatus_(b.status);
-          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='rejected'||s==='returned'||s==='picked up'||s==='pickedup'||s==='completed'||s==='checked out'||s==='checkedout')return false;
+          if(s==='cancelled'||s==='canceled'||s==='cancel'||s==='cancelled by user'||s==='rejected'||s==='rejected by admin'||s==='returned'||s==='key returned'||s==='picked up'||s==='pickedup'||s==='completed'||s==='checked out'||s==='checkedout'||s==='in use')return false;
           return true;
         });
         if(!rows.length){tbody.innerHTML='<tr><td colspan="5" class="p-6 text-center text-gray-400 text-xs md:text-sm">No active reservations.</td></tr>';return;}
         tbody.innerHTML='';
         rows.forEach(function(b){
-          var sc={'Pending':'bg-yellow-100 text-yellow-700','pending':'bg-yellow-100 text-yellow-700','Approved':'bg-green-100 text-green-700','approved':'bg-green-100 text-green-700','Rejected':'bg-red-100 text-red-700','rejected':'bg-red-100 text-red-700','Rejected (Removed)':'bg-red-100 text-red-700','Cancelled':'bg-gray-100 text-gray-500','cancelled':'bg-gray-100 text-gray-500','Picked Up':'bg-blue-100 text-blue-700','picked up':'bg-blue-100 text-blue-700','Returned':'bg-emerald-100 text-emerald-700','completed':'bg-emerald-100 text-emerald-700','overdue':'bg-orange-100 text-orange-700'};
+          var sc={'Pending':'bg-yellow-100 text-yellow-700','pending':'bg-yellow-100 text-yellow-700','Approved':'bg-green-100 text-green-700','approved':'bg-green-100 text-green-700','approved by admin':'bg-green-100 text-green-700','Rejected':'bg-red-100 text-red-700','rejected':'bg-red-100 text-red-700','rejected by admin':'bg-red-100 text-red-700','Rejected (Removed)':'bg-red-100 text-red-700','Cancelled':'bg-gray-100 text-gray-500','cancelled':'bg-gray-100 text-gray-500','cancelled by user':'bg-gray-100 text-gray-500','Picked Up':'bg-blue-100 text-blue-700','picked up':'bg-blue-100 text-blue-700','key picked':'bg-blue-100 text-blue-700','in use':'bg-blue-100 text-blue-700','Returned':'bg-emerald-100 text-emerald-700','key returned':'bg-emerald-100 text-emerald-700','completed':'bg-emerald-100 text-emerald-700','overdue':'bg-orange-100 text-orange-700'};
           var bc=sc[b.status]||'bg-gray-100 text-gray-600';
           var stLow=normalizeBookingStatus_(b.status);
-          var cc=(stLow==='pending'||stLow==='approved');
-          var showExtend=bookingLimits.canExtendActiveLoan&&b.type==='Equipment'&&b.eqId&&(stLow==='picked up'||stLow==='approved');
+          var cc=(stLow==='pending'||stLow==='approved'||stLow==='approved by admin');
+          var showExtend=bookingLimits.canExtendActiveLoan&&b.type==='Equipment'&&b.eqId&&(stLow==='picked up'||stLow==='approved'||stLow==='in use');
           var parts=[];
           if(cc)parts.push('<button type="button" class="cancel-booking-btn text-[10px] md:text-xs font-bold text-red-500 hover:underline" data-id="'+escAttr(b.id)+'" data-type="'+escAttr(b.type)+'">Cancel</button>');
           if(showExtend)parts.push('<button type="button" class="extend-row-btn text-[10px] md:text-xs font-bold text-[#e30613] hover:underline" data-group="'+escAttr(b.id)+'" data-eqid="'+escAttr(b.eqId)+'" data-start="'+escAttr(b.start)+'" data-end="'+escAttr(b.end)+'">Extend</button>');

@@ -829,7 +829,7 @@
   function installAdminApiScriptRunShim_() {
     function isActiveReservationStatus_(s) {
       var st = String(s || '').trim().toLowerCase();
-      return st === 'pending' || st === 'approved' || st === 'checked_out' || st === 'picked_up' || st === 'key_out';
+      return st === 'pending' || st === 'approved' || st === 'approved_by_admin' || st === 'in_use' || st === 'checked_out' || st === 'picked_up' || st === 'key_out' || st === 'key_picked';
     }
     function buildScriptRunner(methodMap) {
       var onSuccess = null;
@@ -919,10 +919,14 @@
     function trafficActiveStatus_(status) {
       var s = String(status || '').trim().toLowerCase();
       if (!s) return false;
-      if (s === 'pending' || s === 'approved' || s === 'checked_out' || s === 'picked_up' || s === 'key_out') return true;
+      if (s === 'pending' || s === 'approved' || s === 'approved_by_admin') return true;
+      if (s === 'in_use' || s === 'checked_out' || s === 'picked_up' || s === 'key_out' || s === 'key_picked') return true;
+      if (s === 'key_returned' || s === 'returned' || s === 'completed') return false;
+      if (s.indexOf('cancel') >= 0 || s.indexOf('reject') >= 0) return false;
       if (s === 'onaylı' || s === 'onayli' || s === 'beklemede') return true;
       if (s.indexOf('approved') >= 0 || s.indexOf('pending') >= 0 || s.indexOf('onay') >= 0 || s.indexOf('bekle') >= 0) return true;
-      if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0 || s.indexOf('key') >= 0) return true;
+      if (s.indexOf('in_use') >= 0 || s.indexOf('kullanimda') >= 0 || s.indexOf('disarida') >= 0) return true;
+      if (s.indexOf('picked') >= 0 || s.indexOf('checked') >= 0 || s.indexOf('key_picked') >= 0) return true;
       return false;
     }
     function trafficCanShowReturn_(status) {
@@ -940,13 +944,14 @@
       // Iade karti sadece fiilen teslim edilmis kayitlarda gorunsun.
       // pending/approved kayitlarda (ayni gun olsa bile) iade akisi acilmamali.
       var outStatuses = {
+        in_use: true,
         checked_out: true,
         checkedout: true,
         picked_up: true,
         pickedup: true,
+        key_picked: true,
         key_out: true,
         keyout: true,
-        in_use: true,
         disarida: true,
         kullanimda: true,
         teslim_edildi: true
