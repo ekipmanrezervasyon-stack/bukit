@@ -608,6 +608,18 @@
       <div id="admin-ui-dialog-input-wrap" class="mt-4 hidden">
         <input id="admin-ui-dialog-input" type="text" class="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#e30613]" />
       </div>
+      <div id="admin-ui-dialog-datetime-wrap" class="mt-4 hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">İade Tarihi</label>
+            <input id="admin-ui-dialog-date" type="date" class="w-full p-3 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613]" />
+          </div>
+          <div>
+            <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">İade Saati</label>
+            <input id="admin-ui-dialog-time" type="time" step="60" class="w-full p-3 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613]" />
+          </div>
+        </div>
+      </div>
       <p id="admin-ui-dialog-error" class="text-[11px] text-red-600 mt-2 hidden"></p>
       <div class="flex gap-2 mt-6">
         <button type="button" onclick="closeAdminUiDialog()" class="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl text-xs hover:bg-gray-200 transition">Vazgeç</button>
@@ -774,6 +786,19 @@
     var hh = String(d.getHours()).padStart(2, '0');
     var mi = String(d.getMinutes()).padStart(2, '0');
     return dd + '.' + mm + ' / ' + hh + '.' + mi;
+  }
+
+  function splitRawIsoDateTime_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return { date: '', time: '' };
+    var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+    if (iso) return { date: iso[1] + '-' + iso[2] + '-' + iso[3], time: iso[4] + ':' + iso[5] };
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return { date: '', time: '' };
+    return {
+      date: String(d.getFullYear()) + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
+      time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+    };
   }
 
   function adminApiRequest(path, opts) {
@@ -1502,10 +1527,13 @@
     var d = document.getElementById('admin-ui-dialog-desc');
     var w = document.getElementById('admin-ui-dialog-input-wrap');
     var i = document.getElementById('admin-ui-dialog-input');
+    var dw = document.getElementById('admin-ui-dialog-datetime-wrap');
+    var di = document.getElementById('admin-ui-dialog-date');
+    var ti = document.getElementById('admin-ui-dialog-time');
     var e = document.getElementById('admin-ui-dialog-error');
     var ok = document.getElementById('admin-ui-dialog-ok');
     var ic = document.getElementById('admin-ui-dialog-icon');
-    if (!m || !t || !d || !w || !i || !e || !ok || !ic) return;
+    if (!m || !t || !d || !w || !i || !dw || !di || !ti || !e || !ok || !ic) return;
     t.innerText = String(opts.title || 'İşlem');
     d.innerText = String(opts.desc || '');
     var tone = String(opts.tone || 'info').toLowerCase();
@@ -1527,18 +1555,39 @@
     t.className = 'text-lg font-black ' + titleClassMap[tone];
     ok.className = 'flex-1 text-white font-black py-3 rounded-xl text-xs transition ' + btnClassMap[tone];
     var needInput = !!opts.input;
-    w.classList.toggle('hidden', !needInput);
+    var inputMode = String(opts.inputMode || 'text').toLowerCase();
+    var useDateTime = needInput && inputMode === 'datetime_split';
+    var useText = needInput && !useDateTime;
+    w.classList.toggle('hidden', !useText);
+    dw.classList.toggle('hidden', !useDateTime);
     i.value = String(opts.defaultValue || '');
     i.placeholder = String(opts.placeholder || '');
+    var seeded = splitRawIsoDateTime_(opts.defaultValue || '');
+    di.value = String(opts.defaultDate || seeded.date || '');
+    ti.value = String(opts.defaultTime || seeded.time || '');
     e.classList.add('hidden');
     ok.innerText = String(opts.okText || 'Onayla');
     adminUiDialogCb = function() {
-      var val = String(i.value || '').trim();
-      if (needInput && opts.required && !val) {
-        e.innerText = String(opts.requiredMessage || 'Bu alan zorunlu.');
-        e.classList.remove('hidden');
-        i.focus();
-        return;
+      var val = '';
+      if (useDateTime) {
+        var dVal = String(di.value || '').trim();
+        var tVal = String(ti.value || '').trim();
+        if (opts.required && (!dVal || !tVal)) {
+          e.innerText = String(opts.requiredMessage || 'Bu alan zorunlu.');
+          e.classList.remove('hidden');
+          if (!dVal) di.focus();
+          else ti.focus();
+          return;
+        }
+        val = (dVal && tVal) ? (dVal + 'T' + tVal + ':00') : '';
+      } else {
+        val = String(i.value || '').trim();
+        if (needInput && opts.required && !val) {
+          e.innerText = String(opts.requiredMessage || 'Bu alan zorunlu.');
+          e.classList.remove('hidden');
+          i.focus();
+          return;
+        }
       }
       var f = cb;
       closeAdminUiDialog();
@@ -1546,7 +1595,16 @@
     };
     ok.onclick = function() { if (adminUiDialogCb) adminUiDialogCb(); };
     m.classList.remove('hidden');
-    if (needInput) setTimeout(function() { try { i.focus(); } catch (_e) {} }, 10);
+    if (needInput) {
+      setTimeout(function() {
+        try {
+          if (useDateTime) {
+            if (!di.value) di.focus();
+            else ti.focus();
+          } else i.focus();
+        } catch (_e) {}
+      }, 10);
+    }
   }
 
   function openAdminStudentPdfView(url) {
@@ -3093,14 +3151,21 @@
   function adminTrafficExtendAct(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast('Kalem seçin.', 'error'); return; }
+    var rid = String(resId || '').trim();
+    var row = (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid && String(x.type || '').toLowerCase() === 'return'; })
+      || (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid; })
+      || null;
+    var seed = splitRawIsoDateTime_((row && (row.returnLabel || row.time)) || '');
     openAdminUiDialog({
       title: 'Yeni İade Zamanı',
-      desc: 'Format: 2026-04-05T17:00',
+      desc: 'Yeni iade tarihini ve saatini seçin.',
       tone: 'warning',
       input: true,
+      inputMode: 'datetime_split',
       required: true,
-      requiredMessage: 'Yeni iade zamanı zorunlu.',
-      placeholder: 'YYYY-MM-DDTHH:mm',
+      requiredMessage: 'Yeni iade tarihi ve saati zorunlu.',
+      defaultDate: seed.date,
+      defaultTime: seed.time,
       okText: 'Güncelle'
     }, function(nd) {
       google.script.run.withSuccessHandler(function(r) {
