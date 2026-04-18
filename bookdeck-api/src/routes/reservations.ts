@@ -466,6 +466,11 @@ const normalizeBool = (raw: unknown): boolean => {
   return s === "true" || s === "1" || s === "yes";
 };
 
+const canOperateLevel5Equipment = (profile: Record<string, unknown>): boolean => {
+  const role = String(profile.role || "").trim().toLowerCase();
+  return role === "super_admin" || role === "technician" || normalizeBool(profile.senior_flag);
+};
+
 const getSemesterEndDateIso = (): string => {
   const now = new Date();
   const month = now.getMonth() + 1;
@@ -1738,8 +1743,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (String(item.status || "").toUpperCase() !== "AVAILABLE") {
       return reply.code(409).send({ ok: false, error: "Equipment not available." });
     }
-    const matrix = resolveAccessMatrix(profile as Record<string, unknown>);
     const requiredLevel = parseEquipmentLevel((item as Record<string, unknown>).required_level);
+    const canUseLevel5 = canOperateLevel5Equipment(profile as Record<string, unknown>);
+    if (requiredLevel >= 5 && !canUseLevel5) {
+      return reply.code(403).send({ ok: false, error: "Bu ekipman yalnızca super_admin, technician veya senior kullanıcılar için erişilebilir." });
+    }
+    const matrix = resolveAccessMatrix(profile as Record<string, unknown>);
     if (requiredLevel > matrix.maxEquipmentLevel) {
       return reply
         .code(403)
@@ -1893,6 +1902,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/admin/traffic/checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
     const actor = getAuthProfile(req);
+    const actorRecord = actor as unknown as Record<string, unknown>;
+    const canUseLevel5 = canOperateLevel5Equipment(actorRecord);
     const parsed = adminTrafficActionSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
@@ -1924,12 +1935,22 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
       const itemMetaRes = await supabaseAdmin
         .from("equipment_items")
-        .select("id,name,equipment_id,condition_out")
+        .select("id,name,equipment_id,condition_out,required_level")
         .in("id", allItemIds);
       if (itemMetaRes.error) return reply.code(500).send({ ok: false, error: itemMetaRes.error.message });
       const itemMetaById = new Map(
         ((itemMetaRes.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || "").trim(), r])
       );
+
+      for (const itemId of selectedItemIds) {
+        if (!itemId || itemId === eqId) continue;
+        const itemRow = itemMetaById.get(itemId);
+        if (!itemRow) continue;
+        const requiredLevel = parseEquipmentLevel(itemRow.required_level);
+        if (requiredLevel >= 5 && !canUseLevel5) {
+          return reply.code(403).send({ ok: false, error: "Seviye 5 ekipman yalnızca super_admin, technician veya senior kullanıcılar için checkout'a eklenebilir." });
+        }
+      }
 
       const itemsForPdf: Array<{ name: string; code: string; conditionOut: string }> = [];
       for (const itemId of allItemIds) {
@@ -2425,6 +2446,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       requester_email: String(p.email || "").toLowerCase(),
       requester_name: String(p.full_name || p.email || "")
     };
+    const targetCanUseLevel5 = canOperateLevel5Equipment(p);
+
+    const eqExisting = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,required_level")
+      .eq("id", id)
+      .maybeSingle();
+    if (eqExisting.error) return reply.code(500).send({ ok: false, error: eqExisting.error.message });
+    if (eqExisting.data) {
+      const requiredLevel = parseEquipmentLevel((eqExisting.data as Record<string, unknown>).required_level);
+      if (requiredLevel >= 5 && !targetCanUseLevel5) {
+        return reply.code(403).send({ ok: false, error: "Seviye 5 ekipman rezervasyonu yalnızca super_admin, technician veya senior kullanıcıya devredilebilir." });
+      }
+    }
 
     const eq = await supabaseAdmin
       .from("equipment_reservations")
@@ -3016,6 +3051,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/admin/quick-checkout", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
     const actor = getAuthProfile(req);
+    const actorRecord = actor as unknown as Record<string, unknown>;
+    const canUseLevel5 = canOperateLevel5Equipment(actorRecord);
     const parsed = quickCheckoutSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const p = parsed.data;
@@ -3036,6 +3073,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     for (const rawId of p.cart_ids) {
       const eqId = String(rawId || "").trim();
       if (!eqId) continue;
+      const itemMeta = await supabaseAdmin
+        .from("equipment_items")
+        .select("id,required_level")
+        .eq("id", eqId)
+        .limit(1)
+        .maybeSingle();
+      if (itemMeta.error) return reply.code(500).send({ ok: false, error: itemMeta.error.message });
+      if (!itemMeta.data) return reply.code(404).send({ ok: false, error: `Equipment item not found: ${eqId}` });
+      const requiredLevel = parseEquipmentLevel((itemMeta.data as Record<string, unknown>).required_level);
+      if (requiredLevel >= 5 && !canUseLevel5) {
+        return reply.code(403).send({ ok: false, error: "Seviye 5 ekipman için yalnızca super_admin, technician veya senior kullanıcılar hızlı çıkış yapabilir." });
+      }
       const created = await supabaseAdmin
                 .from("equipment_reservations")
                 .insert({
