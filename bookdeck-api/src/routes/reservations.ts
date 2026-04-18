@@ -34,10 +34,20 @@ const myBookingCancelSchema = z.object({
 });
 
 const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "iiw_admin"];
-const ACTIVE_RES_STATUSES = ["pending", "approved", "checked_out", "picked_up", "key_out"];
-const CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
+const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "checked_out", "picked_up", "key_out"];
+const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
-const ON_LOAN_RES_STATUSES = ["checked_out", "picked_up", "key_out"];
+const EQUIPMENT_ON_LOAN_RES_STATUSES = ["checked_out", "picked_up", "key_out"];
+const STUDIO_PENDING_STATUS = "pending";
+const STUDIO_APPROVED_STATUS = "approved_by_admin";
+const STUDIO_REJECTED_STATUS = "rejected_by_admin";
+const STUDIO_CANCELLED_STATUS = "cancelled_by_user";
+const STUDIO_PICKED_STATUS = "key_picked";
+const STUDIO_RETURNED_STATUS = "key_returned";
+const STUDIO_ACTIVE_RES_STATUSES = [STUDIO_PENDING_STATUS, STUDIO_APPROVED_STATUS, STUDIO_PICKED_STATUS, "approved"];
+const STUDIO_CLOSED_RES_STATUSES = [STUDIO_CANCELLED_STATUS, STUDIO_REJECTED_STATUS, STUDIO_RETURNED_STATUS, "cancelled", "rejected", "completed"];
+const ALL_ACTIVE_RES_STATUSES = Array.from(new Set([...EQUIPMENT_ACTIVE_RES_STATUSES, ...STUDIO_ACTIVE_RES_STATUSES]));
+const ALL_CLOSED_RES_STATUSES = Array.from(new Set([...EQUIPMENT_CLOSED_RES_STATUSES, ...STUDIO_CLOSED_RES_STATUSES]));
 const NOTIFY_TABLE_CANDIDATES = ["equipment_notify_subscriptions", "equipment_notify", "notify_subscriptions"];
 
 const notifySubscribeSchema = z.object({
@@ -139,7 +149,7 @@ const iiwSaveHoursSchema = z.object({
 
 const reservationIsActive = (status: string): boolean => {
   const s = String(status || "").trim().toLowerCase();
-  return ACTIVE_RES_STATUSES.includes(s) && !CLOSED_RES_STATUSES.includes(s);
+  return ALL_ACTIVE_RES_STATUSES.includes(s) && !ALL_CLOSED_RES_STATUSES.includes(s);
 };
 
 const normalizeCheckoutConditionOut = (raw: unknown): "Excellent" | "Minor Scratch" | "Missing Part" | "DAMAGED" => {
@@ -537,7 +547,7 @@ const getUserDashboardExtrasForProfile = async (
     .from("equipment_reservations")
     .select("id,equipment_item_id,start_at,end_at,status")
     .or(ownerFilter)
-    .in("status", ON_LOAN_RES_STATUSES)
+    .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
     .order("end_at", { ascending: true });
   if (loanRowsRes.error) throw new Error(loanRowsRes.error.message);
 
@@ -648,7 +658,7 @@ const hasPickupQueuedSoon = async (
     .from("equipment_reservations")
     .select("id,requester_profile_id,requester_email,start_at,status")
     .eq("equipment_item_id", itemId)
-    .in("status", ACTIVE_RES_STATUSES)
+    .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
     .gt("start_at", returnAtIso)
     .lte("start_at", windowEndIso)
     .neq("id", currentReservationId)
@@ -803,7 +813,7 @@ const listOverdueEquipmentRows = async (): Promise<Array<{
   due: string;
 }>> => {
   const nowIso = new Date().toISOString();
-  const activeForOverdue = Array.from(new Set(["approved", ...ON_LOAN_RES_STATUSES]));
+  const activeForOverdue = Array.from(new Set(["approved", ...EQUIPMENT_ON_LOAN_RES_STATUSES]));
   const eqRes = await supabaseAdmin
     .from("equipment_reservations")
     .select("id,equipment_item_id,requester_name,requester_profile_id,requester_email,end_at,status")
@@ -1280,14 +1290,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const status = String(existing.data.status || "").toLowerCase();
-    if (["cancelled", "rejected", "returned", "completed"].includes(status)) {
+    const closedStatuses = isStudio ? STUDIO_CLOSED_RES_STATUSES : EQUIPMENT_CLOSED_RES_STATUSES;
+    if (closedStatuses.includes(status)) {
       return { ok: true, already_closed: true, id, status };
     }
 
+    const nextStatus = isStudio ? STUDIO_CANCELLED_STATUS : "cancelled";
     const updated = await supabaseAdmin
       .from(table)
       .update({
-        status: "cancelled",
+        status: nextStatus,
         reviewed_by: String(profile.email || ""),
         reviewed_at: new Date().toISOString()
       })
@@ -1295,7 +1307,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id,status")
       .single();
     if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
-    return { ok: true, id: String(updated.data.id || id), status: String(updated.data.status || "cancelled") };
+    return { ok: true, id: String(updated.data.id || id), status: String(updated.data.status || nextStatus) };
   });
 
   app.get("/admin/pending", { preHandler: requireRoles(ADMIN_ROLES) }, async (_, reply) => {
@@ -1405,7 +1417,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .from("studio_reservations")
       .select("id")
       .eq("studio_id", studio_id)
-      .in("status", ["pending", "approved"])
+      .in("status", STUDIO_ACTIVE_RES_STATUSES)
       .lt("start_at", end_at)
       .gt("end_at", start_at)
       .limit(1);
@@ -1420,7 +1432,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       requester_email: profile.email,
       requester_name: profile.full_name || profile.email,
       access_level: String(studio.access_level || "A"),
-      status: isAdminRole(profile.role) ? "approved" : "pending",
+      status: isAdminRole(profile.role) ? STUDIO_APPROVED_STATUS : STUDIO_PENDING_STATUS,
       approval_required: !isAdminRole(profile.role),
       start_at,
       end_at,
@@ -1544,7 +1556,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const { data, error } = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "approved",
+        status: STUDIO_APPROVED_STATUS,
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString(),
         purpose: note ?? undefined
@@ -1565,7 +1577,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const { data, error } = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "rejected",
+        status: STUDIO_REJECTED_STATUS,
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString(),
         purpose: note ?? undefined
@@ -1681,7 +1693,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
               .eq("requester_email", requesterEmail)
               .eq("start_at", reservationStartAt)
               .eq("end_at", reservationEndAt)
-              .in("status", ACTIVE_RES_STATUSES)
+              .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
               .limit(1);
             if (existingExtra.error) {
               return reply.code(500).send({ ok: false, error: existingExtra.error.message });
@@ -1773,7 +1785,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "approved",
+        status: STUDIO_PICKED_STATUS,
         studio_handover_note: studioHandoverNote || null,
         reviewed_by: actor.email,
         reviewed_at: nowIso
@@ -1826,7 +1838,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           ok: true,
           success: true,
           id,
-          status: String(stRow.status || "approved"),
+          status: String(stRow.status || STUDIO_PICKED_STATUS),
           url: pdfUrl || ""
         };
       } catch (e) {
@@ -1855,7 +1867,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (eqBefore.data) {
       const before = eqBefore.data as Record<string, unknown>;
       const currentStatus = String(before.status || "").toLowerCase();
-      if (!ON_LOAN_RES_STATUSES.includes(currentStatus)) {
+      if (!EQUIPMENT_ON_LOAN_RES_STATUSES.includes(currentStatus)) {
         return reply.code(400).send({ ok: false, error: `Checkin is only allowed for on-loan items. Current status: ${currentStatus || "unknown"}` });
       }
 
@@ -1913,7 +1925,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "completed",
+        status: STUDIO_RETURNED_STATUS,
         return_handover_note: String(parsed.data.studio_handover_note || "").trim() || null,
         reviewed_by: actor.email,
         reviewed_at: nowIso
@@ -1922,7 +1934,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id,status")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || "approved") };
+    if (st.data) return { ok: true, success: true, id, status: String((st.data as Record<string, unknown>).status || STUDIO_RETURNED_STATUS) };
 
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
@@ -2026,7 +2038,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "cancelled",
+        status: STUDIO_CANCELLED_STATUS,
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString()
       })
@@ -2034,7 +2046,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id")
       .maybeSingle();
     if (st.error) return reply.code(500).send({ ok: false, error: st.error.message });
-    if (st.data) return { ok: true, success: true, id, status: "cancelled" };
+    if (st.data) return { ok: true, success: true, id, status: STUDIO_CANCELLED_STATUS };
     return reply.code(404).send({ ok: false, error: "Reservation not found." });
   });
 
@@ -2347,7 +2359,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const overlaps = await supabaseAdmin
       .from("equipment_reservations")
       .select("equipment_item_id")
-      .in("status", ACTIVE_RES_STATUSES)
+      .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
       .lt("start_at", end_at)
       .gt("end_at", start_at);
     if (overlaps.error) return reply.code(500).send({ ok: false, error: overlaps.error.message, list: [] });
@@ -2815,8 +2827,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const status = String(r.status || "").toLowerCase();
       const row = studioByMap.get(studio) || { total: 0, approved: 0, cancelled: 0 };
       row.total += 1;
-      if (status === "approved") row.approved += 1;
-      if (status === "cancelled") row.cancelled += 1;
+      if (status === STUDIO_APPROVED_STATUS || status === STUDIO_PICKED_STATUS || status === "approved") row.approved += 1;
+      if (status === STUDIO_CANCELLED_STATUS || status === "cancelled") row.cancelled += 1;
       studioByMap.set(studio, row);
     });
 
