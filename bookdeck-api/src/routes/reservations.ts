@@ -1773,7 +1773,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "checked_out",
+        status: "approved",
+        studio_handover_note: studioHandoverNote || null,
         reviewed_by: actor.email,
         reviewed_at: nowIso
       })
@@ -1912,7 +1913,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        status: "returned",
+        status: "completed",
+        return_handover_note: String(parsed.data.studio_handover_note || "").trim() || null,
         reviewed_by: actor.email,
         reviewed_at: nowIso
       })
