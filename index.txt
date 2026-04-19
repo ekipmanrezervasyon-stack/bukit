@@ -743,6 +743,38 @@
     // ═══════════════════════════════════════
     var currentTestToken = null;
     var currentUser = null;
+    function readEquipmentDeepLinkFromUrl_() {
+      var keys = ['eq', 'equipment', 'equipment_id', 'equipment_name', 'item', 'model'];
+      function pickFromParams_(sp) {
+        for (var i = 0; i < keys.length; i++) {
+          var v = String(sp.get(keys[i]) || '').trim();
+          if (v) return v;
+        }
+        return '';
+      }
+      function safeDecode_(v) {
+        var raw = String(v || '').trim();
+        if (!raw) return '';
+        try { return decodeURIComponent(raw.replace(/\+/g, '%20')).trim(); } catch (e) { return raw; }
+      }
+      try {
+        var qp = new URLSearchParams(window.location.search || '');
+        var fromQuery = pickFromParams_(qp);
+        if (fromQuery) return safeDecode_(fromQuery);
+      } catch (_e0) {}
+      try {
+        var hashRaw = String(window.location.hash || '').replace(/^#/, '').trim();
+        if (!hashRaw) return '';
+        if (/^eq-detail-/i.test(hashRaw)) return safeDecode_(hashRaw);
+        var hq = hashRaw.replace(/^\?/, '');
+        if (hq.indexOf('=') >= 0) {
+          var hp = new URLSearchParams(hq);
+          var fromHashQuery = pickFromParams_(hp);
+          if (fromHashQuery) return safeDecode_(fromHashQuery);
+        }
+      } catch (_e1) {}
+      return '';
+    }
     var USER_APP_BASE = (function() {
       try {
         var qp = new URLSearchParams(window.location.search);
@@ -1089,6 +1121,11 @@
     var studioCalendarBusy = false;
     var studioCalendarChecking = false;
     var lastStudioCalBusyResult = false;
+    var equipmentDeepLinkRaw = readEquipmentDeepLinkFromUrl_();
+    var equipmentDeepLinkApplied = false;
+    var equipmentDeepLinkFetchTried = false;
+    var equipmentDeepLinkBusy = false;
+    var __eqDeepLinkTimer = null;
     var STUDIO_CALENDAR_BUSY_MSG_EN = 'The time range you selected is not available for this studio reservation.';
     var STUDIO_CALENDAR_BUSY_MSG_TR = 'Bu başlangıç (ve ön kontrol bitişi) için stüdyo takvimi dolu. Lütfen başka saat seçin; bitiş alanlarını doldurmadan da uyarı alırsınız.';
     function resolveStudioCanonicalKey_(row){
@@ -1778,6 +1815,7 @@
         setTimeout(function() {
           activateTab('view-equipment');
           loadEquipment(currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY);
+          scheduleEquipmentDeepLinkAttempt_();
         }, 0);
         setTimeout(function() {
           // Warm top categories in background so first click is instant.
@@ -1856,6 +1894,7 @@
       setTimeout(function() {
         activateTab('view-equipment');
         loadEquipment(currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY);
+        scheduleEquipmentDeepLinkAttempt_();
       }, 0);
       google.script.run.withSuccessHandler(function(ex){ applyDashboardBlockState(ex); }).withFailureHandler(function(){ applyDashboardBlockState(null); }).getUserDashboardExtras(currentTestToken);
       return true;
@@ -2094,6 +2133,9 @@
       eqCart = [];
       allEquipmentData = [];
       equipmentCategoryCache = {};
+      equipmentDeepLinkRaw = readEquipmentDeepLinkFromUrl_();
+      equipmentDeepLinkApplied = false;
+      equipmentDeepLinkFetchTried = false;
       document.getElementById('login-overlay').style.display = 'flex';
       document.getElementById('cart-bar').classList.add('translate-y-full');
       loadLoginScreen();
@@ -2233,6 +2275,164 @@
       }
       return null;
     }
+    function normalizedEquipmentDeepLinkToken_(raw) {
+      return normalizeEquipmentNameKey_(raw).replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+    function normalizedEquipmentDeepLinkSlug_(raw) {
+      return normalizedEquipmentDeepLinkToken_(raw).replace(/\s+/g, '-');
+    }
+    function getEquipmentGroupsForDeepLink_() {
+      var rows = [];
+      var seen = {};
+      function pushRows_(arr) {
+        (arr || []).forEach(function(it) {
+          if (!it) return;
+          var dk = detailKeyForEquipmentGroup(it);
+          if (!dk || seen[dk]) return;
+          seen[dk] = 1;
+          rows.push(it);
+        });
+      }
+      pushRows_(allEquipmentData || []);
+      for (var k in equipmentCategoryCache) {
+        if (!Object.prototype.hasOwnProperty.call(equipmentCategoryCache, k)) continue;
+        pushRows_(equipmentCategoryCache[k] || []);
+      }
+      return rows;
+    }
+    function resolveEquipmentGroupByDeepLink_(rawTarget) {
+      var raw = String(rawTarget || '').trim();
+      if (!raw) return null;
+      var rows = getEquipmentGroupsForDeepLink_();
+      if (!rows.length) return null;
+      var targetRaw = raw;
+      var targetUpper = targetRaw.toUpperCase();
+      var targetLower = targetRaw.toLowerCase();
+      var targetNorm = normalizedEquipmentDeepLinkToken_(targetRaw);
+      var targetSlug = normalizedEquipmentDeepLinkSlug_(targetRaw);
+      var detailTarget = '';
+      if (/^eq-detail-/i.test(targetRaw)) {
+        detailTarget = 'eq-detail-' + normalizedEquipmentDeepLinkSlug_(targetRaw.replace(/^eq-detail-/i, ''));
+      } else if (targetSlug) {
+        detailTarget = 'eq-detail-' + targetSlug;
+      }
+      var best = null;
+      var ambiguous = false;
+      function scoreValue_(val, kind) {
+        var v = String(val || '').trim();
+        if (!v) return 0;
+        var vUpper = v.toUpperCase();
+        var vLower = v.toLowerCase();
+        if (kind === 'detail' && detailTarget && vLower === detailTarget) return 150;
+        if (vUpper === targetUpper) return 130;
+        if (vLower === targetLower) return 126;
+        var vn = normalizedEquipmentDeepLinkToken_(v);
+        if (!vn) return 0;
+        var vs = vn.replace(/\s+/g, '-');
+        if (detailTarget && kind === 'detail' && vs && ('eq-detail-' + vs) === detailTarget) return 145;
+        if (targetSlug && vs === targetSlug) return kind === 'name' ? 118 : 120;
+        if (targetNorm && vn === targetNorm) return kind === 'name' ? 114 : 112;
+        if (kind === 'name' && targetNorm && vn && (vn.indexOf(targetNorm) >= 0 || targetNorm.indexOf(vn) >= 0)) return 80;
+        return 0;
+      }
+      rows.forEach(function(it) {
+        var score = 0;
+        score = Math.max(score, scoreValue_(detailKeyForEquipmentGroup(it), 'detail'));
+        score = Math.max(score, scoreValue_(it.groupKey, 'id'));
+        score = Math.max(score, scoreValue_(it.id, 'id'));
+        score = Math.max(score, scoreValue_(it.displayId, 'id'));
+        score = Math.max(score, scoreValue_(it.name, 'name'));
+        score = Math.max(score, scoreValue_(it.typeLabel, 'name'));
+        if (Array.isArray(it.details)) {
+          it.details.forEach(function(d) {
+            score = Math.max(score, scoreValue_(d && d.equipment_id, 'id'));
+            score = Math.max(score, scoreValue_(d && d.equipment_code, 'id'));
+            score = Math.max(score, scoreValue_(d && d.name, 'name'));
+          });
+        }
+        if (!score) return;
+        if (!best || score > best.score) {
+          best = { score: score, row: it };
+          ambiguous = false;
+          return;
+        }
+        if (best && score === best.score && score < 120) ambiguous = true;
+      });
+      if (!best || ambiguous) return null;
+      return best.row;
+    }
+    function focusEquipmentCardByDetailKey_(detailKey, tryNo) {
+      var key = String(detailKey || '').trim();
+      if (!key) return;
+      var n = Number(tryNo || 0);
+      var el = document.getElementById(key);
+      if (!el) {
+        if (n < 16) setTimeout(function() { focusEquipmentCardByDetailKey_(key, n + 1); }, 130);
+        return;
+      }
+      try {
+        var d = el.closest('details');
+        while (d) {
+          d.open = true;
+          d = d.parentElement ? d.parentElement.closest('details') : null;
+        }
+      } catch (_e0) {}
+      try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_e1) {}
+      var prevTrans = el.style.transition || '';
+      var prevShadow = el.style.boxShadow || '';
+      var prevTransform = el.style.transform || '';
+      el.style.transition = 'box-shadow .25s ease, transform .25s ease';
+      el.style.boxShadow = '0 0 0 3px rgba(227,6,19,.35), 0 12px 28px rgba(15,23,42,.14)';
+      el.style.transform = 'translateY(-1px)';
+      setTimeout(function() {
+        el.style.transition = prevTrans;
+        el.style.boxShadow = prevShadow;
+        el.style.transform = prevTransform;
+      }, 2200);
+    }
+    function scheduleEquipmentDeepLinkAttempt_() {
+      if (equipmentDeepLinkApplied || !equipmentDeepLinkRaw) return;
+      if (__eqDeepLinkTimer) clearTimeout(__eqDeepLinkTimer);
+      __eqDeepLinkTimer = setTimeout(function() {
+        __eqDeepLinkTimer = null;
+        attemptEquipmentDeepLink_();
+      }, 140);
+    }
+    function attemptEquipmentDeepLink_() {
+      if (equipmentDeepLinkApplied || !equipmentDeepLinkRaw || !currentTestToken || !currentUser) return;
+      var target = resolveEquipmentGroupByDeepLink_(equipmentDeepLinkRaw);
+      if (!target) {
+        if (equipmentDeepLinkBusy || equipmentDeepLinkFetchTried) return;
+        equipmentDeepLinkFetchTried = true;
+        equipmentDeepLinkBusy = true;
+        fetchEquipmentItemsFromApi_('All').then(function(items) {
+          equipmentCategoryCache.All = groupEquipmentItemsByName(items);
+          equipmentDeepLinkBusy = false;
+          scheduleEquipmentDeepLinkAttempt_();
+        }).catch(function() {
+          equipmentDeepLinkBusy = false;
+        });
+        return;
+      }
+      equipmentDeepLinkApplied = true;
+      var searchInput = document.getElementById('equipment-search');
+      if (searchInput) searchInput.value = '';
+      activateTab('view-equipment');
+      var targetCat = getBaseCategory(target);
+      if (!targetCat || targetCat === 'Other') targetCat = 'All';
+      if (currentEquipmentCategory !== targetCat || !Array.isArray(allEquipmentData) || !allEquipmentData.length) {
+        loadEquipment(targetCat);
+      }
+      focusEquipmentCardByDetailKey_(detailKeyForEquipmentGroup(target), 0);
+    }
+    window.addEventListener('hashchange', function() {
+      var nextTarget = readEquipmentDeepLinkFromUrl_();
+      if (!nextTarget) return;
+      equipmentDeepLinkRaw = nextTarget;
+      equipmentDeepLinkApplied = false;
+      equipmentDeepLinkFetchTried = false;
+      scheduleEquipmentDeepLinkAttempt_();
+    });
     function syncEquipmentCategoryTabStyles() {
       var sel = currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY;
       document.querySelectorAll('#filter-buttons .filter-btn').forEach(function(b) {
@@ -2741,6 +2941,7 @@
           if (Object.prototype.hasOwnProperty.call(equipmentCategoryCache, catEq)) {
             allEquipmentData = equipmentCategoryCache[catEq];
             scheduleEquipmentUiRefresh_('tab-activate-cache');
+            scheduleEquipmentDeepLinkAttempt_();
           } else {
             loadEquipment(catEq);
           }
@@ -2796,6 +2997,7 @@
       if (equipmentCategoryCache[catUse]) {
         allEquipmentData = equipmentCategoryCache[catUse];
         scheduleEquipmentUiRefresh_('loadEquipment-cache');
+        scheduleEquipmentDeepLinkAttempt_();
         return;
       }
       grid.innerHTML='<p class="text-blue-500 p-4 text-xs md:text-base animate-pulse">'+(currentLang==='tr'?'Envanter senkronize ediliyor...':'Syncing inventory...')+'</p>';
@@ -2804,6 +3006,7 @@
         equipmentCategoryCache[catUse] = groupedByName;
         allEquipmentData = groupedByName;
         scheduleEquipmentUiRefresh_('loadEquipment-remote');
+        scheduleEquipmentDeepLinkAttempt_();
       }).catch(function(err){
         grid.innerHTML='<p class="text-red-500 p-4">'+(currentLang==='tr'?'Yuklenemedi.':'Failed to load.')+' '+escHtml((err&&err.message)||'')+'</p>';
       });
