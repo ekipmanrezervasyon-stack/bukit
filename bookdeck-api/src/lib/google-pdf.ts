@@ -120,49 +120,57 @@ const generateEquipmentFromTemplate = async (ctx: EquipmentCheckoutContext): Pro
     return null;
   }
 
-  const pdfDoc = await LibPdfDocument.load(bytes);
+  const templateDoc = await LibPdfDocument.load(bytes);
+  const templatePage = templateDoc.getPages()[0];
+  if (!templatePage) return null;
+
+  const pdfDoc = await LibPdfDocument.create();
   pdfDoc.registerFontkit(fontkit);
-  const page = pdfDoc.getPages()[0];
-  if (!page) return null;
   const font = await loadOverlayFont(pdfDoc);
 
-  const draw = (text: string, x: number, y: number, size = 9) =>
+  const rowsPerPage = 9;
+  const totalItems = Array.isArray(ctx.items) ? ctx.items.length : 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage));
+
+  const drawText = (page: import("pdf-lib").PDFPage, text: string, x: number, y: number, size = 9) =>
     page.drawText(safeText(text), { x, y, size, font, color: rgb(0, 0, 0) });
-
-  // Header alanları — etiket sonrasına yaz
-  // Check Out Date: y=720, etiket "Check Out Date:" ~115px → değer 160'tan başlasın
-  draw(formatDate(ctx.startAt), 160, 722);
-
-  // Return Date: y=696
-  draw(formatDate(ctx.endAt), 160, 698);
-
-  // Profile Name: y=673
-  draw(clip(ctx.studentName, 40), 160, 675);
-
-  // Profile ID: y=649
-  draw(clip(ctx.reservationId, 30), 160, 651, 8);
-
-  // Project Explanation: diğer alanlarla aynı yatay başlangıç hizası
-  draw(clip(ctx.projectExplanation || "-", 60), 160, 628, 8);
 
   // Tablo satırları
   // Başlık y=595, ilk satır ~575'ten başlıyor, her satır ~22px aralıklı
-  // Sütun x koordinatları: ID=60, NAME=185, CONDITION_OUT=327, CONDITION_IN=460
+  // NAME kolonu kullanıcı isteğine göre ~4 karakter sola kaydırıldı.
   const tableStartY = 575;
   const rowHeight = 24;
+  const nameColX = 171; // 187 -> 171 (yaklaşık 4 karakter sola)
 
-  for (let i = 0; i < Math.min(ctx.items.length, 9); i++) {
-    const item = ctx.items[i];
-    const y = tableStartY - i * rowHeight;
-    draw(clip(item.code || "-", 14),          62,  y, 8);
-    draw(clip(item.name || "-", 28),          187, y, 8);
-    draw(clip(item.conditionOut || "-", 14),  329, y, 8);
-    // Condition In kasıtlı boş bırakılıyor (elle doldurulacak)
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+    const [copied] = await pdfDoc.copyPages(templateDoc, [0]);
+    const page = pdfDoc.addPage(copied);
+
+    // Header alanları — her sayfada tekrar edilir.
+    drawText(page, formatDate(ctx.startAt), 160, 722);
+    drawText(page, formatDate(ctx.endAt), 160, 698);
+    drawText(page, clip(ctx.studentName, 40), 160, 675);
+    drawText(page, clip(ctx.reservationId, 30), 160, 651, 8);
+    drawText(page, clip(ctx.projectExplanation || "-", 60), 160, 628, 8);
+
+    const start = pageIndex * rowsPerPage;
+    const end = Math.min(start + rowsPerPage, totalItems);
+    for (let i = start; i < end; i++) {
+      const item = ctx.items[i];
+      const row = i - start;
+      const y = tableStartY - row * rowHeight;
+      drawText(page, clip(item.code || "-", 14), 62, y, 8);
+      drawText(page, clip(item.name || "-", 28), nameColX, y, 8);
+      drawText(page, clip(item.conditionOut || "-", 14), 329, y, 8);
+      // Condition In kasıtlı boş bırakılıyor (elle doldurulacak)
+    }
+
+    // İmzalar son sayfada bırakılır.
+    if (pageIndex === totalPages - 1) {
+      drawText(page, `${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80, 140, 8);
+      drawText(page, `${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`, 305, 140, 8);
+    }
   }
-
-  // İmza tablosu — RECEIVED/RETURNED altı y=166, tablo içi ~140
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.startAt)}`, 80,  140, 8);
-  draw(`${clip(ctx.studentName, 22)} / ${formatDate(ctx.endAt)}`,   305, 140, 8);
 
   return toDataUrl(await pdfDoc.save());
 };
