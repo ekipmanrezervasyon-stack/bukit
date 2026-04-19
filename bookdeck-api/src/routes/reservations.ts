@@ -2932,7 +2932,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       name: String(p.full_name || ""),
       email: String(p.email || ""),
       studentId: String(p.student_number || p.staff_auto_id || p.staff_number || p.id || ""),
-      level: String(p.access_override_level || "1")
+      level: String(resolveAccessMatrix(p as Record<string, unknown>).maxEquipmentLevel || 1)
     };
   });
 
