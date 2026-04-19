@@ -351,7 +351,7 @@
             <table class="w-full text-left text-xs">
               <thead class="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Rez. ID</th>
+                  <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Ekipman ID</th>
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Ekipman</th>
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Kullanıcı</th>
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Teslim</th>
@@ -1359,15 +1359,18 @@
           var rows = Array.isArray(eqRes.data) ? eqRes.data : [];
           var inv = Array.isArray(invRes.data) ? invRes.data : [];
           var nameById = {};
+          var codeById = {};
           inv.forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
             if (!iid) return;
             nameById[iid] = String((it && it.name) || iid);
+            codeById[iid] = String((it && (it.equipment_id || it.code)) || '').trim().toUpperCase();
           });
           return rows.map(function(r) {
             var eqId = String((r && r.equipment_item_id) || '').trim();
             return {
               resId: String((r && r.id) || ''),
+              eqCode: codeById[eqId] || '',
               eqName: nameById[eqId] || eqId || '—',
               userName: String((r && (r.requester_name || r.requester_email)) || '—'),
               startDt: String((r && r.start_at) || ''),
@@ -4009,14 +4012,14 @@
         if (statusFilter && stRaw !== statusFilter) return;
         if (userFilter && String(r.userName || '').toLowerCase().indexOf(userFilter) === -1) return;
         if (eqFilter) {
-          var eqBlob = (String(r.eqName || '') + ' ' + String(r.resId || '')).toLowerCase();
+          var eqBlob = (String(r.eqName || '') + ' ' + String(r.eqCode || '') + ' ' + String(r.resId || '')).toLowerCase();
           if (eqBlob.indexOf(eqFilter) === -1) return;
         }
         visible++;
         var badgeClass = statusMap[stRaw] || 'bg-gray-100 text-gray-600';
         var stShow = statusLabelTr[stRaw] || stRaw || '-';
         var fmtDt = function(dt) { try { return dt ? new Date(dt).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'; } catch(e) { return dt || '-'; } };
-        tbody.innerHTML += '<tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-5 py-3 text-[10px] font-mono text-gray-400">' + (r.resId || '-') + '</td><td class="px-5 py-3 text-[11px] font-bold text-gray-800">' + (r.eqName || '-') + '</td><td class="px-5 py-3 text-[11px] text-gray-600">' + (r.userName || '-') + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.startDt) + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.endDt) + '</td><td class="px-5 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-black ' + badgeClass + '">' + stShow + '</span></td></tr>';
+        tbody.innerHTML += '<tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-5 py-3 text-[10px] font-mono text-gray-400">' + (r.eqCode || '-') + '</td><td class="px-5 py-3 text-[11px] font-bold text-gray-800">' + (r.eqName || '-') + '</td><td class="px-5 py-3 text-[11px] text-gray-600">' + (r.userName || '-') + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.startDt) + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.endDt) + '</td><td class="px-5 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-black ' + badgeClass + '">' + stShow + '</span></td></tr>';
       });
       if (!visible) tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Filtreye uygun kayıt bulunamadı.</td></tr>';
     }).withFailureHandler(function(err) {
