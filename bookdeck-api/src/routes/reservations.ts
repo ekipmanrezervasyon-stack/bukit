@@ -39,6 +39,8 @@ const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use"
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
 const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
+const EQUIPMENT_CATEGORY_LIMITS: Record<string, number> = { Cam: 1, Ops: 2, Sound: 3, Light: 5, Grip: 5 };
+const EQUIPMENT_CATEGORY_DEFAULT_LIMIT = 5;
 const STUDIO_PENDING_STATUS = "pending";
 const STUDIO_APPROVED_STATUS = "approved_by_admin";
 const STUDIO_REJECTED_STATUS = "rejected_by_admin";
@@ -229,6 +231,40 @@ const parseEquipmentLevel = (raw: unknown): number => {
   if (v.includes("PRO")) return 4;
   if (v.includes("SENIOR")) return 5;
   return 1;
+};
+
+const normalizeCategoryBlob = (raw: unknown): string =>
+  String(raw ?? "")
+    .toLowerCase()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c");
+
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  Cam: ["cam", "kamera", "camera", "dslr", "video"],
+  Ops: ["opt", "lens", "optik", "optics", "filtre", "filter"],
+  Sound: ["snd", "sound", "ses", "audio", "recorder", "mikser", "mic", "mikrofon", "yaka", "boom"],
+  Light: ["lgh", "light", "isik", "lighting", "led"],
+  Grip: ["grp", "grip", "tripod", "ayak", "stand", "gimbal"]
+};
+
+const isLightStandGripBlob = (blob: string): boolean => {
+  const s = normalizeCategoryBlob(blob);
+  return s.includes("light stand") || s.includes("lighting stand");
+};
+
+const resolveEquipmentCategoryBucket = (item: Record<string, unknown>): "Cam" | "Ops" | "Sound" | "Light" | "Grip" | "Other" => {
+  const blob = normalizeCategoryBlob(
+    `${String(item.category || "")} ${String(item.type || "")} ${String(item.type_desc || "")} ${String(item.name || "")} ${String(item.equipment_id || "")} ${String(item.id || "")}`
+  );
+  if (isLightStandGripBlob(blob)) return "Grip";
+  for (const key of Object.keys(CATEGORY_KEYWORDS) as Array<"Cam" | "Ops" | "Sound" | "Light" | "Grip">) {
+    if (CATEGORY_KEYWORDS[key].some((kw) => blob.includes(kw))) return key;
+  }
+  return "Other";
 };
 
 const parseStudentDeptFromNumber = (studentNoRaw: unknown): { code: string; abbr: string; baseLevel: number; isApplied: boolean } | null => {
@@ -1753,6 +1789,53 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply
         .code(403)
         .send({ ok: false, error: `Bu ekipman seviye ${requiredLevel} yetkisi gerektirir. Hesabinizin azami seviyesi ${matrix.maxEquipmentLevel}.` });
+    }
+
+    if (!isAppAdminRole(String(profile.role || ""))) {
+      const targetCategory = resolveEquipmentCategoryBucket(item as Record<string, unknown>);
+      const maxInCategory = EQUIPMENT_CATEGORY_LIMITS[targetCategory] ?? EQUIPMENT_CATEGORY_DEFAULT_LIMIT;
+      const profileId = String(profile.id || "").trim();
+      const requesterEmail = String(profile.email || "").trim().toLowerCase();
+      if (profileId || requesterEmail) {
+        const ownerFilter = profileId && requesterEmail
+          ? `requester_profile_id.eq.${profileId},requester_email.eq.${requesterEmail}`
+          : profileId
+            ? `requester_profile_id.eq.${profileId}`
+            : `requester_email.eq.${requesterEmail}`;
+        const loansRes = await supabaseAdmin
+          .from("equipment_reservations")
+          .select("equipment_item_id")
+          .or(ownerFilter)
+          .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES);
+        if (loansRes.error) return reply.code(500).send({ ok: false, error: loansRes.error.message });
+
+        const loanItemIds = Array.from(
+          new Set(
+            (loansRes.data ?? [])
+              .map((r) => String((r as Record<string, unknown>).equipment_item_id || "").trim())
+              .filter(Boolean)
+          )
+        );
+        if (loanItemIds.length) {
+          const loanItemsRes = await supabaseAdmin
+            .from("equipment_items")
+            .select("id,name,category,type,type_desc,equipment_id")
+            .in("id", loanItemIds);
+          if (loanItemsRes.error) return reply.code(500).send({ ok: false, error: loanItemsRes.error.message });
+          let sameCategoryOnLoan = 0;
+          for (const li of (loanItemsRes.data ?? []) as Record<string, unknown>[]) {
+            if (resolveEquipmentCategoryBucket(li) === targetCategory) sameCategoryOnLoan += 1;
+          }
+          if (sameCategoryOnLoan >= maxInCategory) {
+            return reply.code(409).send({
+              ok: false,
+              error:
+                `Bu kategoride limit dolu (${targetCategory}: ${sameCategoryOnLoan}/${maxInCategory}). ` +
+                "Üzerinizdeki ekipmanı iade etmeden bu kategoriden yeni rezervasyon açamazsınız."
+            });
+          }
+        }
+      }
     }
 
     const overlap = await supabaseAdmin
