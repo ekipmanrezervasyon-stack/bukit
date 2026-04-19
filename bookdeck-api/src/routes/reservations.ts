@@ -35,6 +35,9 @@ const myBookingCancelSchema = z.object({
 
 const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "iiw_admin"];
 const EQUIPMENT_CHECKED_OUT_STATUS = "IN_USE";
+const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
+  new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
+);
 const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
@@ -192,6 +195,77 @@ const findMappedConditionOut = (conditionMap: Record<string, string>, eqId: stri
   const up = conditionMap[id.toUpperCase()];
   if (typeof up === "string" && up.trim()) return normalizeCheckoutConditionOut(up);
   return null;
+};
+
+const isEquipmentReservationStatusConstraintError = (err: unknown): boolean => {
+  if (!err || typeof err !== "object") return false;
+  const obj = err as { code?: string; message?: string; details?: string; hint?: string };
+  const msg = `${String(obj.message || "")} ${String(obj.details || "")} ${String(obj.hint || "")}`.toLowerCase();
+  if (String(obj.code || "") === "23514") return true;
+  if (msg.includes("equipment_reservations_status_check")) return true;
+  return msg.includes("violates check constraint") && msg.includes("status");
+};
+
+const updateEquipmentReservationToCheckedOut = async (
+  reservationId: string,
+  patch: Record<string, unknown>
+): Promise<{ data: Record<string, unknown> | null; status: string; error: { message: string } | null }> => {
+  let lastErr: { message: string } | null = null;
+  for (const candidate of EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES) {
+    const upd = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({ ...patch, status: candidate })
+      .eq("id", reservationId)
+      .select("id,status")
+      .single();
+    if (!upd.error) {
+      return {
+        data: (upd.data as Record<string, unknown> | null) || null,
+        status: String((upd.data as Record<string, unknown> | null)?.status || candidate),
+        error: null
+      };
+    }
+    if (isEquipmentReservationStatusConstraintError(upd.error)) {
+      lastErr = { message: upd.error.message };
+      continue;
+    }
+    return { data: null, status: candidate, error: { message: upd.error.message } };
+  }
+  return {
+    data: null,
+    status: EQUIPMENT_CHECKED_OUT_STATUS,
+    error: lastErr || { message: "No supported checked-out status value matched equipment_reservations_status_check." }
+  };
+};
+
+const insertEquipmentReservationAsCheckedOut = async (
+  payload: Record<string, unknown>
+): Promise<{ data: Record<string, unknown> | null; status: string; error: { message: string } | null }> => {
+  let lastErr: { message: string } | null = null;
+  for (const candidate of EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES) {
+    const ins = await supabaseAdmin
+      .from("equipment_reservations")
+      .insert({ ...payload, status: candidate })
+      .select("id,status")
+      .single();
+    if (!ins.error) {
+      return {
+        data: (ins.data as Record<string, unknown> | null) || null,
+        status: String((ins.data as Record<string, unknown> | null)?.status || candidate),
+        error: null
+      };
+    }
+    if (isEquipmentReservationStatusConstraintError(ins.error)) {
+      lastErr = { message: ins.error.message };
+      continue;
+    }
+    return { data: null, status: candidate, error: { message: ins.error.message } };
+  }
+  return {
+    data: null,
+    status: EQUIPMENT_CHECKED_OUT_STATUS,
+    error: lastErr || { message: "No supported checked-out status value matched equipment_reservations_status_check." }
+  };
 };
 
 const hasPrivilegedStudioAccess = (role: string): boolean =>
@@ -2111,17 +2185,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
       }
 
-      const eqMark = await supabaseAdmin
-        .from("equipment_reservations")
-        .update({
-          status: EQUIPMENT_CHECKED_OUT_STATUS,
-          reviewed_by: actor.email,
-          reviewed_at: nowIso
-        })
-        .eq("id", id)
-        .select("id")
-        .single();
+      const eqMark = await updateEquipmentReservationToCheckedOut(id, {
+        reviewed_by: actor.email,
+        reviewed_at: nowIso
+      });
       if (eqMark.error) return reply.code(500).send({ ok: false, error: eqMark.error.message });
+      const checkoutStatusUsed = eqMark.status || EQUIPMENT_CHECKED_OUT_STATUS;
+      if (checkoutStatusUsed !== EQUIPMENT_CHECKED_OUT_STATUS) {
+        req.log.warn(
+          { reservationId: id, preferredStatus: EQUIPMENT_CHECKED_OUT_STATUS, fallbackStatus: checkoutStatusUsed },
+          "equipment checkout status fallback applied for equipment_reservations"
+        );
+      }
 
       for (const itemId of allItemIds) {
         const patch: Record<string, unknown> = { status: "IN_USE" };
@@ -2149,38 +2224,27 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           if (existingExtra.error) return reply.code(500).send({ ok: false, error: existingExtra.error.message });
 
           if ((existingExtra.data ?? []).length === 0) {
-            const createdExtra = await supabaseAdmin
-              .from("equipment_reservations")
-              .insert({
-                equipment_item_id: itemId,
-                requester_profile_id: requesterProfileId,
-                requester_email: requesterEmail,
-                requester_name: requesterName,
-                required_level: requiredLevel,
-                status: EQUIPMENT_CHECKED_OUT_STATUS,
-                approval_required: false,
-                start_at: reservationStartAt,
-                end_at: reservationEndAt,
-                note: reservationNote,
-                reviewed_by: String(actor.email || ""),
-                reviewed_at: nowIso
-              })
-              .select("id")
-              .single();
+            const createdExtra = await insertEquipmentReservationAsCheckedOut({
+              equipment_item_id: itemId,
+              requester_profile_id: requesterProfileId,
+              requester_email: requesterEmail,
+              requester_name: requesterName,
+              required_level: requiredLevel,
+              approval_required: false,
+              start_at: reservationStartAt,
+              end_at: reservationEndAt,
+              note: reservationNote,
+              reviewed_by: String(actor.email || ""),
+              reviewed_at: nowIso
+            });
             if (createdExtra.error) return reply.code(500).send({ ok: false, error: createdExtra.error.message });
           } else {
             const existingId = String((existingExtra.data?.[0] as Record<string, unknown> | undefined)?.id || "").trim();
             if (existingId) {
-              const updExisting = await supabaseAdmin
-                .from("equipment_reservations")
-                .update({
-                  status: EQUIPMENT_CHECKED_OUT_STATUS,
-                  reviewed_by: String(actor.email || ""),
-                  reviewed_at: nowIso
-                })
-                .eq("id", existingId)
-                .select("id")
-                .single();
+              const updExisting = await updateEquipmentReservationToCheckedOut(existingId, {
+                reviewed_by: String(actor.email || ""),
+                reviewed_at: nowIso
+              });
               if (updExisting.error) return reply.code(500).send({ ok: false, error: updExisting.error.message });
             }
           }
@@ -2201,7 +2265,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
         }
       }
-      return { ok: true, success: true, id, status: EQUIPMENT_CHECKED_OUT_STATUS, url: pdfUrl || "" };
+      return { ok: true, success: true, id, status: checkoutStatusUsed, url: pdfUrl || "" };
     }
 
     const stLookup = await supabaseAdmin
@@ -3217,26 +3281,21 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       if (requiredLevel >= 5 && !canUseLevel5) {
         return reply.code(403).send({ ok: false, error: "Seviye 5 ekipman için yalnızca super_admin, technician veya senior kullanıcılar hızlı çıkış yapabilir." });
       }
-      const created = await supabaseAdmin
-                .from("equipment_reservations")
-                .insert({
-          equipment_item_id: eqId,
-          requester_profile_id: null,
-          requester_email: p.email.toLowerCase(),
-          requester_name: name,
-          required_level: 1,
-                  status: EQUIPMENT_CHECKED_OUT_STATUS,
-          approval_required: false,
-          start_at: startAt,
-          end_at: endAt,
-          note: p.project_purpose || "Hızlı Çıkış",
-          reviewed_by: String(actor.email || ""),
-          reviewed_at: new Date().toISOString()
-        })
-        .select("id")
-        .single();
+      const created = await insertEquipmentReservationAsCheckedOut({
+        equipment_item_id: eqId,
+        requester_profile_id: null,
+        requester_email: p.email.toLowerCase(),
+        requester_name: name,
+        required_level: 1,
+        approval_required: false,
+        start_at: startAt,
+        end_at: endAt,
+        note: p.project_purpose || "Hızlı Çıkış",
+        reviewed_by: String(actor.email || ""),
+        reviewed_at: new Date().toISOString()
+      });
       if (created.error) return reply.code(500).send({ ok: false, error: created.error.message });
-      const rid = String(created.data?.id || "");
+      const rid = String((created.data as Record<string, unknown> | null)?.id || "");
       results.push(rid);
       eqIdsForPdf.push(eqId);
       await supabaseAdmin.from("equipment_items").update({ status: "IN_USE" }).eq("id", eqId);
