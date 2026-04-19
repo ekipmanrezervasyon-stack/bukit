@@ -3707,6 +3707,25 @@
       var u = norm.toUpperCase();
       if (!u) return false;
       if (eqCart.some(function(x) { return String(x).trim().toUpperCase() === u; })) return false;
+      if (!(bookingLimits && bookingLimits.isAdmin)) {
+        var grp = findEquipGroupByCartId(norm);
+        if (grp) {
+          var maxModel = maxSameModelUnitsForGroup(grp);
+          if (maxModel >= 1) {
+            var modelCount = countSameModelInCart(String(grp.name || grp.typeLabel || ''));
+            if (modelCount >= maxModel) {
+              showAlert(
+                t('modalLimit'),
+                currentLang === 'tr'
+                  ? ('Bu model için en fazla ' + maxModel + ' adet (Ekipman Seviyesi MAX:N).')
+                  : ('At most ' + maxModel + ' unit(s) of this model (level cell MAX:N).'),
+                true
+              );
+              return false;
+            }
+          }
+        }
+      }
       eqCart.push(norm);
       return true;
     }
