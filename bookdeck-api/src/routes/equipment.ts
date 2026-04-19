@@ -2,6 +2,32 @@ import type { FastifyPluginAsync } from "fastify";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { getAuthProfile, requireAuth } from "../modules/auth/guards.js";
 
+const hasPrivilegedStudioAccess = (role: string): boolean =>
+  role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
+
+const DEPT_MATRIX: Record<string, { abbr: string; baseLevel: number; isApplied: boolean }> = {
+  "31": { abbr: "MED", baseLevel: 3, isApplied: true },
+  "32": { abbr: "ADV", baseLevel: 2, isApplied: false },
+  "33": { abbr: "PUB", baseLevel: 2, isApplied: false },
+  "34": { abbr: "FTV", baseLevel: 3, isApplied: true },
+  "35": { abbr: "VCD", baseLevel: 3, isApplied: true },
+  "36": { abbr: "MAP", baseLevel: 2, isApplied: false },
+  "37": { abbr: "TVRP", baseLevel: 3, isApplied: true },
+  "39": { abbr: "ART", baseLevel: 2, isApplied: false },
+  "60": { abbr: "PA", baseLevel: 2, isApplied: false },
+  "156": { abbr: "GAME", baseLevel: 2, isApplied: false },
+  "305": { abbr: "CDM", baseLevel: 2, isApplied: false }
+};
+
+const parseOverrideLevel = (raw: unknown): number | null => {
+  const v = String(raw ?? "").trim().toUpperCase();
+  if (!v) return null;
+  if (v === "SENIOR") return 5;
+  const n = Number(v);
+  if (Number.isFinite(n) && n >= 1 && n <= 5) return n;
+  return null;
+};
+
 const parseEquipmentLevel = (raw: unknown): number => {
   const v = String(raw ?? "").trim().toUpperCase();
   if (!v) return 1;
@@ -21,15 +47,61 @@ const parseBoolLike = (raw: unknown): boolean => {
   return s === "true" || s === "1" || s === "yes";
 };
 
+const parseStudentDeptFromNumber = (studentNoRaw: unknown): { code: string; abbr: string; baseLevel: number; isApplied: boolean } | null => {
+  const sid = String(studentNoRaw ?? "").replace(/\D/g, "");
+  if (!sid) return null;
+  const code3 = sid.length >= 6 ? sid.substring(3, 6) : "";
+  const code2 = sid.length >= 5 ? sid.substring(3, 5) : "";
+  const rec = DEPT_MATRIX[code3] || DEPT_MATRIX[code2];
+  if (!rec) return null;
+  return { code: code3 && DEPT_MATRIX[code3] ? code3 : code2, abbr: rec.abbr, baseLevel: rec.baseLevel, isApplied: rec.isApplied };
+};
+
+const isCommFacultyName = (raw: unknown): boolean => {
+  const v = String(raw ?? "").toLowerCase();
+  return v.includes("faculty of communication") || v.includes("iletişim fakültesi") || v.includes("iletisim fakultesi");
+};
+
+const resolveCommDeptAbbr = (profile: Record<string, unknown>): string => {
+  const dc = String(profile.department_code ?? "").trim().toUpperCase();
+  if (dc) return dc;
+  const faculty = String(profile.faculty_name ?? "").trim().toUpperCase();
+  const tail = faculty.includes("-") ? faculty.split("-").pop() || "" : faculty;
+  const abbr = String(tail || "").trim().replace(/\s+/g, "");
+  if (Object.values(DEPT_MATRIX).some((x) => x.abbr === abbr)) return abbr;
+  return "";
+};
+
+const resolveAccessMatrix = (profile: Record<string, unknown>): { maxEquipmentLevel: number; studioBands: Array<"A" | "B"> } => {
+  const role = String(profile.role ?? "").toLowerCase();
+  if (hasPrivilegedStudioAccess(role)) return { maxEquipmentLevel: 5, studioBands: ["A", "B"] };
+  const override = parseOverrideLevel(profile.access_override_level);
+  const senior = override === 5 || parseBoolLike(profile.senior_flag);
+  if (senior) return { maxEquipmentLevel: 5, studioBands: ["A", "B"] };
+
+  const email = String(profile.email ?? "").toLowerCase();
+  const isStudent = email.endsWith("@bilgiedu.net") || role === "student";
+  if (isStudent) {
+    const dept = parseStudentDeptFromNumber(profile.student_number);
+    if (!dept) return { maxEquipmentLevel: 1, studioBands: [] };
+    const cohortRaw = String(profile.student_number ?? "").replace(/\D/g, "");
+    const cohort2 = cohortRaw.length >= 3 ? Number(cohortRaw.substring(1, 3)) : NaN;
+    const autoLvl4 = dept.baseLevel === 3 && Number.isFinite(cohort2) && cohort2 <= 22;
+    const base = autoLvl4 ? 4 : dept.baseLevel;
+    return { maxEquipmentLevel: override ?? base, studioBands: ["A"] };
+  }
+
+  const staffType = String(profile.staff_type ?? "").toLowerCase();
+  const commDept = resolveCommDeptAbbr(profile);
+  const isComm = isCommFacultyName(profile.faculty_name) || Boolean(commDept);
+  if (staffType !== "academic" || !isComm) return { maxEquipmentLevel: override ?? 1, studioBands: ["A"] };
+  const practical = ["TVRP", "MED", "FTV", "VCD"].includes(commDept);
+  return { maxEquipmentLevel: override ?? (practical ? 4 : 2), studioBands: ["A"] };
+};
+
 const canOperateLevel5Equipment = (profile: Record<string, unknown>): boolean => {
   const role = String(profile.role || "").trim().toLowerCase();
   return role === "super_admin" || role === "technician" || parseBoolLike(profile.senior_flag);
-};
-
-const canViewLevel5Equipment = (profile: Record<string, unknown>): boolean => {
-  const role = String(profile.role || "").trim().toLowerCase();
-  if (role === "iiw_instructor" || role === "iiw_admin") return true;
-  return canOperateLevel5Equipment(profile);
 };
 
 const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
@@ -45,9 +117,8 @@ export const equipmentRoutes: FastifyPluginAsync = async (app) => {
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const rows = (data ?? []) as Record<string, unknown>[];
-    const visibleRows = canViewLevel5Equipment(profile)
-      ? rows
-      : rows.filter((r) => parseEquipmentLevel(r.required_level) < 5);
+    const matrix = resolveAccessMatrix(profile);
+    const visibleRows = rows.filter((r) => parseEquipmentLevel(r.required_level) <= matrix.maxEquipmentLevel);
 
     const itemIds = Array.from(
       new Set(visibleRows.map((r) => String(r.id || "").trim()).filter(Boolean))
