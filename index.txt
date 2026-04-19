@@ -293,6 +293,12 @@
       <p id="app-hard-block-msg" class="text-sm text-gray-700 leading-relaxed"></p>
     </div>
   </div>
+  <div id="global-maintenance-overlay" class="hidden fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div class="max-w-lg w-full bg-white rounded-2xl shadow-2xl border border-amber-200 p-6 text-center">
+      <p id="global-maintenance-title" class="text-xl font-black text-gray-900 mb-3">Bakım Modu</p>
+      <p id="global-maintenance-msg" class="text-sm text-gray-700 leading-relaxed"></p>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════ -->
   <!-- NAVBAR -->
@@ -843,6 +849,32 @@
           return data;
         });
       });
+    }
+    var globalMaintenanceActive = false;
+    function setGlobalMaintenanceState_(active, message){
+      var box=document.getElementById('global-maintenance-overlay');
+      var msg=document.getElementById('global-maintenance-msg');
+      globalMaintenanceActive = !!active;
+      if (!box) return;
+      if (globalMaintenanceActive) {
+        if (msg) msg.textContent = String(message || 'Sistem geçici olarak bakım modunda. Lütfen kısa süre sonra tekrar deneyin.');
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+    function checkGlobalMaintenance_() {
+      return apiPublicRequest('/maintenance', { method: 'GET' })
+        .then(function(res){
+          var on = !!(res && res.enabled);
+          var msg = String((res && res.message) || '');
+          setGlobalMaintenanceState_(on, msg);
+          return on;
+        })
+        .catch(function(){
+          setGlobalMaintenanceState_(false, '');
+          return false;
+        });
     }
     function installApiScriptRunShim_() {
       function chainRunner(methodMap) {
@@ -1571,116 +1603,126 @@
 
     document.addEventListener('DOMContentLoaded', function(){
       applyFrameGuard_();
-      try {
-      applyLanguage();
-      syncEquipmentCategoryTabStyles();
-      syncCompactModeChrome();
-      loadLoginScreen();
-      var vb = document.getElementById('view-bookings');
-      if (vb) {
-        vb.addEventListener('click', function(e) {
-          var cb = e.target.closest('.cancel-booking-btn');
-          if (cb) { cancelBooking(cb.getAttribute('data-id'), cb.getAttribute('data-type'), cb); return; }
-          var ex = e.target.closest('.extend-row-btn');
-          if (ex) {
-            openExtendModal(ex.getAttribute('data-group'), ex.getAttribute('data-eqid'), ex.getAttribute('data-start'), ex.getAttribute('data-end'));
-          }
-        });
-      }
-      var ptEl = document.getElementById('pickup-time-select');
-      var rtEl = document.getElementById('return-time-select');
-      if (ptEl) ptEl.addEventListener('change', validateEquipmentBookingRange);
-      if (rtEl) rtEl.addEventListener('change', validateEquipmentBookingRange);
-      var stSel = document.getElementById('studio-start-time');
-      var enSel = document.getElementById('studio-end-time');
-      if (stSel) stSel.addEventListener('change', validateStudioBookingRange);
-      if (enSel) enSel.addEventListener('change', validateStudioBookingRange);
-      var sgrid = document.getElementById('studio-grid');
-      if (sgrid) {
-        sgrid.addEventListener('click', function(e) {
-          var head = e.target.closest('.studio-card-header');
-          if (!head) return;
-          e.preventDefault();
-          var sid = head.getAttribute('data-studio-id');
-          var skey = head.getAttribute('data-studio-key') || '';
-          var sname = head.getAttribute('data-studio-name') || '';
-          if (sid) toggleStudioSelection(sid, sname, skey);
-        });
-      }
-      var csl = document.getElementById('cam-suggestions-list');
-      if (csl) {
-        csl.addEventListener('click', function(e) {
-          var b = e.target.closest('.cam-sug-btn');
-          if (b) window.addCamSuggestion(b.getAttribute('data-detail-key'));
-        });
-      }
-      var regStatus = document.getElementById('reg-staff-status');
-      if (regStatus) regStatus.addEventListener('change', function(){ refreshStaffUnitOptions(); refreshStaffCommDeptVisibility(); });
-      var regUnit = document.getElementById('reg-staff-unit');
-      if (regUnit) regUnit.addEventListener('change', refreshStaffCommDeptVisibility);
-      var regStudentName = document.getElementById('reg-student-name');
-      if (regStudentName) {
-        regStudentName.addEventListener('blur', function() {
-          regStudentName.value = normalizePersonNameTitleCase_(regStudentName.value);
-        });
-      }
-      var regStaffName = document.getElementById('reg-staff-name');
-      if (regStaffName) {
-        regStaffName.addEventListener('blur', function() {
-          regStaffName.value = normalizePersonNameTitleCase_(regStaffName.value);
-        });
-      }
-      var contactMsg = document.getElementById('contact-msg');
-      if (contactMsg) contactMsg.addEventListener('input', updateContactCharCount);
-      var studioPurposeInp = document.getElementById('studio-purpose');
-      if (studioPurposeInp) {
-        studioPurposeInp.addEventListener('input', syncStudioProjectNameCount_);
-        studioPurposeInp.addEventListener('paste', function() { setTimeout(syncStudioProjectNameCount_, 0); });
-      }
-      var eqGrid = document.getElementById('equipment-grid');
-      if (eqGrid) {
-        eqGrid.addEventListener('click', function(e) {
-          var nbtn = e.target.closest('button.eq-notify-btn');
-          if (nbtn) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!currentTestToken) { showAlert(t('modalError'), t('notifyMeSignin'), true); return; }
-            var gk = nbtn.getAttribute('data-group-key') || '';
-            var lab = nbtn.getAttribute('data-notify-label') || '';
-            if (!gk) return;
-            if (nbtn.getAttribute('data-notify-busy') === '1') return;
-            nbtn.setAttribute('data-notify-busy', '1');
-            var prev = nbtn.innerHTML;
-            nbtn.disabled = true;
-            apiRequest('/equipment-notify/subscribe', {
-              method: 'POST',
-              body: { group_key: gk, label: lab }
-            }).then(function(res) {
-              nbtn.removeAttribute('data-notify-busy');
-              nbtn.disabled = false;
-              nbtn.innerHTML = prev;
-              showAlert(t('modalSuccess'), res.duplicate ? t('notifyMeDup') : t('notifyMeOk'), false);
-            }).catch(function(err) {
-              nbtn.removeAttribute('data-notify-busy');
-              nbtn.disabled = false;
-              nbtn.innerHTML = prev;
-              showAlert(t('modalError'), (err && err.message) || t('notifyMeErr'), true);
+      function startApp_() {
+        try {
+          applyLanguage();
+          syncEquipmentCategoryTabStyles();
+          syncCompactModeChrome();
+          loadLoginScreen();
+          var vb = document.getElementById('view-bookings');
+          if (vb) {
+            vb.addEventListener('click', function(e) {
+              var cb = e.target.closest('.cancel-booking-btn');
+              if (cb) { cancelBooking(cb.getAttribute('data-id'), cb.getAttribute('data-type'), cb); return; }
+              var ex = e.target.closest('.extend-row-btn');
+              if (ex) {
+                openExtendModal(ex.getAttribute('data-group'), ex.getAttribute('data-eqid'), ex.getAttribute('data-start'), ex.getAttribute('data-end'));
+              }
             });
-            return;
           }
-          var btn = e.target.closest('button.eq-cart-add-btn');
-          if (!btn || btn.disabled) return;
-          e.preventDefault();
-          e.stopPropagation();
-          var id = btn.getAttribute('data-eq-cart-id');
-          if (id != null && id !== '' && typeof window.toggleCart === 'function') window.toggleCart(id, btn);
+          var ptEl = document.getElementById('pickup-time-select');
+          var rtEl = document.getElementById('return-time-select');
+          if (ptEl) ptEl.addEventListener('change', validateEquipmentBookingRange);
+          if (rtEl) rtEl.addEventListener('change', validateEquipmentBookingRange);
+          var stSel = document.getElementById('studio-start-time');
+          var enSel = document.getElementById('studio-end-time');
+          if (stSel) stSel.addEventListener('change', validateStudioBookingRange);
+          if (enSel) enSel.addEventListener('change', validateStudioBookingRange);
+          var sgrid = document.getElementById('studio-grid');
+          if (sgrid) {
+            sgrid.addEventListener('click', function(e) {
+              var head = e.target.closest('.studio-card-header');
+              if (!head) return;
+              e.preventDefault();
+              var sid = head.getAttribute('data-studio-id');
+              var skey = head.getAttribute('data-studio-key') || '';
+              var sname = head.getAttribute('data-studio-name') || '';
+              if (sid) toggleStudioSelection(sid, sname, skey);
+            });
+          }
+          var csl = document.getElementById('cam-suggestions-list');
+          if (csl) {
+            csl.addEventListener('click', function(e) {
+              var b = e.target.closest('.cam-sug-btn');
+              if (b) window.addCamSuggestion(b.getAttribute('data-detail-key'));
+            });
+          }
+          var regStatus = document.getElementById('reg-staff-status');
+          if (regStatus) regStatus.addEventListener('change', function(){ refreshStaffUnitOptions(); refreshStaffCommDeptVisibility(); });
+          var regUnit = document.getElementById('reg-staff-unit');
+          if (regUnit) regUnit.addEventListener('change', refreshStaffCommDeptVisibility);
+          var regStudentName = document.getElementById('reg-student-name');
+          if (regStudentName) {
+            regStudentName.addEventListener('blur', function() {
+              regStudentName.value = normalizePersonNameTitleCase_(regStudentName.value);
+            });
+          }
+          var regStaffName = document.getElementById('reg-staff-name');
+          if (regStaffName) {
+            regStaffName.addEventListener('blur', function() {
+              regStaffName.value = normalizePersonNameTitleCase_(regStaffName.value);
+            });
+          }
+          var contactMsg = document.getElementById('contact-msg');
+          if (contactMsg) contactMsg.addEventListener('input', updateContactCharCount);
+          var studioPurposeInp = document.getElementById('studio-purpose');
+          if (studioPurposeInp) {
+            studioPurposeInp.addEventListener('input', syncStudioProjectNameCount_);
+            studioPurposeInp.addEventListener('paste', function() { setTimeout(syncStudioProjectNameCount_, 0); });
+          }
+          var eqGrid = document.getElementById('equipment-grid');
+          if (eqGrid) {
+            eqGrid.addEventListener('click', function(e) {
+              var nbtn = e.target.closest('button.eq-notify-btn');
+              if (nbtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!currentTestToken) { showAlert(t('modalError'), t('notifyMeSignin'), true); return; }
+                var gk = nbtn.getAttribute('data-group-key') || '';
+                var lab = nbtn.getAttribute('data-notify-label') || '';
+                if (!gk) return;
+                if (nbtn.getAttribute('data-notify-busy') === '1') return;
+                nbtn.setAttribute('data-notify-busy', '1');
+                var prev = nbtn.innerHTML;
+                nbtn.disabled = true;
+                apiRequest('/equipment-notify/subscribe', {
+                  method: 'POST',
+                  body: { group_key: gk, label: lab }
+                }).then(function(res) {
+                  nbtn.removeAttribute('data-notify-busy');
+                  nbtn.disabled = false;
+                  nbtn.innerHTML = prev;
+                  showAlert(t('modalSuccess'), res.duplicate ? t('notifyMeDup') : t('notifyMeOk'), false);
+                }).catch(function(err) {
+                  nbtn.removeAttribute('data-notify-busy');
+                  nbtn.disabled = false;
+                  nbtn.innerHTML = prev;
+                  showAlert(t('modalError'), (err && err.message) || t('notifyMeErr'), true);
+                });
+                return;
+              }
+              var btn = e.target.closest('button.eq-cart-add-btn');
+              if (!btn || btn.disabled) return;
+              e.preventDefault();
+              e.stopPropagation();
+              var id = btn.getAttribute('data-eq-cart-id');
+              if (id != null && id !== '' && typeof window.toggleCart === 'function') window.toggleCart(id, btn);
+            });
+          }
+        } catch (setupErr) {
+          console.error('BookDeck init:', setupErr);
+          var lg = document.getElementById('login-users-grid');
+          if (lg) lg.innerHTML = '<p class="text-red-600 text-center px-4 text-sm">Page setup error. Open the browser console (F12) for details.</p>';
+        }
+      }
+      checkGlobalMaintenance_()
+        .then(function(active) {
+          if (active) return;
+          startApp_();
+        })
+        .catch(function() {
+          startApp_();
         });
-      }
-      } catch (setupErr) {
-        console.error('BookDeck init:', setupErr);
-        var lg = document.getElementById('login-users-grid');
-      if (lg) lg.innerHTML = '<p class="text-red-600 text-center px-4 text-sm">Page setup error. Open the browser console (F12) for details.</p>';
-      }
     });
 
     function showLoginOtpPanel() {

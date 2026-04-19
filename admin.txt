@@ -36,6 +36,12 @@
 <body class="flex flex-col relative">
 
   <div id="toast-container" class="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none"></div>
+  <div id="admin-maintenance-overlay" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div class="max-w-lg w-full bg-white rounded-2xl shadow-2xl border border-amber-200 p-6 text-center">
+      <p class="text-xl font-black text-gray-900 mb-3">Bakım Modu</p>
+      <p id="admin-maintenance-msg" class="text-sm text-gray-700 leading-relaxed"></p>
+    </div>
+  </div>
 
   <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-50 flex-shrink-0">
     <div class="flex items-center gap-3 min-w-0">
@@ -845,6 +851,51 @@
         return data;
       });
     });
+  }
+  function adminApiPublicRequest(path, opts) {
+    if (!API_BASE) return Promise.reject(new Error('API base tanımlı değil. URL sonuna ?api_base=https://... ekleyin.'));
+    var o = opts || {};
+    var method = o.method || 'GET';
+    var headers = o.headers || {};
+    if (method !== 'GET' && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    return fetch(API_BASE + path, {
+      method: method,
+      headers: headers,
+      body: (method === 'GET' || o.body == null) ? undefined : JSON.stringify(o.body)
+    }).then(function(res) {
+      return res.text().then(function(txt) {
+        var data = {};
+        try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt || 'JSON parse error' }; }
+        if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+        return data;
+      });
+    });
+  }
+  var adminMaintenanceActive = false;
+  function setAdminMaintenanceState_(active, message) {
+    var box = document.getElementById('admin-maintenance-overlay');
+    var msg = document.getElementById('admin-maintenance-msg');
+    adminMaintenanceActive = !!active;
+    if (!box) return;
+    if (adminMaintenanceActive) {
+      if (msg) msg.textContent = String(message || 'Admin paneli geçici olarak bakım modunda. Lütfen kısa süre sonra tekrar deneyin.');
+      box.classList.remove('hidden');
+    } else {
+      box.classList.add('hidden');
+    }
+  }
+  function checkAdminMaintenance_() {
+    return adminApiPublicRequest('/maintenance', { method: 'GET' })
+      .then(function(res) {
+        var on = !!(res && (res.admin_enabled || res.enabled));
+        var msg = String((res && (res.admin_message || res.message)) || '');
+        setAdminMaintenanceState_(on, msg);
+        return on;
+      })
+      .catch(function() {
+        setAdminMaintenanceState_(false, '');
+        return false;
+      });
   }
   function installAdminApiScriptRunShim_() {
     function isActiveReservationStatus_(s) {
@@ -2038,8 +2089,7 @@
     } catch (e) {}
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
-    applyFrameGuard_();
+  function bootAdminApp_() {
     initAdminAuthFromUrl();
     if (!ensureAdminToken_()) {
       window.location.replace(buildAdminLoginUrl_());
@@ -2287,6 +2337,18 @@
         userLookupDebounceTimer = setTimeout(function() { runUserLookup(); }, 260);
       });
     }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    applyFrameGuard_();
+    checkAdminMaintenance_()
+      .then(function(active) {
+        if (active) return;
+        bootAdminApp_();
+      })
+      .catch(function() {
+        bootAdminApp_();
+      });
   });
 
   function fillTimeDropdowns() {
