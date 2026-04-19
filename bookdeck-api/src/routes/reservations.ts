@@ -243,6 +243,12 @@ const normalizeCategoryBlob = (raw: unknown): string =>
     .replace(/ö/g, "o")
     .replace(/ç/g, "c");
 
+const normalizeModelNameKey = (raw: unknown): string =>
+  String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   Cam: ["cam", "kamera", "camera", "dslr", "video"],
   Ops: ["opt", "lens", "optik", "optics", "filtre", "filter"],
@@ -1833,6 +1839,46 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
                 `Bu kategoride limit dolu (${targetCategory}: ${sameCategoryOnLoan}/${maxInCategory}). ` +
                 "Üzerinizdeki ekipmanı iade etmeden bu kategoriden yeni rezervasyon açamazsınız."
             });
+          }
+        }
+
+        const modelCapRaw = Number((item as Record<string, unknown>).eq_max_per_reservation);
+        const modelCap = Number.isFinite(modelCapRaw) && modelCapRaw >= 1 ? Math.floor(modelCapRaw) : null;
+        if (modelCap != null) {
+          const activeRes = await supabaseAdmin
+            .from("equipment_reservations")
+            .select("equipment_item_id")
+            .or(ownerFilter)
+            .in("status", EQUIPMENT_ACTIVE_RES_STATUSES);
+          if (activeRes.error) return reply.code(500).send({ ok: false, error: activeRes.error.message });
+
+          const activeItemIds = Array.from(
+            new Set(
+              (activeRes.data ?? [])
+                .map((r) => String((r as Record<string, unknown>).equipment_item_id || "").trim())
+                .filter(Boolean)
+            )
+          );
+          if (activeItemIds.length) {
+            const activeItemsRes = await supabaseAdmin
+              .from("equipment_items")
+              .select("id,name")
+              .in("id", activeItemIds);
+            if (activeItemsRes.error) return reply.code(500).send({ ok: false, error: activeItemsRes.error.message });
+
+            const targetModelName = normalizeModelNameKey(
+              (item as Record<string, unknown>).name || (item as Record<string, unknown>).equipment_name || (item as Record<string, unknown>).id
+            );
+            let sameModelActiveCount = 0;
+            for (const ai of (activeItemsRes.data ?? []) as Record<string, unknown>[]) {
+              if (normalizeModelNameKey(ai.name) === targetModelName) sameModelActiveCount += 1;
+            }
+            if (sameModelActiveCount >= modelCap) {
+              return reply.code(409).send({
+                ok: false,
+                error: `Bu model için limit dolu (${sameModelActiveCount}/${modelCap}). Aynı modelden daha fazla rezervasyon yapamazsınız.`
+              });
+            }
           }
         }
       }
