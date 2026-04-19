@@ -2578,14 +2578,17 @@
     }
     reqPromise.then(function(data) {
       var rawStatus = String(data.status || '').trim().toUpperCase();
-      var isAvailable = (rawStatus === 'AVAILABLE' || String(data.statusEnglish || '').toLowerCase() === 'available');
+      var statusEnNorm = String(data.statusEnglish || '').trim().toLowerCase();
+      var isAvailable = (rawStatus === 'AVAILABLE' || statusEnNorm === 'available');
       var isMaintenanceLike =
         rawStatus === 'MAINTENANCE' ||
         rawStatus === 'MAINTANENCE' ||
         rawStatus === 'BROKEN' ||
         rawStatus === 'DAMAGED' ||
         rawStatus === 'HASARLI' ||
-        rawStatus === 'BOZUK';
+        rawStatus === 'BOZUK' ||
+        statusEnNorm === 'maintenance' ||
+        statusEnNorm === 'damaged';
       var statusBoxClass = isAvailable
         ? 'bg-green-50 border-green-200 text-green-800'
         : (isMaintenanceLike ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800');
@@ -2650,15 +2653,25 @@
       status: document.getElementById('inv-edit-status') ? document.getElementById('inv-edit-status').value : ''
     };
     if (out) { out.textContent = 'Kaydediliyor...'; out.className = 'text-[10px] text-blue-700'; }
-    adminApiRequest('/admin/equipment/' + encodeURIComponent(lastInvDetailId) + '/meta', {
-      method: 'PATCH',
-      body: payload
-    }).then(function() {
+    function onSaveOk() {
       if (out) { out.textContent = 'Kaydedildi.'; out.className = 'text-[10px] text-green-700'; }
       refreshInventoryData();
       showInvDetail(lastInvDetailId);
-    }).catch(function(e) {
+    }
+    function onSaveErr(e) {
       if (out) { out.textContent = (e && e.message) || 'Hata'; out.className = 'text-[10px] text-red-600'; }
+    }
+    adminApiRequest('/admin/equipment/' + encodeURIComponent(lastInvDetailId) + '/meta', {
+      method: 'PATCH',
+      body: payload
+    }).then(onSaveOk).catch(function(firstErr) {
+      // Some edge deployments/proxies block PATCH; retry with POST on same endpoint.
+      adminApiRequest('/admin/equipment/' + encodeURIComponent(lastInvDetailId) + '/meta', {
+        method: 'POST',
+        body: payload
+      }).then(onSaveOk).catch(function(secondErr) {
+        onSaveErr(secondErr || firstErr);
+      });
     });
   }
 

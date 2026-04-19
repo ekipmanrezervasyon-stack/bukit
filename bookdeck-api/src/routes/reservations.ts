@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { env } from "../config/env.js";
@@ -2938,7 +2938,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.patch("/admin/equipment/:id/meta", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+  const updateEquipmentMetaHandler = async (req: FastifyRequest, reply: FastifyReply) => {
     const id = String((req.params as { id: string }).id || "").trim();
     if (!id) return reply.code(400).send({ ok: false, error: "Equipment ID required." });
     const parsed = inventoryMetaSchema.safeParse(req.body);
@@ -2970,7 +2970,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     return { ok: true, success: true, notify };
-  });
+  };
+
+  app.patch("/admin/equipment/:id/meta", { preHandler: requireRoles(ADMIN_ROLES) }, updateEquipmentMetaHandler);
+  app.post("/admin/equipment/:id/meta", { preHandler: requireRoles(ADMIN_ROLES) }, updateEquipmentMetaHandler);
 
   app.get("/admin/tickets", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {
     const candidates = ["tickets", "support_tickets"];
