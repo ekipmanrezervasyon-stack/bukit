@@ -24,6 +24,10 @@ This runbook is the operational checklist for `bilgibooking.com`.
 - [ ] Admin user lookup, history, pending, and reports panels load.
 - [ ] Railway health endpoint returns `ok: true`.
 - [ ] Supabase RLS policies reviewed for reservations + profiles tables.
+- [ ] `SESSION_SECRET` set (32+ chars) in Railway.
+- [ ] `SUPER_ADMIN_EMAIL_ALLOWLIST` set in Railway (comma-separated trusted emails).
+- [ ] `HEALTH_DEBUG_SECRET` set in Railway.
+- [ ] `SUPABASE_SERVICE_ROLE_KEY` and `RESEND_API_KEY` rotated after any git exposure.
 
 ## Soft Launch Procedure
 
@@ -41,6 +45,36 @@ This runbook is the operational checklist for `bilgibooking.com`.
   - User lookup
   - Studio calendar (week/month)
 - Verify `api/health`.
+
+## Secret Rotation Playbook (Supabase + Resend)
+
+1. **Freeze risk window**
+   - Pause admin operations for 10 minutes.
+   - Keep one active maintainer online.
+2. **Rotate Supabase service role key**
+   - Supabase Dashboard → Project Settings → API/Keys.
+   - Generate/rotate service-role credential.
+   - Copy new key securely.
+3. **Rotate Resend API key**
+   - Resend Dashboard → API Keys.
+   - Create a new key for production mail sending.
+   - Keep old key only until smoke test finishes.
+4. **Update Railway environment variables**
+   - Set `SUPABASE_SERVICE_ROLE_KEY=<new>`.
+   - Set `RESEND_API_KEY=<new>`.
+   - Ensure `SESSION_SECRET` exists and is 32+ chars.
+   - Ensure `SUPER_ADMIN_EMAIL_ALLOWLIST` exists (trusted emails only).
+   - Ensure `HEALTH_DEBUG_SECRET` exists.
+5. **Redeploy + smoke test**
+   - Test OTP request + verify.
+   - Test admin login.
+   - Test one equipment checkout/checkin flow.
+6. **Revoke old keys**
+   - Delete old Resend API key.
+   - Revoke old Supabase service-role credential (or complete key rotation procedure).
+7. **Post-check**
+   - Confirm `/api/health` returns `ok: true`.
+   - Confirm non-allowlisted `super_admin` rows are not treated as super admin.
 
 ## Incident Playbook
 

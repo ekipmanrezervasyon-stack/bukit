@@ -48,4 +48,11 @@ if (String(parsed.data.NODE_ENV || "").trim().toLowerCase() === "production" && 
   throw new Error("Invalid env: SESSION_SECRET must be set and at least 32 characters in production.");
 }
 
+if (
+  String(parsed.data.NODE_ENV || "").trim().toLowerCase() === "production" &&
+  !String(parsed.data.SUPER_ADMIN_EMAIL_ALLOWLIST || "").trim()
+) {
+  throw new Error("Invalid env: SUPER_ADMIN_EMAIL_ALLOWLIST must be set in production.");
+}
+
 export const env = parsed.data;

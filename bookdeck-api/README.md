@@ -55,5 +55,5 @@ npm run dev
   - Keep `NODE_ENV=production`.
   - Set a strict `CORS_ORIGIN` list.
   - Set `SESSION_SECRET` with at least 32 chars.
-  - Set `SUPER_ADMIN_EMAIL_ALLOWLIST`; unlisted `super_admin` profiles are downgraded to `staff` at auth time.
+  - Set `SUPER_ADMIN_EMAIL_ALLOWLIST`; startup fails if missing. Unlisted `super_admin` profiles are downgraded to `staff` at auth time.
   - Rotate secrets if `.env` was ever committed.
