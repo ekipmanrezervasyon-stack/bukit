@@ -145,7 +145,7 @@
 <body class="bg-gray-50 text-gray-900 pb-40 md:pb-20 overflow-x-hidden">
   <div id="instant-splash" aria-hidden="true">
     <div class="text-center px-5">
-      <h1 class="text-3xl md:text-4xl font-black tracking-tight mb-3"><span class="text-[#e30613]">BUK</span><span class="text-gray-900">it</span></h1>
+      <h1 class="text-3xl md:text-4xl font-black tracking-tight mb-3"><span class="text-[#e30613]">BU</span><span class="text-gray-900">Kit</span></h1>
       <div class="instant-splash-spinner" aria-hidden="true"></div>
       <p class="text-xs text-gray-400">Loading…</p>
     </div>
@@ -183,7 +183,7 @@
       <div class="mb-8">
         <div class="flex justify-center px-4">
           <h1 id="i18n-login-title" class="text-3xl md:text-4xl font-black tracking-tight text-center">
-            <span class="text-[#e30613]">BUK</span><span class="text-gray-900">it</span>
+            <span class="text-[#e30613]">BU</span><span class="text-gray-900">Kit</span>
           </h1>
         </div>
         <p id="i18n-login-subtitle" class="text-sm text-gray-400 mt-2 text-center">Sign in with one-time password sent to your email</p>
@@ -306,8 +306,8 @@
   <nav class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-[45]">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center min-h-[48px] w-full gap-2">
       <div class="pl-5 sm:pl-6 shrink-0">
-        <button type="button" id="brand-boohome-btn" onclick="goReserveHome()" class="flex flex-wrap items-center gap-x-2 text-xl md:text-2xl font-black tracking-tight whitespace-nowrap rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#e30613]/50 py-0.5 tap-highlight-transparent text-left" aria-label="Ana sayfa — Rezervasyon">
-          <span class="text-[#e30613]">BUK</span><span class="text-gray-900">it</span><span class="text-[#e30613] mx-2">I</span><span class="text-gray-900">BİLGİ</span>
+        <button type="button" id="brand-boohome-btn" onclick="goReserveHome()" class="flex items-center gap-x-0 text-xl md:text-2xl font-black tracking-tight whitespace-nowrap rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#e30613]/50 py-0.5 tap-highlight-transparent text-left" aria-label="Ana sayfa — Rezervasyon">
+          <span class="text-[#e30613]">BU</span><span class="text-gray-900">Kit</span><span class="text-[#e30613] mx-2">I</span><span class="text-gray-900">BİLGİ</span>
         </button>
       </div>
       <div class="flex-1 min-w-0"></div>
@@ -346,7 +346,7 @@
       </h1>
       <p id="i18n-reserve-hero-sub" class="text-sm md:text-lg text-gray-500 font-medium max-w-lg mx-auto">What do you need to reserve?</p>
     </section>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 max-w-5xl mx-auto mb-8 md:mb-10 w-full">
+    <div id="reserve-cards-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 max-w-5xl mx-auto mb-8 md:mb-10 w-full">
       <article id="reserve-card-equipment" class="bg-white rounded-2xl border border-gray-100 shadow-md hover:shadow-lg transition-shadow flex flex-col overflow-hidden text-center">
         <div class="aspect-[4/3] bg-black/5 overflow-hidden">
           <img src="https://www.cskcreative.com/wp-content/uploads/2020/09/video-recording-equipment-orlando.jpg" alt="Canon 5D Mark IV style cinema camera and video equipment" class="w-full h-full object-cover">
@@ -2125,6 +2125,16 @@
       if (tCard) {
         if (showTicket) tCard.classList.remove('hidden');
         else tCard.classList.add('hidden');
+      }
+      var cardsGrid = document.getElementById('reserve-cards-grid');
+      if (cardsGrid) {
+        if (showTicket) {
+          cardsGrid.classList.remove('lg:grid-cols-3');
+          cardsGrid.classList.add('lg:grid-cols-4');
+        } else {
+          cardsGrid.classList.remove('lg:grid-cols-4');
+          cardsGrid.classList.add('lg:grid-cols-3');
+        }
       }
     }
 
