@@ -2577,7 +2577,21 @@
       });
     }
     reqPromise.then(function(data) {
-      var isAvailable = (data.status === 'AVAILABLE' || String(data.statusEnglish || '').toLowerCase() === 'available');
+      var rawStatus = String(data.status || '').trim().toUpperCase();
+      var isAvailable = (rawStatus === 'AVAILABLE' || String(data.statusEnglish || '').toLowerCase() === 'available');
+      var isMaintenanceLike =
+        rawStatus === 'MAINTENANCE' ||
+        rawStatus === 'MAINTANENCE' ||
+        rawStatus === 'BROKEN' ||
+        rawStatus === 'DAMAGED' ||
+        rawStatus === 'HASARLI' ||
+        rawStatus === 'BOZUK';
+      var statusBoxClass = isAvailable
+        ? 'bg-green-50 border-green-200 text-green-800'
+        : (isMaintenanceLike ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800');
+      var statusLabelTr = isAvailable
+        ? 'DEPOLAMADA'
+        : (isMaintenanceLike ? 'ARIZALI / BAKIMDA' : 'DIŞARIDA / KULLANIMDA');
       var historyHtml = data.history && data.history.length ? data.history.map(function(h) { return '<div class="py-2 border-b border-gray-50 flex justify-between"><div><p class="text-[11px] font-bold">' + escAdm(h.user) + '</p><p class="text-[9px] text-gray-400">' + escAdm(h.date) + '</p></div><span class="text-[9px] font-bold ' + (String(h.status).includes('Approve') ? 'text-green-600' : 'text-red-600') + '">' + escAdm(h.status) + '</span></div>'; }).join('') : '<p class="text-xs text-gray-400">Kayıt yok.</p>';
       var currentUserHtml = data.currentUser ? '<div class="mt-3 pt-3 border-t border-gray-100"><p class="text-[10px] font-black text-gray-500 uppercase">Şu an / son çıkış</p><p class="text-xs font-bold">👤 ' + escAdm(data.currentUser.name) + '</p><p class="text-xs font-black text-[#e30613] mt-1">Planlanan iade: ' + escAdm(data.currentUser.returnDate) + '</p></div>' : '';
       var prevHtml = data.previousUser && data.previousUser.name ? '<div class="mt-2 text-[10px] text-gray-600"><span class="font-black">Önceki:</span> ' + escAdm(data.previousUser.name) + ' · ' + escAdm(data.previousUser.date) + ' · ' + escAdm(data.previousUser.status) + '</div>' : '';
@@ -2614,7 +2628,7 @@
         '</div>';
       var availBox = '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200"><p class="text-[10px] font-black text-gray-500 uppercase mb-2">İleri tarihli müsaitlik</p><div class="grid grid-cols-1 gap-2"><input type="datetime-local" id="inv-avail-start" class="w-full text-xs border rounded-lg p-2"><input type="datetime-local" id="inv-avail-end" class="w-full text-xs border rounded-lg p-2"></div><button type="button" onclick="runInvAvailabilityCheck()" class="mt-2 w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Sorgula</button><p id="inv-avail-result" class="text-[10px] mt-2 text-gray-600"></p></div>';
       var canEdit = !!token;
-      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-cover rounded-2xl shadow-sm border border-gray-100"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + statEn + '<div class="p-4 rounded-2xl border ' + (isAvailable ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800') + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + (isAvailable ? 'DEPOLAMADA' : 'DIŞARIDA / KULLANIMDA') + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
+      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-cover rounded-2xl shadow-sm border border-gray-100"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + statEn + '<div class="p-4 rounded-2xl border ' + statusBoxClass + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + statusLabelTr + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
     }).catch(function(e) {
       panel.innerHTML = '<div class="mt-20 text-center text-red-600 text-sm font-medium">' + escAdm((e && e.message) || 'Detay yüklenemedi.') + '</div>';
     });
