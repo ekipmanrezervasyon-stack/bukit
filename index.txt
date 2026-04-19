@@ -2183,8 +2183,39 @@
     // ═══════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════
+    function normalizeInventoryCodeForCategory_(raw) {
+      var code = String(raw || '').trim().toUpperCase();
+      if (!code) return '';
+      var compact = code.replace(/[^A-Z0-9]/g, '');
+      if (/^CAM0*\d+$/.test(compact)) return 'CAM';
+      if (/^(OPS|LNS)0*\d+$/.test(compact)) return 'OPS';
+      if (/^(SND|SOUND)0*\d+$/.test(compact)) return 'SND';
+      if (/^(LGH|LIGHT)0*\d+$/.test(compact)) return 'LGH';
+      if (/^(GRP|GRIP)0*\d+$/.test(compact)) return 'GRP';
+      if (/^KEY0*\d+$/.test(compact)) return 'KEY';
+      return '';
+    }
     function getBaseCategory(item){
-      var haystack=(String(item.category||'')+' '+String(item.typeLabel||'')+' '+String(item.name||'')+' '+String(item.displayId||item.id||'')).toLowerCase();
+      var row = item || {};
+      var details = Array.isArray(row.details) ? row.details : [];
+      var codeCandidates = [
+        row.displayId,
+        row.id,
+        row.equipment_id
+      ];
+      for (var di = 0; di < details.length; di++) {
+        codeCandidates.push(details[di] && details[di].equipment_code);
+        codeCandidates.push(details[di] && details[di].equipment_id);
+      }
+      for (var ci = 0; ci < codeCandidates.length; ci++) {
+        var pref = normalizeInventoryCodeForCategory_(codeCandidates[ci]);
+        if (pref === 'CAM') return 'Cam';
+        if (pref === 'OPS') return 'Ops';
+        if (pref === 'SND') return 'Sound';
+        if (pref === 'LGH') return 'Light';
+        if (pref === 'GRP' || pref === 'KEY') return 'Grip';
+      }
+      var haystack=(String(row.category||'')+' '+String(row.typeLabel||'')+' '+String(row.name||'')+' '+String(row.displayId||row.id||'')).toLowerCase();
       // Light Stand/Ligthing Stand kalemleri her zaman GRIP altında listelenmeli.
       if (gripMatchesLightingStandBlob_(haystack)) return 'Grip';
       for(var key in catMap){ if(catMap[key].some(function(w){return haystack.includes(w);})) return key; }
