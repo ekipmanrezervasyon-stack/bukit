@@ -5,6 +5,7 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { consumeOtp, getOtp, setOtp } from "../modules/auth/otp-store.js";
 import { createSessionToken, verifySessionToken } from "../modules/auth/session.js";
 import { sendOtpEmail } from "../modules/auth/otp-mail.js";
+import { ensureStaffStudentNumberSync } from "../modules/auth/profile-sync.js";
 
 const EmailSchema = z.string().email().max(190).transform((v) => v.trim().toLowerCase());
 const OtpCodeSchema = z.string().regex(/^\d{6}$/);
@@ -172,6 +173,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       profile = created;
     }
 
+    profile = await ensureStaffStudentNumberSync(profile as Record<string, unknown>);
+
     if (!profile.is_active) return reply.code(403).send({ ok: false, error: "Account inactive." });
 
     const token = createSessionToken(
@@ -212,8 +215,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       .maybeSingle();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     if (!data) return reply.code(404).send({ ok: false, error: "Profile not found." });
-
-    return { ok: true, profile: data };
+    const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
+    return { ok: true, profile: synced };
   });
 
   app.post("/auth/onboarding/student", async (req, reply) => {
@@ -289,6 +292,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
-    return { ok: true, profile: data };
+    const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
+    return { ok: true, profile: synced };
   });
 };

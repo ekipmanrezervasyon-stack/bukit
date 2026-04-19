@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { supabaseAdmin } from "../../lib/supabase.js";
 import { verifySessionToken } from "./session.js";
+import { ensureStaffStudentNumberSync } from "./profile-sync.js";
 
 export type AppRole =
   | "super_admin"
@@ -54,7 +55,8 @@ const loadProfileForRequest = async (req: FastifyRequest): Promise<ProfileRow | 
     .limit(1)
     .maybeSingle();
   if (error || !data || !data.is_active) return null;
-  casted.authProfile = data as ProfileRow;
+  const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
+  casted.authProfile = synced as ProfileRow;
   return casted.authProfile;
 };
 
