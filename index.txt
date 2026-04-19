@@ -2242,18 +2242,22 @@
       if (cap != null && cap >= 1) return cap;
       return 999;
     }
-    function countSameModelInCart(nameLower) {
+    function countSameModelInCart(modelKey) {
+      var targetKey = normalizeEquipmentNameKey_(modelKey);
+      if (!targetKey) return 0;
       var c = 0;
       for (var i = 0; i < eqCart.length; i++) {
         var gg = findEquipGroupByCartId(eqCart[i]);
-        if (gg && String(gg.typeLabel || gg.name || '').toLowerCase() === nameLower) c++;
+        if (!gg) continue;
+        var cartKey = normalizeEquipmentNameKey_(gg.name || gg.typeLabel || '');
+        if (cartKey === targetKey) c++;
       }
       return c;
     }
     function hasSameModelCapConflict(candidateGroup) {
       if (!candidateGroup) return false;
       var mx = maxSameModelUnitsForGroup(candidateGroup);
-      var key = String(candidateGroup.typeLabel || candidateGroup.name || '').toLowerCase();
+      var key = String(candidateGroup.name || candidateGroup.typeLabel || '');
       return countSameModelInCart(key) >= mx;
     }
     function categoryRoomLeftForCart(bc) {
@@ -2898,6 +2902,14 @@
             };
           }
           var g=map[key];
+          var capNum = Number(item.eq_max_per_reservation);
+          if (!isNaN(capNum) && capNum >= 1) {
+            if (g.eq_max_per_reservation == null || isNaN(Number(g.eq_max_per_reservation)) || Number(g.eq_max_per_reservation) < 1) {
+              g.eq_max_per_reservation = capNum;
+            } else if (capNum < Number(g.eq_max_per_reservation)) {
+              g.eq_max_per_reservation = capNum;
+            }
+          }
           if(!g.notifyGroupKey&&item.groupKey) g.notifyGroupKey=String(item.groupKey);
           if(!g.image){
             var p=String(d.photo||item.image||'').trim();
@@ -3874,7 +3886,7 @@
         return;
       }
       var maxM = maxSameModelUnitsForGroup(g);
-      if (countSameModelInCart(String(g.name || '').toLowerCase()) >= maxM) {
+      if (countSameModelInCart(String(g.name || '')) >= maxM) {
         showAlert(t('modalLimit'), currentLang === 'tr' ? 'Bu model için en fazla ' + maxM + ' adet (Ekipman Seviyesi MAX:N).' : 'At most ' + maxM + ' unit(s) of this model (level cell MAX:N).', true);
         return;
       }
@@ -3990,17 +4002,29 @@
           showAlert(t('modalDeclined'), (currentLang==='tr' ? 'Resmi tatilde ekipman teslim/iade yapılamaz: ' : 'Equipment pickup/return is not allowed on official holidays: ') + (hc.dates || []).join(', '), true);
           return;
         }
-        Promise.allSettled((ids || []).map(function(eqId) {
-          return apiRequest('/equipment-reservations', {
-            method: 'POST',
-            body: {
-              equipment_item_id: String(eqId || ''),
-              start_at: s,
-              end_at: e,
-              note: pu || ''
-            }
+        var queue = Promise.resolve([]);
+        (ids || []).forEach(function(eqId) {
+          queue = queue.then(function(results) {
+            return apiRequest('/equipment-reservations', {
+              method: 'POST',
+              body: {
+                equipment_item_id: String(eqId || ''),
+                start_at: s,
+                end_at: e,
+                note: pu || ''
+              }
+            })
+              .then(function(res) {
+                results.push({ status: 'fulfilled', value: res });
+                return results;
+              })
+              .catch(function(err) {
+                results.push({ status: 'rejected', reason: err });
+                return results;
+              });
           });
-        })).then(function(results) {
+        });
+        queue.then(function(results) {
           if(btn){btn.innerText=ot;btn.disabled=false;}if(mbtn){mbtn.innerText=mo||'Reserve selected';mbtn.disabled=false;}
           var okCount = results.filter(function(r) { return r.status === 'fulfilled'; }).length;
           var fail = results.find(function(r) { return r.status === 'rejected'; });
