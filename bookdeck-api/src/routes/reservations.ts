@@ -40,7 +40,18 @@ const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
 );
 const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
-const ACTIVE_TICKET_STATUSES = ["pending", "beklemede", "beklemede / pending"];
+const ACTIVE_TICKET_STATUSES = [
+  "pending",
+  "Pending",
+  "PENDING",
+  "beklemede",
+  "Beklemede",
+  "BEKLEMEDE",
+  "beklemede / pending",
+  "Beklemede / Pending",
+  "pending / beklemede",
+  "Pending / Beklemede"
+];
 const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CATEGORY_LIMITS: Record<string, number> = { Cam: 1, Ops: 2, Sound: 3, Light: 5, Grip: 5 };
 const EQUIPMENT_CATEGORY_DEFAULT_LIMIT = 5;
@@ -3210,6 +3221,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const p = parsed.data;
     const candidates = ["tickets", "support_tickets"];
+    let hasConfiguredTable = false;
     for (const table of candidates) {
       const updatePayload =
         table === "tickets"
@@ -3228,11 +3240,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         .eq("ticket_no", p.ticket_no)
         .in("status", ACTIVE_TICKET_STATUSES)
         .select("ticket_no")
-        .single();
-      if (!updated.error) return { ok: true, success: true, ticket_no: updated.data?.ticket_no };
-      if (!isMissingTableError(updated.error)) return reply.code(500).send({ ok: false, error: updated.error.message });
+        ;
+      if (updated.error) {
+        if (!isMissingTableError(updated.error)) return reply.code(500).send({ ok: false, error: updated.error.message });
+        continue;
+      }
+      hasConfiguredTable = true;
+      const updatedRows = (updated.data ?? []) as Array<{ ticket_no?: string }>;
+      if (updatedRows.length > 0) {
+        return { ok: true, success: true, ticket_no: String(updatedRows[0]?.ticket_no || p.ticket_no), updated_count: updatedRows.length };
+      }
+      const found = await supabaseAdmin.from(table).select("ticket_no,status").eq("ticket_no", p.ticket_no).limit(1);
+      if (found.error) {
+        if (!isMissingTableError(found.error)) return reply.code(500).send({ ok: false, error: found.error.message });
+        continue;
+      }
+      const foundRows = (found.data ?? []) as Array<{ ticket_no?: string }>;
+      if (foundRows.length > 0) {
+        return reply.code(409).send({ ok: false, error: "Ticket zaten işlenmiş veya aktif değil." });
+      }
     }
-    return reply.code(501).send({ ok: false, error: "Tickets table is not configured in Supabase." });
+    if (!hasConfiguredTable) return reply.code(501).send({ ok: false, error: "Tickets table is not configured in Supabase." });
+    return reply.code(404).send({ ok: false, error: "Ticket bulunamadı." });
   });
 
   app.post("/admin/tickets/reject", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
@@ -3243,6 +3272,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const reason = String(p.reason || "").trim();
     if (!reason) return reply.code(400).send({ ok: false, error: "Reject reason required." });
     const candidates = ["tickets", "support_tickets"];
+    let hasConfiguredTable = false;
     for (const table of candidates) {
       const updatePayload =
         table === "tickets"
@@ -3261,11 +3291,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         .eq("ticket_no", p.ticket_no)
         .in("status", ACTIVE_TICKET_STATUSES)
         .select("ticket_no")
-        .single();
-      if (!updated.error) return { ok: true, success: true, ticket_no: updated.data?.ticket_no };
-      if (!isMissingTableError(updated.error)) return reply.code(500).send({ ok: false, error: updated.error.message });
+        ;
+      if (updated.error) {
+        if (!isMissingTableError(updated.error)) return reply.code(500).send({ ok: false, error: updated.error.message });
+        continue;
+      }
+      hasConfiguredTable = true;
+      const updatedRows = (updated.data ?? []) as Array<{ ticket_no?: string }>;
+      if (updatedRows.length > 0) {
+        return { ok: true, success: true, ticket_no: String(updatedRows[0]?.ticket_no || p.ticket_no), updated_count: updatedRows.length };
+      }
+      const found = await supabaseAdmin.from(table).select("ticket_no,status").eq("ticket_no", p.ticket_no).limit(1);
+      if (found.error) {
+        if (!isMissingTableError(found.error)) return reply.code(500).send({ ok: false, error: found.error.message });
+        continue;
+      }
+      const foundRows = (found.data ?? []) as Array<{ ticket_no?: string }>;
+      if (foundRows.length > 0) {
+        return reply.code(409).send({ ok: false, error: "Ticket zaten işlenmiş veya aktif değil." });
+      }
     }
-    return reply.code(501).send({ ok: false, error: "Tickets table is not configured in Supabase." });
+    if (!hasConfiguredTable) return reply.code(501).send({ ok: false, error: "Tickets table is not configured in Supabase." });
+    return reply.code(404).send({ ok: false, error: "Ticket bulunamadı." });
   });
 
   app.get("/admin/contact-messages", { preHandler: requireRoles(ADMIN_ROLES) }, async (_req, reply) => {
