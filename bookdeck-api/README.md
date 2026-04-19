@@ -15,6 +15,7 @@ cp .env.example .env
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SESSION_SECRET` (strong random string; do not reuse service role key)
+- `SUPER_ADMIN_EMAIL_ALLOWLIST` (comma-separated emails allowed to hold `super_admin`)
 - `HEALTH_DEBUG_SECRET` (required to access `/api/health/supabase*` in production)
 - `OTP_DEV_BYPASS` (`false` for live, `true` only for local testing)
 - `RESEND_API_KEY`
@@ -53,4 +54,6 @@ npm run dev
 - In production:
   - Keep `NODE_ENV=production`.
   - Set a strict `CORS_ORIGIN` list.
+  - Set `SESSION_SECRET` with at least 32 chars.
+  - Set `SUPER_ADMIN_EMAIL_ALLOWLIST`; unlisted `super_admin` profiles are downgraded to `staff` at auth time.
   - Rotate secrets if `.env` was ever committed.

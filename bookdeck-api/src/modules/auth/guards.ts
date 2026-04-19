@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastif
 import { supabaseAdmin } from "../../lib/supabase.js";
 import { verifySessionToken } from "./session.js";
 import { ensureStaffStudentNumberSync } from "./profile-sync.js";
+import { enforceRolePolicy } from "./role-policy.js";
 
 export type AppRole =
   | "super_admin"
@@ -56,7 +57,8 @@ const loadProfileForRequest = async (req: FastifyRequest): Promise<ProfileRow | 
     .maybeSingle();
   if (error || !data || !data.is_active) return null;
   const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
-  casted.authProfile = synced as ProfileRow;
+  const secured = await enforceRolePolicy(synced as Record<string, unknown>);
+  casted.authProfile = secured as ProfileRow;
   return casted.authProfile;
 };
 

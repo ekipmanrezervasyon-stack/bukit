@@ -6,6 +6,7 @@ import { consumeOtp, getOtp, registerFailedOtpAttempt, registerOtpRequest, setOt
 import { createSessionToken, verifySessionToken } from "../modules/auth/session.js";
 import { sendOtpEmail } from "../modules/auth/otp-mail.js";
 import { ensureStaffStudentNumberSync } from "../modules/auth/profile-sync.js";
+import { enforceRolePolicy, sanitizeRoleByPolicy } from "../modules/auth/role-policy.js";
 
 const EmailSchema = z.string().email().max(190).transform((v) => v.trim().toLowerCase());
 const OtpCodeSchema = z.string().regex(/^\d{6}$/);
@@ -53,16 +54,6 @@ const resolveOtpRequestGate = async (): Promise<{ enabled: boolean; message: str
   const message = String(map.get(OTP_REQUESTS_DISABLED_MESSAGE_KEY) || DEFAULT_OTP_DISABLED_MESSAGE).trim() || DEFAULT_OTP_DISABLED_MESSAGE;
   return { enabled, message };
 };
-
-const RoleSchema = z.enum([
-  "super_admin",
-  "technician",
-  "iiw_instructor",
-  "iiw_admin",
-  "instructor",
-  "student",
-  "staff"
-]);
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
   app.get("/auth/onboarding/units", async () => {
@@ -187,6 +178,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     profile = await ensureStaffStudentNumberSync(profile as Record<string, unknown>);
+    profile = await enforceRolePolicy(profile as Record<string, unknown>);
 
     if (!profile.is_active) return reply.code(403).send({ ok: false, error: "Account inactive." });
 
@@ -229,7 +221,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     if (!data) return reply.code(404).send({ ok: false, error: "Profile not found." });
     const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
-    return { ok: true, profile: synced };
+    const secured = await enforceRolePolicy(synced as Record<string, unknown>);
+    return { ok: true, profile: secured };
   });
 
   app.post("/auth/onboarding/student", async (req, reply) => {
@@ -271,8 +264,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         token: z.string().min(20),
         full_name: z.string().min(2).max(120),
         staff_type: z.enum(["academic", "administrative"]),
-        faculty_name: z.string().min(1).max(120),
-        role: RoleSchema.optional()
+        faculty_name: z.string().min(1).max(120)
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: "Invalid payload." });
@@ -283,7 +275,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (profileRoleRes.error) return reply.code(500).send({ ok: false, error: profileRoleRes.error.message });
     const existingRole = String((profileRoleRes.data as Record<string, unknown> | null)?.role || "").trim().toLowerCase();
     const preservedRoles = new Set(["super_admin", "technician", "iiw_instructor", "iiw_admin", "instructor", "staff"]);
-    const safeRole = preservedRoles.has(existingRole) ? existingRole : "staff";
+    const safeRole = sanitizeRoleByPolicy(
+      preservedRoles.has(existingRole) ? existingRole : "staff",
+      p.email,
+      "staff"
+    );
     const facultyName = String(parsed.data.faculty_name || "").trim();
     const lowFaculty = facultyName.toLowerCase();
     const isCommFaculty =
@@ -310,6 +306,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const synced = await ensureStaffStudentNumberSync(data as Record<string, unknown>);
-    return { ok: true, profile: synced };
+    const secured = await enforceRolePolicy(synced as Record<string, unknown>);
+    return { ok: true, profile: secured };
   });
 };

@@ -8,8 +8,10 @@ type SessionPayload = {
   exp: number;
 };
 
-const sessionSecret = env.SUPABASE_SERVICE_ROLE_KEY;
-const signingSecret = String(env.SESSION_SECRET || "").trim() || sessionSecret;
+const signingSecret = String(env.SESSION_SECRET || "").trim();
+if (!signingSecret) {
+  throw new Error("Invalid env: SESSION_SECRET is required.");
+}
 
 const base64url = (input: string | Buffer) => Buffer.from(input).toString("base64url");
 
