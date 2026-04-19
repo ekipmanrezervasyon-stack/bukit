@@ -1360,6 +1360,83 @@ const sendEquipmentAvailableNotifyEmail = async (
   }
 };
 
+const sendTicketReceivedEmail = async (
+  toEmail: string,
+  payload: {
+    ticketNo: string;
+    requesterName: string;
+    ticketType: string;
+    startAt: string;
+    endAt: string;
+    location?: string;
+    description?: string;
+  }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Ticket confirmation mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const startLabel = formatMailDateTimeTR(payload.startAt);
+  const endLabel = formatMailDateTimeTR(payload.endAt);
+  const ticketNo = String(payload.ticketNo || "").trim();
+  const ticketType = String(payload.ticketType || "").trim();
+  const requesterName = String(payload.requesterName || "").trim();
+  const location = String(payload.location || "").trim();
+  const description = String(payload.description || "").trim();
+
+  const subject = `[${appName}] Talebiniz alındı / Ticket received (${ticketNo || "TCK"})`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p>Destek talebiniz başarıyla alınmıştır. Talebiniz incelendikten sonra sizinle tekrar iletişime geçilecektir.</p>
+      <p><strong>Talep No:</strong> ${escapeHtml(ticketNo || "-")}<br>
+      <strong>Talep Türü:</strong> ${escapeHtml(ticketType || "-")}<br>
+      <strong>Başlangıç:</strong> ${escapeHtml(startLabel || "-")}<br>
+      <strong>Bitiş:</strong> ${escapeHtml(endLabel || "-")}${location ? `<br><strong>Konum:</strong> ${escapeHtml(location)}` : ""}</p>
+      ${description ? `<p><strong>Açıklama:</strong><br>${escapeHtml(description)}</p>` : ""}
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p>Your support ticket has been received successfully. We will contact you after review.</p>
+      <p><strong>Ticket No:</strong> ${escapeHtml(ticketNo || "-")}<br>
+      <strong>Type:</strong> ${escapeHtml(ticketType || "-")}<br>
+      <strong>Start:</strong> ${escapeHtml(startLabel || "-")}<br>
+      <strong>End:</strong> ${escapeHtml(endLabel || "-")}${location ? `<br><strong>Location:</strong> ${escapeHtml(location)}` : ""}</p>
+      ${description ? `<p><strong>Description:</strong><br>${escapeHtml(description)}</p>` : ""}
+    </div>
+  `;
+  const text =
+    `TR: Talebiniz alindi.\n` +
+    `Talep No: ${ticketNo || "-"}\n` +
+    `Tur: ${ticketType || "-"}\n` +
+    `Baslangic: ${startLabel || "-"}\n` +
+    `Bitis: ${endLabel || "-"}\n` +
+    (location ? `Konum: ${location}\n` : "") +
+    (description ? `Aciklama: ${description}\n` : "") +
+    `\nEN: Your ticket has been received.\n` +
+    `Ticket No: ${ticketNo || "-"}\n` +
+    `Type: ${ticketType || "-"}\n` +
+    `Start: ${startLabel || "-"}\n` +
+    `End: ${endLabel || "-"}\n` +
+    (location ? `Location: ${location}\n` : "") +
+    (description ? `Description: ${description}\n` : "");
+
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
 const parsePdfDataUrl = (raw: string): { mimeType: string; base64: string } | null => {
   const value = String(raw || "").trim();
   if (!value) return null;
@@ -2904,7 +2981,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         .insert(insertPayload)
         .select(table === "tickets" ? "ticket_no" : "id,ticket_no")
         .single();
-      if (!created.error) return { ok: true, ticket_no: String((created.data as { ticket_no?: string } | null)?.ticket_no || ticketNo) };
+      if (!created.error) {
+        const createdTicketNo = String((created.data as { ticket_no?: string } | null)?.ticket_no || ticketNo);
+        let mailSent = false;
+        const toEmail = String(profile.email || "").trim().toLowerCase();
+        if (toEmail && toEmail.includes("@")) {
+          try {
+            await sendTicketReceivedEmail(toEmail, {
+              ticketNo: createdTicketNo,
+              requesterName: String(profile.full_name || profile.email || ""),
+              ticketType: String(payload.ticket_type || ""),
+              startAt: String(payload.start_at || ""),
+              endAt: String(payload.end_at || ""),
+              location: String(payload.location || ""),
+              description: String(payload.description || "")
+            });
+            mailSent = true;
+          } catch (e) {
+            req.log.error({ err: e, ticketNo: createdTicketNo, toEmail }, "send ticket received mail failed");
+          }
+        }
+        return { ok: true, ticket_no: createdTicketNo, mail_sent: mailSent };
+      }
       if (!isMissingTableError(created.error)) return reply.code(500).send({ ok: false, error: created.error.message });
     }
     return reply.code(501).send({ ok: false, error: "Tickets table is not configured in Supabase." });
