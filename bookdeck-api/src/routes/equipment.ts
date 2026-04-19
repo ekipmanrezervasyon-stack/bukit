@@ -32,6 +32,8 @@ const canViewLevel5Equipment = (profile: Record<string, unknown>): boolean => {
   return canOperateLevel5Equipment(profile);
 };
 
+const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
+
 export const equipmentRoutes: FastifyPluginAsync = async (app) => {
   app.get("/equipment-items", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req) as unknown as Record<string, unknown>;
@@ -43,11 +45,46 @@ export const equipmentRoutes: FastifyPluginAsync = async (app) => {
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const rows = (data ?? []) as Record<string, unknown>[];
-    if (canViewLevel5Equipment(profile)) return { ok: true, data: rows };
-    return {
-      ok: true,
-      data: rows.filter((r) => parseEquipmentLevel(r.required_level) < 5)
-    };
+    const visibleRows = canViewLevel5Equipment(profile)
+      ? rows
+      : rows.filter((r) => parseEquipmentLevel(r.required_level) < 5);
+
+    const itemIds = Array.from(
+      new Set(visibleRows.map((r) => String(r.id || "").trim()).filter(Boolean))
+    );
+    const returnByItemId = new Map<string, string>();
+    if (itemIds.length) {
+      const qRes = await supabaseAdmin
+        .from("equipment_reservations")
+        .select("equipment_item_id,end_at,status")
+        .in("equipment_item_id", itemIds)
+        .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
+        .not("end_at", "is", null)
+        .order("end_at", { ascending: true });
+      if (!qRes.error) {
+        for (const row of (qRes.data ?? []) as Record<string, unknown>[]) {
+          const eqId = String(row.equipment_item_id || "").trim();
+          const endAt = String(row.end_at || "").trim();
+          if (!eqId || !endAt || returnByItemId.has(eqId)) continue;
+          returnByItemId.set(eqId, endAt);
+        }
+      } else {
+        req.log.warn({ err: qRes.error }, "equipment-items: failed to resolve return_date from equipment_reservations");
+      }
+    }
+
+    const enrichedRows = visibleRows.map((r) => {
+      const eqId = String(r.id || "").trim();
+      const fallbackReturn =
+        String((r.return_date as string) || (r.due_date as string) || (r.end_at as string) || "").trim() ||
+        (eqId ? String(returnByItemId.get(eqId) || "").trim() : "");
+      return {
+        ...r,
+        return_date: fallbackReturn
+      };
+    });
+
+    return { ok: true, data: enrichedRows };
   });
 
   app.get("/equipment-reservations", async (req, reply) => {
