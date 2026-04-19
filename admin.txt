@@ -49,8 +49,8 @@
     </div>
     <div class="flex items-center gap-2 sm:gap-3">
       <div class="text-right">
-        <p class="text-xs font-bold text-gray-800" id="adminNameDisplay">Yükleniyor...</p>
-        <p class="text-[9px] text-gray-400 uppercase tracking-widest" id="adminRoleDisplay">Bekleniyor</p>
+        <p class="text-xs font-bold text-gray-800" id="adminNameDisplay"></p>
+        <p class="text-[9px] text-gray-400 uppercase tracking-widest" id="adminRoleDisplay"></p>
       </div>
       <button type="button" onclick="goToUserAppAsMember()" class="text-[10px] font-black text-[#e30613] border border-red-100 rounded-full px-3 py-1.5 hover:bg-red-50 whitespace-nowrap">Üye görünümü</button>
       <button type="button" onclick="adminLogout()" class="text-[10px] font-black text-white bg-gray-900 px-3 py-2 rounded-xl hover:bg-black whitespace-nowrap">Çıkış</button>
