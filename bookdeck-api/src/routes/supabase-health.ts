@@ -3,6 +3,13 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { env } from "../config/env.js";
 
 export const supabaseHealthRoutes: FastifyPluginAsync = async (app) => {
+  const isProd = String(env.NODE_ENV || "").toLowerCase() === "production";
+  const debugSecret = String(env.HEALTH_DEBUG_SECRET || "").trim();
+  const hasHealthAccess = (rawSecret: unknown): boolean => {
+    if (!isProd) return true;
+    if (!debugSecret) return false;
+    return String(rawSecret || "").trim() === debugSecret;
+  };
   const errorToText = (e: unknown): string => {
     if (e instanceof Error) return e.message || e.name;
     if (typeof e === "string") return e;
@@ -25,7 +32,10 @@ export const supabaseHealthRoutes: FastifyPluginAsync = async (app) => {
     }
   };
 
-  app.get("/health/supabase", async (_, reply) => {
+  app.get("/health/supabase", async (req, reply) => {
+    const q = req.query as { secret?: string };
+    const headerSecret = String(req.headers["x-health-secret"] || "");
+    if (!hasHealthAccess(q.secret || headerSecret)) return reply.code(404).send({ ok: false, error: "Not found." });
     const checks: Record<string, { ok: boolean; count?: number; error?: string }> = {};
     const tables = ["profiles", "equipment_items", "studios", "equipment_reservations", "studio_reservations"];
     const results = await Promise.all(
@@ -59,7 +69,10 @@ export const supabaseHealthRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, checks };
   });
 
-  app.get("/health/supabase/raw", async (_, reply) => {
+  app.get("/health/supabase/raw", async (req, reply) => {
+    const q = req.query as { secret?: string };
+    const headerSecret = String(req.headers["x-health-secret"] || "");
+    if (!hasHealthAccess(q.secret || headerSecret)) return reply.code(404).send({ ok: false, error: "Not found." });
     try {
       const url = `${env.SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`;
       const resp = await fetch(url, {

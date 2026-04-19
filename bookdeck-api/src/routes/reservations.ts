@@ -2993,7 +2993,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, list };
   });
 
-  app.get("/admin/equipment/:id/detail", async (req, reply) => {
+  app.get("/admin/equipment/:id/detail", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
     const id = String((req.params as { id: string }).id || "").trim();
     if (!id) return reply.code(400).send({ ok: false, error: "Equipment ID required.", history: [] });
 

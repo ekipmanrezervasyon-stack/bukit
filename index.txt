@@ -994,7 +994,7 @@
           return Promise.resolve({ ok: true });
         },
         checkStudioCalendarBridge: function(studioId, startIso, endIso) {
-          return apiPublicRequest('/studio-reservations?from=' + encodeURIComponent(String(startIso || '')) + '&to=' + encodeURIComponent(String(endIso || '')))
+          return apiRequest('/studio-reservations?from=' + encodeURIComponent(String(startIso || '')) + '&to=' + encodeURIComponent(String(endIso || '')), { method: 'GET' })
             .then(function(res) {
               var rows = (res && res.data) || [];
               var sid = String(studioId || '').trim().toUpperCase();
@@ -1031,7 +1031,7 @@
         checkEquipmentReservationConflictsBridge: function(itemIds, startIso, endIso) {
           var ids = (Array.isArray(itemIds) ? itemIds : []).map(function(x) { return String(x || '').trim().toUpperCase(); }).filter(Boolean);
           if (!ids.length) return Promise.resolve({ availableIds: [] });
-          return apiPublicRequest('/equipment-reservations')
+          return apiRequest('/equipment-reservations', { method: 'GET' })
             .then(function(res) {
               var rows = (res && res.data) || [];
               var sMs = new Date(String(startIso || '')).getTime();

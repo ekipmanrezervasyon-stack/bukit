@@ -7,9 +7,11 @@ const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
   PORT: z.coerce.number().default(4000),
   HOST: z.string().default("0.0.0.0"),
-  CORS_ORIGIN: z.string().default("*"),
+  CORS_ORIGIN: z.string().default("https://bilgibooking.com,https://www.bilgibooking.com,http://localhost:3000,http://127.0.0.1:3000"),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
+  SESSION_SECRET: z.string().optional().default(""),
+  HEALTH_DEBUG_SECRET: z.string().optional().default(""),
   OTP_DEV_BYPASS: z.string().default("false"),
   OTP_CODE_TTL_MINUTES: z.coerce.number().default(5),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
@@ -35,6 +37,10 @@ if (
   (!String(parsed.data.RESEND_API_KEY || "").trim() || !String(parsed.data.OTP_EMAIL_FROM || "").trim())
 ) {
   throw new Error("Invalid env: OTP mail delivery requires RESEND_API_KEY and OTP_EMAIL_FROM when OTP_DEV_BYPASS is false.");
+}
+
+if (String(parsed.data.NODE_ENV || "").trim().toLowerCase() === "production" && parsed.data.OTP_DEV_BYPASS === "true") {
+  throw new Error("Invalid env: OTP_DEV_BYPASS cannot be true in production.");
 }
 
 export const env = parsed.data;

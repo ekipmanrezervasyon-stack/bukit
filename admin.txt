@@ -2039,6 +2039,11 @@
         currentAuthToken = at;
         try { localStorage.setItem('bookdeck_auth_token', at); } catch (e0) {}
         try { sessionStorage.setItem('bookdeck_auth_token', at); } catch (e00) {}
+        try {
+          u.searchParams.delete('at');
+          u.searchParams.delete('token');
+          window.history.replaceState({}, document.title, u.pathname + (u.search ? u.search : '') + (u.hash ? u.hash : ''));
+        } catch (_eClean) {}
       } else {
         try { currentAuthToken = localStorage.getItem('bookdeck_auth_token') || sessionStorage.getItem('bookdeck_auth_token') || ''; } catch (e1) { currentAuthToken = ''; }
       }
@@ -2050,13 +2055,7 @@
   function getAdminToken_() {
     var t = String(currentAuthToken || '').trim();
     if (t) return t;
-    try {
-      var u = new URL(window.location.href);
-      t = String(u.searchParams.get('at') || u.searchParams.get('token') || '').trim();
-    } catch (_eUrl) { t = ''; }
-    if (!t) {
-      try { t = String(localStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eLs) { t = ''; }
-    }
+    try { t = String(localStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eLs) { t = ''; }
     if (!t) {
       try { t = String(sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eSs) { t = ''; }
     }
@@ -2523,21 +2522,12 @@
     if (list) list.innerHTML = '<div class="mt-12 text-center text-xs text-gray-400 animate-pulse">Envanter yükleniyor...</div>';
     var token = '';
     try { token = String(currentAuthToken || localStorage.getItem('bookdeck_auth_token') || sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eTok) { token = ''; }
-    var reqPromise;
-    if (token) {
-      reqPromise = adminApiRequest('/equipment-items', { method: 'GET' });
-    } else {
-      // Public fallback so inventory list can render even if admin token is missing.
-      reqPromise = fetch(API_BASE + '/equipment-items', { method: 'GET' }).then(function(res) {
-        return res.text().then(function(txt) {
-          var data = {};
-          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
-          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
-          return data;
-        });
-      });
+    if (!token) {
+      if (list) list.innerHTML = '<div class="mt-12 text-center text-xs text-red-500">Oturum bulunamadı. Lütfen tekrar giriş yapın.</div>';
+      if (typeof done === 'function') done();
+      return;
     }
-    reqPromise.then(function(res) {
+    adminApiRequest('/equipment-items', { method: 'GET' }).then(function(res) {
       var rows = (res && res.data) ? res.data : [];
       allEq = (rows || []).map(function(r) {
         var itemId = String((r && r.id) || '').trim();
@@ -2641,20 +2631,11 @@
     panel.innerHTML = '<div class="mt-20 text-center animate-pulse text-gray-400 text-sm font-medium">Yükleniyor...</div>';
     var token = '';
     try { token = String(currentAuthToken || localStorage.getItem('bookdeck_auth_token') || sessionStorage.getItem('bookdeck_auth_token') || '').trim(); } catch (_eTok) { token = ''; }
-    var reqPromise;
-    if (token) {
-      reqPromise = adminApiRequest('/admin/equipment/' + encodeURIComponent(id) + '/detail', { method: 'GET' });
-    } else {
-      reqPromise = fetch(API_BASE + '/admin/equipment/' + encodeURIComponent(id) + '/detail', { method: 'GET' }).then(function(res) {
-        return res.text().then(function(txt) {
-          var data = {};
-          try { data = txt ? JSON.parse(txt) : {}; } catch (_eParse) { data = { error: txt || 'JSON parse error' }; }
-          if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || ('HTTP ' + res.status));
-          return data;
-        });
-      });
+    if (!token) {
+      panel.innerHTML = '<div class="mt-20 text-center text-red-600 text-sm font-medium">Oturum bulunamadı. Lütfen tekrar giriş yapın.</div>';
+      return;
     }
-    reqPromise.then(function(data) {
+    adminApiRequest('/admin/equipment/' + encodeURIComponent(id) + '/detail', { method: 'GET' }).then(function(data) {
       var rawStatus = String(data.status || '').trim().toUpperCase();
       var statusEnNorm = String(data.statusEnglish || '').trim().toLowerCase();
       var isAvailable = (rawStatus === 'AVAILABLE' || statusEnNorm === 'available');

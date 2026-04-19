@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { consumeOtp, getOtp, setOtp } from "../modules/auth/otp-store.js";
+import { consumeOtp, getOtp, registerFailedOtpAttempt, registerOtpRequest, setOtp } from "../modules/auth/otp-store.js";
 import { createSessionToken, verifySessionToken } from "../modules/auth/session.js";
 import { sendOtpEmail } from "../modules/auth/otp-mail.js";
 import { ensureStaffStudentNumberSync } from "../modules/auth/profile-sync.js";
@@ -116,6 +116,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const email = parsed.data.email;
+    const rl = registerOtpRequest(email, String((req as { ip?: string }).ip || ""));
+    if (!rl.ok) {
+      return reply
+        .code(429)
+        .header("Retry-After", String(rl.retryAfterSec || 60))
+        .send({ ok: false, error: "Too many OTP requests. Please try again later." });
+    }
     const code = String(Math.floor(100000 + Math.random() * 900000));
     if (env.OTP_DEV_BYPASS !== "true") {
       try {
@@ -133,7 +140,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       ok: true,
       email,
       ttlMinutes: env.OTP_CODE_TTL_MINUTES,
-      devOtpCode: env.OTP_DEV_BYPASS === "true" ? code : undefined
+      devOtpCode: env.OTP_DEV_BYPASS === "true" && env.NODE_ENV !== "production" ? code : undefined
     };
   });
 
@@ -142,8 +149,14 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: "Invalid payload." });
     const { email, code } = parsed.data;
     const rec = getOtp(email);
-    if (!rec) return reply.code(400).send({ ok: false, error: "OTP expired or not found." });
-    if (rec.code !== code) return reply.code(400).send({ ok: false, error: "Incorrect OTP." });
+    if (!rec) return reply.code(400).send({ ok: false, error: "Invalid OTP." });
+    if (rec.code !== code) {
+      const failed = registerFailedOtpAttempt(email, 5);
+      if (failed.locked) {
+        return reply.code(429).send({ ok: false, error: "Too many invalid OTP attempts. Request a new OTP." });
+      }
+      return reply.code(400).send({ ok: false, error: "Invalid OTP." });
+    }
     consumeOtp(email);
 
     const { data: existing, error: findErr } = await supabaseAdmin
@@ -266,7 +279,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const p = verifySessionToken(parsed.data.token);
     if (!p) return reply.code(401).send({ ok: false, error: "Invalid session token." });
 
-    const safeRole = parsed.data.role && parsed.data.role !== "student" ? parsed.data.role : "staff";
+    const profileRoleRes = await supabaseAdmin.from("profiles").select("role").eq("id", p.sub).limit(1).maybeSingle();
+    if (profileRoleRes.error) return reply.code(500).send({ ok: false, error: profileRoleRes.error.message });
+    const existingRole = String((profileRoleRes.data as Record<string, unknown> | null)?.role || "").trim().toLowerCase();
+    const preservedRoles = new Set(["super_admin", "technician", "iiw_instructor", "iiw_admin", "instructor", "staff"]);
+    const safeRole = preservedRoles.has(existingRole) ? existingRole : "staff";
     const facultyName = String(parsed.data.faculty_name || "").trim();
     const lowFaculty = facultyName.toLowerCase();
     const isCommFaculty =

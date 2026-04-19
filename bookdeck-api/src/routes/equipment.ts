@@ -158,7 +158,7 @@ export const equipmentRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, data: enrichedRows };
   });
 
-  app.get("/equipment-reservations", async (req, reply) => {
+  app.get("/equipment-reservations", { preHandler: requireAuth }, async (req, reply) => {
     const q = req.query as { status?: string; requester_email?: string };
     let query = supabaseAdmin.from("equipment_reservations").select("*").order("start_at", { ascending: false });
     if (q.status) query = query.eq("status", q.status);

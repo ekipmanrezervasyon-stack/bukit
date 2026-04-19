@@ -159,7 +159,7 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, data: normalized };
   });
 
-  app.get("/studio-reservations", async (req, reply) => {
+  app.get("/studio-reservations", { preHandler: requireAuth }, async (req, reply) => {
     const q = req.query as { status?: string; requester_email?: string; from?: string; to?: string };
     let query = supabaseAdmin.from("studio_reservations").select("*").order("start_at", { ascending: true });
     if (q.status) query = query.eq("status", q.status);
