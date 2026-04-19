@@ -2924,15 +2924,35 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         name: "",
         email: isEmail ? raw.toLowerCase() : "",
         studentId: isEmail ? raw.toLowerCase() : raw,
-        note: "not_found"
+        note: "not_found",
+        loans: []
       };
+    }
+    let extras: DashboardExtras = { loans: [], penalties: [], appBlocked: false, blockReason: "" };
+    try {
+      extras = await getUserDashboardExtrasForProfile({
+        id: String(p.id || ""),
+        email: String(p.email || "").toLowerCase(),
+        role: String(p.role || "")
+      });
+    } catch (_e) {
+      // Lookup ekranini kirmamak icin sadece ekstra veriyi bos gec.
+      extras = { loans: [], penalties: [], appBlocked: false, blockReason: "" };
     }
     return {
       ok: true,
       name: String(p.full_name || ""),
       email: String(p.email || ""),
       studentId: String(p.student_number || p.staff_auto_id || p.staff_number || p.id || ""),
-      level: String(resolveAccessMatrix(p as Record<string, unknown>).maxEquipmentLevel || 1)
+      role: String(p.role || ""),
+      department: String(p.department_name || p.faculty_name || ""),
+      level: String(resolveAccessMatrix(p as Record<string, unknown>).maxEquipmentLevel || 1),
+      loans: extras.loans.map((l) => ({
+        name: String(l.name || ""),
+        eqId: String(l.eqDisplayId || l.eqId || ""),
+        due: String(l.due || ""),
+        overdue: !!l.overdue
+      }))
     };
   });
 

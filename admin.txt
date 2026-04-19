@@ -1323,15 +1323,25 @@
           body: { query: String(query || '').trim() }
         }).then(function(res) {
           if (!res || res.ok === false) return { error: (res && res.error) || 'Lookup failed.', matches: [] };
+          if (Array.isArray(res.matches)) return res;
           if (res.note === 'not_found') return { matches: [] };
+          var loansRaw = Array.isArray(res.loans) ? res.loans : [];
+          var loansOnHand = loansRaw.map(function(l) {
+            return {
+              name: String((l && l.name) || '').trim(),
+              eqId: String((l && l.eqId) || '').trim(),
+              due: String((l && l.due) || '').trim(),
+              overdue: !!(l && l.overdue)
+            };
+          }).filter(function(l) { return !!(l.name || l.eqId || l.due); });
           var profile = {
             name: String(res.name || '').trim(),
             email: String(res.email || '').trim(),
             student_no: String(res.studentId || '').trim(),
             id: String(res.studentId || '').trim(),
-            role: '',
+            role: String(res.role || '').trim(),
             level: String(res.level || ''),
-            department: '',
+            department: String(res.department || '').trim(),
             phone: ''
           };
           return {
@@ -1343,7 +1353,7 @@
               pendingEquipmentApprovals: [],
               pendingStudioApprovals: [],
               equipmentRecent15d: [],
-              loansOnHand: [],
+              loansOnHand: loansOnHand,
               responsibleForEquipment: []
             }]
           };
