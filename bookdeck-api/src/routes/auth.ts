@@ -8,6 +8,50 @@ import { sendOtpEmail } from "../modules/auth/otp-mail.js";
 
 const EmailSchema = z.string().email().max(190).transform((v) => v.trim().toLowerCase());
 const OtpCodeSchema = z.string().regex(/^\d{6}$/);
+const OTP_REQUESTS_ENABLED_KEY = "otp_requests_enabled";
+const OTP_REQUESTS_DISABLED_MESSAGE_KEY = "otp_requests_disabled_message";
+const DEFAULT_OTP_DISABLED_MESSAGE = "Yeni girişler geçici olarak durduruldu. Lütfen daha sonra tekrar deneyin.";
+
+const parseBoolLike = (raw: unknown, fallback = true): boolean => {
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return fallback;
+  if (["1", "true", "yes", "on"].includes(s)) return true;
+  if (["0", "false", "no", "off"].includes(s)) return false;
+  return fallback;
+};
+
+const isMissingConfigTableError = (err: unknown): boolean => {
+  const msg =
+    typeof err === "string"
+      ? err
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message?: string }).message || "")
+        : "";
+  return msg.includes("Could not find the table") || msg.includes("relation") || msg.includes("does not exist");
+};
+
+const resolveOtpRequestGate = async (): Promise<{ enabled: boolean; message: string }> => {
+  const q = await supabaseAdmin
+    .from("app_config")
+    .select("key,value")
+    .in("key", [OTP_REQUESTS_ENABLED_KEY, OTP_REQUESTS_DISABLED_MESSAGE_KEY]);
+  if (q.error) {
+    if (isMissingConfigTableError(q.error)) {
+      return { enabled: true, message: DEFAULT_OTP_DISABLED_MESSAGE };
+    }
+    throw new Error(q.error.message);
+  }
+  const map = new Map<string, string>();
+  for (const row of (q.data ?? []) as Array<Record<string, unknown>>) {
+    const k = String(row.key || "").trim();
+    if (!k) continue;
+    map.set(k, String(row.value || ""));
+  }
+  const enabled = parseBoolLike(map.get(OTP_REQUESTS_ENABLED_KEY), true);
+  const message = String(map.get(OTP_REQUESTS_DISABLED_MESSAGE_KEY) || DEFAULT_OTP_DISABLED_MESSAGE).trim() || DEFAULT_OTP_DISABLED_MESSAGE;
+  return { enabled, message };
+};
 
 const RoleSchema = z.enum([
   "super_admin",
@@ -54,6 +98,21 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   app.post("/auth/otp/request", async (req, reply) => {
     const parsed = z.object({ email: EmailSchema }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: "Invalid email." });
+
+    try {
+      const gate = await resolveOtpRequestGate();
+      if (!gate.enabled) {
+        return reply.code(503).send({
+          ok: false,
+          code: "OTP_REQUESTS_DISABLED",
+          error: gate.message
+        });
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      req.log.error({ err: e }, "otp gate check failed");
+      return reply.code(500).send({ ok: false, error: message });
+    }
 
     const email = parsed.data.email;
     const code = String(Math.floor(100000 + Math.random() * 900000));
