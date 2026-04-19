@@ -12,6 +12,7 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   SESSION_SECRET: z.string().optional().default(""),
   SUPER_ADMIN_EMAIL_ALLOWLIST: z.string().optional().default(""),
+  TECHNICIAN_EMAIL_ALLOWLIST: z.string().optional().default(""),
   HEALTH_DEBUG_SECRET: z.string().optional().default(""),
   OTP_DEV_BYPASS: z.string().default("false"),
   OTP_CODE_TTL_MINUTES: z.coerce.number().default(5),

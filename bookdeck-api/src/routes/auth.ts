@@ -6,7 +6,7 @@ import { consumeOtp, getOtp, registerFailedOtpAttempt, registerOtpRequest, setOt
 import { createSessionToken, verifySessionToken } from "../modules/auth/session.js";
 import { sendOtpEmail } from "../modules/auth/otp-mail.js";
 import { ensureStaffStudentNumberSync } from "../modules/auth/profile-sync.js";
-import { enforceRolePolicy, sanitizeRoleByPolicy } from "../modules/auth/role-policy.js";
+import { enforceRolePolicy, resolveInitialRoleAndUserType, sanitizeRoleByPolicy } from "../modules/auth/role-policy.js";
 
 const EmailSchema = z.string().email().max(190).transform((v) => v.trim().toLowerCase());
 const OtpCodeSchema = z.string().regex(/^\d{6}$/);
@@ -160,10 +160,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
     let profile = existing;
     if (!profile) {
+      const initialRole = resolveInitialRoleAndUserType(email);
       const insertPayload = {
         email,
-        user_type: email.endsWith("@bilgiedu.net") ? "student" : "staff",
-        role: email.endsWith("@bilgiedu.net") ? "student" : "staff",
+        user_type: initialRole.userType,
+        role: initialRole.role,
         full_name: "",
         is_active: true,
         onboarding_completed: false

@@ -16,6 +16,7 @@ cp .env.example .env
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SESSION_SECRET` (strong random string; do not reuse service role key)
 - `SUPER_ADMIN_EMAIL_ALLOWLIST` (comma-separated emails allowed to hold `super_admin`)
+- `TECHNICIAN_EMAIL_ALLOWLIST` (comma-separated emails auto-assigned/allowed as `technician`)
 - `HEALTH_DEBUG_SECRET` (required to access `/api/health/supabase*` in production)
 - `OTP_DEV_BYPASS` (`false` for live, `true` only for local testing)
 - `RESEND_API_KEY`
@@ -56,4 +57,5 @@ npm run dev
   - Set a strict `CORS_ORIGIN` list.
   - Set `SESSION_SECRET` with at least 32 chars.
   - Set `SUPER_ADMIN_EMAIL_ALLOWLIST`; startup fails if missing. Unlisted `super_admin` profiles are downgraded to `staff` at auth time.
+  - Set `TECHNICIAN_EMAIL_ALLOWLIST`; first profile creation for listed emails is auto-assigned to `technician`, and unlisted `technician` profiles are downgraded to `staff` at auth time.
   - Rotate secrets if `.env` was ever committed.
