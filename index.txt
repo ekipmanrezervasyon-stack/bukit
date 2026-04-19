@@ -1314,7 +1314,7 @@
         modalError: 'Error',
         modalSuccess: 'Success',
         modalDeclined: 'Declined',
-        modalLimit: 'Limit',
+        modalLimit: 'Reservation Limit',
         modalUnavailable: 'Unavailable',
         modalReservationLength: 'Reservation length',
         modalMissingData: 'Missing data',
@@ -1419,7 +1419,7 @@
         modalError: 'Hata',
         modalSuccess: 'Basarili',
         modalDeclined: 'Reddedildi',
-        modalLimit: 'Limit',
+        modalLimit: 'Rezervasyon Sınırı',
         modalUnavailable: 'Musait Degil',
         modalReservationLength: 'Rezervasyon suresi',
         modalMissingData: 'Eksik bilgi',
@@ -2269,6 +2269,13 @@
       var mx = maxSameModelUnitsForGroup(candidateGroup);
       var key = String(candidateGroup.name || candidateGroup.typeLabel || '');
       return countSameModelInCart(key) >= mx;
+    }
+    function modelLimitAlertText(maxUnits) {
+      var n = Number(maxUnits);
+      var safeMax = (!isNaN(n) && n >= 1) ? Math.floor(n) : 1;
+      return currentLang === 'tr'
+        ? ('Bu model için rezervasyon sınırına ulaştınız. En fazla ' + safeMax + ' adet ekleyebilirsiniz.')
+        : ('You have reached the reservation limit for this model. You can add up to ' + safeMax + ' unit(s).');
     }
     function categoryRoomLeftForCart(bc) {
       var maxCat = CART_LIMITS[bc] != null ? CART_LIMITS[bc] : DEFAULT_LIMIT;
@@ -3674,7 +3681,7 @@
         return;
       }
       if (hasSameModelCapConflict(group)) {
-        showAlert(t('modalLimit'), currentLang === 'tr' ? 'Bu model için en fazla ' + maxSameModelUnitsForGroup(group) + ' adet (Ekipman Seviyesi MAX).' : 'Max ' + maxSameModelUnitsForGroup(group) + ' unit(s) of this model (level cell MAX:N).', true);
+        showAlert(t('modalLimit'), modelLimitAlertText(maxSameModelUnitsForGroup(group)), true);
         return;
       }
       pickReservableFromCandidates(freeCandidates, function(availableId, conflictsMsg){
@@ -3716,9 +3723,7 @@
             if (modelCount >= maxModel) {
               showAlert(
                 t('modalLimit'),
-                currentLang === 'tr'
-                  ? ('Bu model için en fazla ' + maxModel + ' adet (Ekipman Seviyesi MAX:N).')
-                  : ('At most ' + maxModel + ' unit(s) of this model (level cell MAX:N).'),
+                modelLimitAlertText(maxModel),
                 true
               );
               return false;
@@ -3748,7 +3753,7 @@
         var it=findEquipGroupByCartId(id);if(!it)return;
         var bc=getBaseCategory(it);
         if(categoryRoomLeftForCart(bc)<=0){showAlert(t('modalLimit'),currentLang==='tr'?'Bu kategoride üst sınıra ulaşıldı.':'Category limit reached.',true);return;}
-        if(hasSameModelCapConflict(it)){showAlert(t('modalLimit'),currentLang==='tr'?'Bu model için adet sınırı (Ekipman Seviyesi MAX:N).':'Model quantity limit (level cell MAX:N).',true);return;}
+        if(hasSameModelCapConflict(it)){showAlert(t('modalLimit'),modelLimitAlertText(maxSameModelUnitsForGroup(it)),true);return;}
         var fid=id;
         var idUp=String(fid).trim().toUpperCase();
         if(eqCart.some(function(x){return String(x).trim().toUpperCase()===idUp;})) return;
@@ -3797,7 +3802,7 @@
         return;
       }
       if(hasSameModelCapConflict(group)){
-        showAlert(t('modalLimit'),currentLang==='tr'?'Bu model için adet sınırı (Ekipman Seviyesi MAX:N).':'Model quantity limit (level cell MAX:N).',true);
+        showAlert(t('modalLimit'),modelLimitAlertText(maxSameModelUnitsForGroup(group)),true);
         return;
       }
       var range=selectedReservationRangeIso();
@@ -3916,7 +3921,7 @@
       }
       var maxM = maxSameModelUnitsForGroup(g);
       if (countSameModelInCart(String(g.name || '')) >= maxM) {
-        showAlert(t('modalLimit'), currentLang === 'tr' ? 'Bu model için en fazla ' + maxM + ' adet (Ekipman Seviyesi MAX:N).' : 'At most ' + maxM + ' unit(s) of this model (level cell MAX:N).', true);
+        showAlert(t('modalLimit'), modelLimitAlertText(maxM), true);
         return;
       }
       var candidates = (g.availableIds || []).filter(function(id) { return eqCartIndexOfId(id) < 0; });
