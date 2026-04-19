@@ -85,6 +85,14 @@
         <div class="flex-1 flex flex-col border-r border-gray-100 bg-white">
           <div class="p-6 border-b border-gray-100">
             <h2 class="text-xl font-black mb-4">Ekipman Envanteri</h2>
+            <div id="inv-category-buttons" class="flex flex-wrap gap-2 mb-3">
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="CAM" onclick="setInvCategoryFilter('CAM')">CAM</button>
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="LENS" onclick="setInvCategoryFilter('LENS')">LENS</button>
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="SOUND" onclick="setInvCategoryFilter('SOUND')">SOUND</button>
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="LIGHT" onclick="setInvCategoryFilter('LIGHT')">LIGHT</button>
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="KEY" onclick="setInvCategoryFilter('KEY')">KEY</button>
+              <button type="button" class="inv-cat-btn px-3 py-1.5 rounded-lg text-[10px] font-black border border-gray-200 bg-white text-gray-700" data-cat="GRIP" onclick="setInvCategoryFilter('GRIP')">GRIP</button>
+            </div>
             <input type="text" id="inv-q" oninput="filterInventory()" class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm outline-none" placeholder="Cihaz, konum, sorumlu ara...">
           </div>
           <div id="inv-list" class="flex-1 overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 scrollbar-hide"></div>
@@ -685,6 +693,7 @@
   var adminIsIiwOnly = false;
   var adminIsSuper = false;
   var lastInvDetailId = '';
+  var invCategoryFilter = 'CAM';
   var studioEquipPool = [];
   var studioEquipSelected = {};
   var adminUiDialogCb = null;
@@ -2516,6 +2525,7 @@
           responsibleText: String((r && (r.responsible || r.responsible_text)) || '')
         };
       });
+      syncInvCategoryButtons();
       filterInventory();
       filterQuickCheckout();
       if (typeof done === 'function') done();
@@ -2528,13 +2538,51 @@
   }
 
   // ═══ ENVANTER ═══
+  function inventoryCategoryForItem_(item) {
+    if (!item) return 'CAM';
+    if (item.isStudioKey || looksLikeStudioKey_(item.name, item.type, item.code)) return 'KEY';
+    var blob = normalizeAdmAscii_([item.type, item.name, item.code].join(' '));
+    if (!blob) return 'CAM';
+    if (blob.indexOf('light stand') >= 0 || blob.indexOf('lighting stand') >= 0 || blob.indexOf('isik ayagi') >= 0) return 'GRIP';
+    if (blob.indexOf('lens') >= 0 || blob.indexOf('optik') >= 0 || blob.indexOf('optic') >= 0 || blob.indexOf('filtre') >= 0 || blob.indexOf('filter') >= 0 || /\bops\b/.test(blob)) return 'LENS';
+    if (blob.indexOf('sound') >= 0 || blob.indexOf('ses') >= 0 || blob.indexOf('audio') >= 0 || blob.indexOf('recorder') >= 0 || blob.indexOf('mic') >= 0 || blob.indexOf('mikrofon') >= 0 || blob.indexOf('yaka') >= 0 || blob.indexOf('boom') >= 0) return 'SOUND';
+    if (blob.indexOf('grip') >= 0 || blob.indexOf('tripod') >= 0 || blob.indexOf('gimbal') >= 0 || blob.indexOf('stand') >= 0 || blob.indexOf('ayak') >= 0) return 'GRIP';
+    if (blob.indexOf('light') >= 0 || blob.indexOf('isik') >= 0 || blob.indexOf('led') >= 0) return 'LIGHT';
+    return 'CAM';
+  }
+
+  function syncInvCategoryButtons() {
+    var current = String(invCategoryFilter || 'CAM').toUpperCase();
+    document.querySelectorAll('#inv-category-buttons .inv-cat-btn').forEach(function(btn) {
+      var cat = String(btn.getAttribute('data-cat') || '').toUpperCase();
+      if (cat === current) {
+        btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-200');
+        btn.classList.add('bg-[#e30613]', 'text-white', 'border-[#e30613]');
+      } else {
+        btn.classList.remove('bg-[#e30613]', 'text-white', 'border-[#e30613]');
+        btn.classList.add('bg-white', 'text-gray-700', 'border-gray-200');
+      }
+    });
+  }
+
+  function setInvCategoryFilter(cat) {
+    var next = String(cat || '').trim().toUpperCase();
+    var allowed = { CAM: 1, LENS: 1, SOUND: 1, LIGHT: 1, KEY: 1, GRIP: 1 };
+    invCategoryFilter = allowed[next] ? next : 'CAM';
+    syncInvCategoryButtons();
+    filterInventory();
+  }
+
   function filterInventory() {
     var q = document.getElementById('inv-q').value.toLowerCase();
+    var cat = String(invCategoryFilter || 'CAM').toUpperCase();
     var list = document.getElementById('inv-list');
     if (!list) return;
     list.innerHTML = '';
+    syncInvCategoryButtons();
     allEq.filter(function(i) {
-      if (i.isStudioKey) return false;
+      var itemCat = inventoryCategoryForItem_(i);
+      if (cat && itemCat !== cat) return false;
       var loc = String(i.locationText || '').toLowerCase();
       var resp = String(i.responsibleText || '').toLowerCase();
       var ty = String(i.type || '').toLowerCase();
