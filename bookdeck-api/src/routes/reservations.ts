@@ -197,6 +197,50 @@ const findMappedConditionOut = (conditionMap: Record<string, string>, eqId: stri
   return null;
 };
 
+const isMissingProfilesColumnError = (err: unknown, column: string): boolean => {
+  if (!err || typeof err !== "object") return false;
+  const obj = err as { message?: string; details?: string; hint?: string };
+  const msg = `${String(obj.message || "")} ${String(obj.details || "")} ${String(obj.hint || "")}`.toLowerCase();
+  return msg.includes(`profiles.${String(column || "").toLowerCase()}`) && msg.includes("does not exist");
+};
+
+const lookupProfileByAdminQuery = async (
+  rawQuery: string
+): Promise<{ data: Record<string, unknown> | null; error: { message: string } | null }> => {
+  const raw = String(rawQuery || "").trim();
+  if (!raw) return { data: null, error: null };
+  const isEmail = raw.includes("@");
+
+  if (isEmail) {
+    const byEmail = await supabaseAdmin.from("profiles").select("*").eq("email", raw.toLowerCase()).limit(1).maybeSingle();
+    if (byEmail.error) return { data: null, error: { message: byEmail.error.message } };
+    if (byEmail.data) return { data: byEmail.data as Record<string, unknown>, error: null };
+  } else {
+    let lastErr: { message: string } | null = null;
+    for (const col of ["student_number", "staff_auto_id", "staff_number"]) {
+      const byCol = await supabaseAdmin.from("profiles").select("*").eq(col, raw).limit(1).maybeSingle();
+      if (!byCol.error && byCol.data) return { data: byCol.data as Record<string, unknown>, error: null };
+      if (byCol.error) {
+        if (isMissingProfilesColumnError(byCol.error, col)) continue;
+        lastErr = { message: byCol.error.message };
+        break;
+      }
+    }
+    if (lastErr) return { data: null, error: lastErr };
+  }
+
+  const likeNeedle = `%${raw.replace(/[%_]/g, "\\$&")}%`;
+  const byName = await supabaseAdmin.from("profiles").select("*").ilike("full_name", likeNeedle).limit(1);
+  if (byName.error) return { data: null, error: { message: byName.error.message } };
+  if ((byName.data ?? []).length > 0) return { data: byName.data?.[0] as Record<string, unknown>, error: null };
+
+  const byEmailLike = await supabaseAdmin.from("profiles").select("*").ilike("email", likeNeedle).limit(1);
+  if (byEmailLike.error) return { data: null, error: { message: byEmailLike.error.message } };
+  if ((byEmailLike.data ?? []).length > 0) return { data: byEmailLike.data?.[0] as Record<string, unknown>, error: null };
+
+  return { data: null, error: null };
+};
+
 const isEquipmentReservationStatusConstraintError = (err: unknown): boolean => {
   if (!err || typeof err !== "object") return false;
   const obj = err as { code?: string; message?: string; details?: string; hint?: string };
@@ -2626,11 +2670,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
     const raw = String(parsed.data.query || "").trim();
-    const isEmail = raw.includes("@");
-    const q = supabaseAdmin.from("profiles").select("*").limit(1);
-    const user = isEmail
-      ? await q.eq("email", raw.toLowerCase()).maybeSingle()
-      : await q.or(`student_number.eq.${raw},staff_number.eq.${raw}`).maybeSingle();
+    const user = await lookupProfileByAdminQuery(raw);
     if (user.error) return reply.code(500).send({ ok: false, error: user.error.message });
     if (!user.data) return reply.code(404).send({ ok: false, error: "Target user not found." });
     const p = user.data as Record<string, unknown>;
@@ -2875,10 +2915,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const raw = String(parsed.data.query || "").trim();
     const isEmail = raw.includes("@");
-    const q = supabaseAdmin.from("profiles").select("*").limit(1);
-    const result = isEmail
-      ? await q.eq("email", raw.toLowerCase()).maybeSingle()
-      : await q.or(`student_number.eq.${raw},staff_number.eq.${raw}`).maybeSingle();
+    const result = await lookupProfileByAdminQuery(raw);
     if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
     const p = result.data;
     if (!p) {
@@ -2894,7 +2931,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       ok: true,
       name: String(p.full_name || ""),
       email: String(p.email || ""),
-      studentId: String(p.student_number || p.staff_number || p.id || ""),
+      studentId: String(p.student_number || p.staff_auto_id || p.staff_number || p.id || ""),
       level: String(p.access_override_level || "1")
     };
   });
