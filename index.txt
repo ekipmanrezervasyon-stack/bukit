@@ -3682,7 +3682,7 @@
             ? (currentLang === 'tr' ? 'Seçilen aralık için müsaitlik kontrol ediliyor…' : 'Checking availability for selected window…')
           : (isA
             ? (currentLang === 'tr' ? 'Müsait (tarih aralığına göre)' : 'Available for selected window')
-            : '<span class="text-rose-600 font-extrabold">' + escHtml(t('notifyMe')) + '</span>'));
+            : ''));
         var rbc = '';
         if (hasRange && hasConflictInRange) {
           rbc = '<span class="text-[8px] md:text-[10px] text-rose-700 bg-rose-50 px-1 md:px-1.5 py-0.5 rounded font-extrabold ml-1">' + (currentLang === 'tr' ? 'Seçilen aralıkta çakışma' : 'Reserved in selected range') + '</span>';
@@ -3703,7 +3703,7 @@
         var sumImg = (!compactMode && imgSrc)
           ? '<img src="' + imgSrc + '" alt="" class="h-11 w-11 md:h-14 md:w-14 rounded-xl object-contain bg-white p-0.5 shrink-0 border border-gray-200 ' + (!isA ? 'grayscale opacity-90' : '') + '" loading="lazy" decoding="async">'
           : '';
-        var stockLine = '<span class="text-[11px] md:text-sm font-black text-emerald-700">' + (currentLang === 'tr' ? 'Müsait' : 'Available') + ': ' + stockCnt + '/' + totalCnt + '</span>';
+        var stockLine = '<span class="text-[11px] md:text-sm font-black ' + (stockCnt > 0 ? 'text-emerald-700' : 'text-gray-400') + '">' + (currentLang === 'tr' ? 'Müsait' : 'Available') + ': ' + stockCnt + '/' + totalCnt + '</span>';
         var bigTitle = escHtml(equipmentDisplayTitle(item));
         var subModels = (Array.isArray(item.modelNames) && item.modelNames.length > 1)
           ? escHtml(item.modelNames.slice(0, 4).join(' · ') + (item.modelNames.length > 4 ? ' · …' : ''))
@@ -3736,11 +3736,7 @@
         var inCartRow = eqCart.some(function(x) { return String(x).trim().toUpperCase() === String(effectiveCartId).trim().toUpperCase(); });
         var needDatesRow = !hasRange && !inCartRow;
         var condLine = hideUseDetails ? '' : '<p class="text-[9px] text-gray-400">' + (currentLang === 'tr' ? 'Giriş' : 'Condition') + ': ' + escHtml(d0.conditionIn || '–') + '</p>';
-        var retRaw = String(d0.returnDate == null ? '' : d0.returnDate).trim();
-        var retMeaningful = retRaw && retRaw !== '–' && retRaw !== '-' && retRaw !== '—';
-        var retLine = retMeaningful
-          ? '<p class="text-xs md:text-sm font-black text-red-600 leading-snug mt-1">' + (currentLang === 'tr' ? 'İade: ' : 'Return: ') + escHtml(retRaw) + '</p>'
-          : '';
+        var retLine = '';
         var firstReturn = '';
         function formatFirstReturnLabel_(rawValue) {
           var raw = String(rawValue || '').trim();
@@ -3805,7 +3801,7 @@
           retLine +
           condLine +
           firstReturn +
-          '<p class="text-[9px] md:text-[11px] font-semibold text-gray-600 mt-1.5 leading-snug">' + statusLine + '</p>' +
+          (statusLine ? '<p class="text-[9px] md:text-[11px] font-semibold text-gray-600 mt-1.5 leading-snug">' + statusLine + '</p>' : '') +
           '</div>' +
           '<div class="shrink-0 w-[130px] md:w-[150px]">' + actionBtn + '</div>' +
           '</div>' +
