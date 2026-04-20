@@ -1440,8 +1440,12 @@ const sendSecurityEquipmentCheckoutPdfCopyEmail = async (
   const reservationId = String(payload.reservationId || "").trim();
   const studentName = String(payload.studentName || "").trim();
   const studentNumber = String(payload.studentNumber || "").trim();
-  const safeId = (reservationId || "reservation").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "reservation";
-  const filename = `equipment-handover-form-${safeId}.pdf`;
+  const filename = buildCheckoutPdfFilename({
+    kind: "equipment",
+    studentName,
+    studentNumber,
+    startAt: payload.startAt
+  });
   const subject = `${studentName || "-"}-${studentNumber || "-"} / İletişim Fakültesi Ekipman Çıkışı Uygundur`;
   const startLabel = formatMailDateTimeTR(payload.startAt);
   const endLabel = formatMailDateTimeTR(payload.endAt);
@@ -1584,12 +1588,71 @@ const formatMailDateTimeTR = (iso: string): string => {
   return new Date(ms).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
 };
 
+const formatPdfFilenameDateToken = (iso: string): string => {
+  const ms = new Date(String(iso || "")).getTime();
+  if (Number.isNaN(ms)) return "tarih_belirsiz";
+  try {
+    const parts = new Intl.DateTimeFormat("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(new Date(ms));
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    return `${map.day || "00"}.${map.month || "00"}.${map.year || "0000"}-${map.hour || "00"}.${map.minute || "00"}`;
+  } catch {
+    return "tarih_belirsiz";
+  }
+};
+
+const normalizePdfFileToken = (raw: string): string =>
+  String(raw || "")
+    .trim()
+    .replace(/ğ/g, "g")
+    .replace(/Ğ/g, "G")
+    .replace(/ü/g, "u")
+    .replace(/Ü/g, "U")
+    .replace(/ş/g, "s")
+    .replace(/Ş/g, "S")
+    .replace(/ı/g, "i")
+    .replace(/İ/g, "I")
+    .replace(/ö/g, "o")
+    .replace(/Ö/g, "O")
+    .replace(/ç/g, "c")
+    .replace(/Ç/g, "C")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "-";
+
+const buildCheckoutPdfFilename = (payload: {
+  kind: "equipment" | "studio";
+  studentName: string;
+  studentNumber?: string;
+  startAt: string;
+  studioName?: string;
+}): string => {
+  const studentName = normalizePdfFileToken(payload.studentName || "-");
+  const studentNumber = normalizePdfFileToken(payload.studentNumber || "-");
+  const checkoutDate = normalizePdfFileToken(formatPdfFilenameDateToken(payload.startAt));
+  const parts = [studentName, studentNumber, checkoutDate];
+  if (payload.kind === "studio") {
+    parts.push(normalizePdfFileToken(payload.studioName || "Studio"));
+  }
+  return `${parts.join("_")}.pdf`;
+};
+
 const sendCheckoutPdfAttachmentEmail = async (
   toEmail: string,
   payload: {
     kind: "equipment" | "studio";
     reservationId: string;
     studentName: string;
+    studentNumber?: string;
     startAt: string;
     endAt: string;
     pdfDataUrl: string;
@@ -1615,10 +1678,13 @@ const sendCheckoutPdfAttachmentEmail = async (
   const studioLine = payload.kind === "studio" && payload.studioName
     ? `<p><strong>Stüdyo / Studio:</strong> ${escapeHtml(String(payload.studioName || ""))}</p>`
     : "";
-  const safeId = (reservationId || "reservation").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "reservation";
-  const filename = payload.kind === "studio"
-    ? `studio-usage-form-${safeId}.pdf`
-    : `equipment-handover-form-${safeId}.pdf`;
+  const filename = buildCheckoutPdfFilename({
+    kind: payload.kind,
+    studentName,
+    studentNumber: String(payload.studentNumber || "").trim(),
+    startAt: payload.startAt,
+    studioName: payload.studioName
+  });
   const subject = `[${appName}] ${scopeLabelTr} formu / ${scopeLabelEn} form`;
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
@@ -2510,6 +2576,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
               kind: "equipment",
               reservationId: String(eqRes.id || id),
               studentName: requesterName,
+              studentNumber: requesterNumber,
               startAt: reservationStartAt,
               endAt: reservationEndAt,
               pdfDataUrl: pdfUrl
@@ -2536,7 +2603,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const stLookup = await supabaseAdmin
       .from("studio_reservations")
-      .select("id,status,studio_id,start_at,end_at,requester_name,requester_email,purpose")
+      .select("id,status,studio_id,start_at,end_at,requester_name,requester_email,requester_profile_id,purpose")
       .eq("id", id)
       .maybeSingle();
     if (stLookup.error) return reply.code(500).send({ ok: false, error: stLookup.error.message });
@@ -2591,11 +2658,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         }
         if (stMark.error) return reply.code(500).send({ ok: false, error: stMark.error.message });
         if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
+          const requesterNumber = await resolveProfileNumberLabel(
+            String(stRow.requester_profile_id || ""),
+            requesterEmail
+          );
           try {
             await sendCheckoutPdfAttachmentEmail(requesterEmail, {
               kind: "studio",
               reservationId: String(stRow.id || id),
               studentName: String(stRow.requester_name || ""),
+              studentNumber: requesterNumber,
               startAt: String(stRow.start_at || ""),
               endAt: String(stRow.end_at || ""),
               studioName: String(studioName || studioId || "Studio"),
@@ -3675,6 +3747,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             kind: "equipment",
             reservationId: results[0] || "quick",
             studentName: name,
+            studentNumber: quickNumber,
             startAt,
             endAt,
             pdfDataUrl: pdfUrl
