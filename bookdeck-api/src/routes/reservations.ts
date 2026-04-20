@@ -1371,6 +1371,121 @@ const sendEquipmentAvailableNotifyEmail = async (
   }
 };
 
+const SECURITY_OFFICE_EMAIL = "santral_guvenlik@bilgi.edu.tr";
+
+const resolveProfileNumberLabel = async (profileId: string, email: string): Promise<string> => {
+  const id = String(profileId || "").trim();
+  const mail = String(email || "").trim().toLowerCase();
+  const pickNumber = (row: Record<string, unknown> | null | undefined): string => {
+    if (!row) return "";
+    const candidates = [row.student_number, row.staff_number, row.staff_auto_id];
+    for (const c of candidates) {
+      const v = String(c || "").trim();
+      if (v) return v;
+    }
+    return "";
+  };
+  if (id) {
+    const byId = await supabaseAdmin
+      .from("profiles")
+      .select("student_number,staff_number,staff_auto_id")
+      .eq("id", id)
+      .limit(1)
+      .maybeSingle();
+    if (!byId.error) {
+      const v = pickNumber((byId.data ?? null) as Record<string, unknown> | null);
+      if (v) return v;
+    }
+  }
+  if (mail && mail.includes("@")) {
+    const byEmail = await supabaseAdmin
+      .from("profiles")
+      .select("student_number,staff_number,staff_auto_id")
+      .eq("email", mail)
+      .limit(1)
+      .maybeSingle();
+    if (!byEmail.error) {
+      const v = pickNumber((byEmail.data ?? null) as Record<string, unknown> | null);
+      if (v) return v;
+    }
+  }
+  return id || mail;
+};
+
+const sendSecurityEquipmentCheckoutPdfCopyEmail = async (
+  payload: {
+    reservationId: string;
+    studentName: string;
+    studentNumber: string;
+    startAt: string;
+    endAt: string;
+    pdfDataUrl: string;
+  }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  const toEmail = String(SECURITY_OFFICE_EMAIL || "").trim().toLowerCase();
+  if (!apiKey || !from) {
+    throw new Error("Security copy mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  if (!toEmail || !toEmail.includes("@")) {
+    throw new Error("Security copy mail target is invalid.");
+  }
+  const pdf = parsePdfDataUrl(payload.pdfDataUrl);
+  if (!pdf) {
+    throw new Error("Security copy PDF is not a valid base64 data URL.");
+  }
+  const reservationId = String(payload.reservationId || "").trim();
+  const studentName = String(payload.studentName || "").trim();
+  const studentNumber = String(payload.studentNumber || "").trim();
+  const safeId = (reservationId || "reservation").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "reservation";
+  const filename = `equipment-handover-form-${safeId}.pdf`;
+  const subject = `${studentName || "-"}-${studentNumber || "-"} / İletişim Fakültesi Ekipman Çıkışı Uygundur`;
+  const startLabel = formatMailDateTimeTR(payload.startAt);
+  const endLabel = formatMailDateTimeTR(payload.endAt);
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p>Merhaba,</p>
+      <p>Ekipman çıkış formunun güvenlik kopyası ektedir.</p>
+      <p><strong>Öğrenci:</strong> ${escapeHtml(studentName || "-")}<br>
+      <strong>Numara:</strong> ${escapeHtml(studentNumber || "-")}<br>
+      <strong>Rezervasyon ID:</strong> ${escapeHtml(reservationId || "-")}<br>
+      <strong>Teslim:</strong> ${escapeHtml(startLabel)}<br>
+      <strong>İade:</strong> ${escapeHtml(endLabel)}</p>
+    </div>
+  `;
+  const text =
+    `Ekipman cikis formu guvenlik kopyasi ektedir.\n` +
+    `Ogrenci: ${studentName || "-"}\n` +
+    `Numara: ${studentNumber || "-"}\n` +
+    `Rezervasyon ID: ${reservationId || "-"}\n` +
+    `Teslim: ${startLabel}\n` +
+    `Iade: ${endLabel}`;
+  const body: Record<string, unknown> = {
+    from,
+    to: [toEmail],
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename,
+        content: pdf.base64
+      }
+    ]
+  };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
 const sendTicketReceivedEmail = async (
   toEmail: string,
   payload: {
@@ -2383,18 +2498,33 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      if (pdfUrl && requesterEmail && requesterEmail.includes("@")) {
+      if (pdfUrl) {
+        const requesterNumber = await resolveProfileNumberLabel(String(requesterProfileId || ""), requesterEmail);
+        if (requesterEmail && requesterEmail.includes("@")) {
+          try {
+            await sendCheckoutPdfAttachmentEmail(requesterEmail, {
+              kind: "equipment",
+              reservationId: String(eqRes.id || id),
+              studentName: requesterName,
+              startAt: reservationStartAt,
+              endAt: reservationEndAt,
+              pdfDataUrl: pdfUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
+          }
+        }
         try {
-          await sendCheckoutPdfAttachmentEmail(requesterEmail, {
-            kind: "equipment",
+          await sendSecurityEquipmentCheckoutPdfCopyEmail({
             reservationId: String(eqRes.id || id),
             studentName: requesterName,
+            studentNumber: requesterNumber,
             startAt: reservationStartAt,
             endAt: reservationEndAt,
             pdfDataUrl: pdfUrl
           });
         } catch (e) {
-          req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
+          req.log.error({ err: e, reservationId: String(eqRes.id || id), securityEmail: SECURITY_OFFICE_EMAIL }, "send security equipment checkout pdf copy failed");
         }
       }
       return { ok: true, success: true, id, status: checkoutStatusUsed, url: pdfUrl || "" };
@@ -3530,6 +3660,11 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
       }
       const quickEmail = String(p.email || "").trim().toLowerCase();
+      const quickNumber =
+        String((p as Record<string, unknown>).student_number || "").trim() ||
+        String((p as Record<string, unknown>).staff_number || "").trim() ||
+        String((p as Record<string, unknown>).staff_auto_id || "").trim() ||
+        (await resolveProfileNumberLabel("", quickEmail));
       if (pdfUrl && quickEmail && quickEmail.includes("@")) {
         try {
           await sendCheckoutPdfAttachmentEmail(quickEmail, {
@@ -3542,6 +3677,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           });
         } catch (e) {
           req.log.error({ err: e, reservationId: results[0] || "quick", requesterEmail: quickEmail }, "send quick checkout pdf mail failed");
+        }
+      }
+      if (pdfUrl) {
+        try {
+          await sendSecurityEquipmentCheckoutPdfCopyEmail({
+            reservationId: results[0] || "quick",
+            studentName: name,
+            studentNumber: quickNumber,
+            startAt,
+            endAt,
+            pdfDataUrl: pdfUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: results[0] || "quick", securityEmail: SECURITY_OFFICE_EMAIL }, "send quick security equipment checkout pdf copy failed");
         }
       }
     }
