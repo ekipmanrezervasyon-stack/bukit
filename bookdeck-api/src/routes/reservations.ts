@@ -21,7 +21,8 @@ const equipmentCreateSchema = z.object({
   equipment_item_id: z.string().min(1),
   start_at: isoDateSchema,
   end_at: isoDateSchema,
-  note: z.string().max(500).optional().default("")
+  note: z.string().max(500).optional().default(""),
+  usage_scope: z.enum(["on_campus", "off_campus"])
 });
 
 const decisionSchema = z.object({
@@ -35,6 +36,11 @@ const myBookingCancelSchema = z.object({
 
 const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "iiw_admin"];
 const EQUIPMENT_CHECKED_OUT_STATUS = "IN_USE";
+const EQUIPMENT_USAGE_SCOPE_ON_CAMPUS = "on_campus";
+const EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS = "off_campus";
+type EquipmentUsageScope = typeof EQUIPMENT_USAGE_SCOPE_ON_CAMPUS | typeof EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS;
+const EQUIPMENT_NOTE_USAGE_MARKER_REGEX = /\[USAGE_SCOPE:(ON_CAMPUS|OFF_CAMPUS)\]\s*$/i;
+const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
   new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
 );
@@ -206,6 +212,34 @@ const findMappedConditionOut = (conditionMap: Record<string, string>, eqId: stri
   const up = conditionMap[id.toUpperCase()];
   if (typeof up === "string" && up.trim()) return normalizeCheckoutConditionOut(up);
   return null;
+};
+
+const normalizeEquipmentUsageScope = (raw: unknown): EquipmentUsageScope => {
+  const s = String(raw || "").trim().toLowerCase();
+  return s === EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS ? EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS : EQUIPMENT_USAGE_SCOPE_ON_CAMPUS;
+};
+
+const decodeEquipmentReservationNote = (raw: unknown): { note: string; usageScope: EquipmentUsageScope } => {
+  const full = String(raw || "");
+  const m = full.match(EQUIPMENT_NOTE_USAGE_MARKER_REGEX);
+  if (!m) {
+    return { note: full.trim(), usageScope: EQUIPMENT_USAGE_SCOPE_ON_CAMPUS };
+  }
+  const rawScope = String(m[1] || "");
+  const usageScope = normalizeEquipmentUsageScope(rawScope);
+  const markerStart = typeof m.index === "number" ? m.index : full.length;
+  const clean = full.slice(0, markerStart).replace(/\s+$/g, "");
+  return { note: clean, usageScope };
+};
+
+const encodeEquipmentReservationNote = (rawNote: unknown, rawScope: unknown): string => {
+  const usageScope = normalizeEquipmentUsageScope(rawScope);
+  const cleanBase = decodeEquipmentReservationNote(rawNote).note;
+  const marker = `[USAGE_SCOPE:${usageScope === EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS ? "OFF_CAMPUS" : "ON_CAMPUS"}]`;
+  const glue = cleanBase ? "\n\n" : "";
+  const maxBaseLen = Math.max(0, EQUIPMENT_RESERVATION_NOTE_DB_MAX - marker.length - glue.length);
+  const clipped = cleanBase.slice(0, maxBaseLen).replace(/\s+$/g, "");
+  return `${clipped}${clipped ? "\n\n" : ""}${marker}`;
 };
 
 const isMissingProfilesColumnError = (err: unknown, column: string): boolean => {
@@ -2043,7 +2077,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         phone: "",
         handoverLabel: String(r.start_at || ""),
         returnLabel: String(r.end_at || ""),
-        purpose: String(r.note || ""),
+        purpose: decodeEquipmentReservationNote(r.note).note,
         items: [
           {
             eqId: String(r.equipment_item_id || ""),
@@ -2151,7 +2185,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ ok: false, error: msg });
     }
 
-    const { equipment_item_id, start_at, end_at, note } = parsed.data;
+    const { equipment_item_id, start_at, end_at, note, usage_scope } = parsed.data;
     const s = new Date(start_at).getTime();
     const e = new Date(end_at).getTime();
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
@@ -2324,7 +2358,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       approval_required: !isAdminRole(profile.role),
       start_at,
       end_at,
-      note
+      note: encodeEquipmentReservationNote(note, usage_scope)
     };
 
     const { data, error } = await supabaseAdmin
@@ -2384,13 +2418,25 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
 
     const { id, note } = parsed.data;
+    let nextNote: string | undefined = undefined;
+    if (typeof note === "string") {
+      const existing = await supabaseAdmin
+        .from("equipment_reservations")
+        .select("note")
+        .eq("id", id)
+        .limit(1)
+        .maybeSingle();
+      if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
+      const currentUsage = decodeEquipmentReservationNote((existing.data as Record<string, unknown> | null)?.note).usageScope;
+      nextNote = encodeEquipmentReservationNote(note, currentUsage);
+    }
     const { data, error } = await supabaseAdmin
       .from("equipment_reservations")
       .update({
         status: "approved",
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString(),
-        note: note ?? undefined
+        note: nextNote
       })
       .eq("id", id)
       .select("*")
@@ -2405,13 +2451,25 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
 
     const { id, note } = parsed.data;
+    let nextNote: string | undefined = undefined;
+    if (typeof note === "string") {
+      const existing = await supabaseAdmin
+        .from("equipment_reservations")
+        .select("note")
+        .eq("id", id)
+        .limit(1)
+        .maybeSingle();
+      if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
+      const currentUsage = decodeEquipmentReservationNote((existing.data as Record<string, unknown> | null)?.note).usageScope;
+      nextNote = encodeEquipmentReservationNote(note, currentUsage);
+    }
     const { data, error } = await supabaseAdmin
       .from("equipment_reservations")
       .update({
         status: "rejected",
         reviewed_by: actor.email,
         reviewed_at: new Date().toISOString(),
-        note: note ?? undefined
+        note: nextNote
       })
       .eq("id", id)
       .select("*")
@@ -2449,7 +2507,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const requesterProfileId = eqRes.requester_profile_id ? String(eqRes.requester_profile_id) : null;
       const requiredLevelRaw = Number(eqRes.required_level);
       const requiredLevel = Number.isFinite(requiredLevelRaw) ? requiredLevelRaw : 1;
-      const reservationNote = String(eqRes.note || "");
+      const reservationNoteMeta = decodeEquipmentReservationNote(eqRes.note);
+      const reservationNote = reservationNoteMeta.note;
+      const reservationUsageScope = reservationNoteMeta.usageScope;
+      const reservationNoteStored = encodeEquipmentReservationNote(reservationNote, reservationUsageScope);
       const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
       const requesterName = String(eqRes.requester_name || "");
 
@@ -2550,7 +2611,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
               approval_required: false,
               start_at: reservationStartAt,
               end_at: reservationEndAt,
-              note: reservationNote,
+              note: reservationNoteStored,
               reviewed_by: String(actor.email || ""),
               reviewed_at: nowIso
             });
@@ -2585,17 +2646,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             req.log.error({ err: e, reservationId: String(eqRes.id || id), requesterEmail }, "send equipment checkout pdf mail failed");
           }
         }
-        try {
-          await sendSecurityEquipmentCheckoutPdfCopyEmail({
-            reservationId: String(eqRes.id || id),
-            studentName: requesterName,
-            studentNumber: requesterNumber,
-            startAt: reservationStartAt,
-            endAt: reservationEndAt,
-            pdfDataUrl: pdfUrl
-          });
-        } catch (e) {
-          req.log.error({ err: e, reservationId: String(eqRes.id || id), securityEmail: SECURITY_OFFICE_EMAIL }, "send security equipment checkout pdf copy failed");
+        if (reservationUsageScope === EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS) {
+          try {
+            await sendSecurityEquipmentCheckoutPdfCopyEmail({
+              reservationId: String(eqRes.id || id),
+              studentName: requesterName,
+              studentNumber: requesterNumber,
+              startAt: reservationStartAt,
+              endAt: reservationEndAt,
+              pdfDataUrl: pdfUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(eqRes.id || id), securityEmail: SECURITY_OFFICE_EMAIL }, "send security equipment checkout pdf copy failed");
+          }
         }
       }
       return { ok: true, success: true, id, status: checkoutStatusUsed, url: pdfUrl || "" };
@@ -3662,6 +3725,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const p = parsed.data;
     const startAt = new Date().toISOString();
     const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
+    const quickUsageScope = decodeEquipmentReservationNote(p.project_purpose || "").usageScope;
+    const quickStoredNote = encodeEquipmentReservationNote(p.project_purpose || "Hızlı Çıkış", quickUsageScope);
     if (hasPublicHolidayInRange(startAt, endAt)) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
     }
@@ -3698,7 +3763,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         approval_required: false,
         start_at: startAt,
         end_at: endAt,
-        note: p.project_purpose || "Hızlı Çıkış",
+        note: quickStoredNote,
         reviewed_by: String(actor.email || ""),
         reviewed_at: new Date().toISOString()
       });
@@ -3756,7 +3821,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           req.log.error({ err: e, reservationId: results[0] || "quick", requesterEmail: quickEmail }, "send quick checkout pdf mail failed");
         }
       }
-      if (pdfUrl) {
+      if (pdfUrl && quickUsageScope === EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS) {
         try {
           await sendSecurityEquipmentCheckoutPdfCopyEmail({
             reservationId: results[0] || "quick",

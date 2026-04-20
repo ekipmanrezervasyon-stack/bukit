@@ -466,9 +466,23 @@
         </div>
       </div>
       <div id="equipment-purpose-anchor" class="mt-4 md:mt-5 scroll-mt-28 md:scroll-mt-24">
-        <label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">Project description <span class="text-red-500">*</span></label>
+        <label id="i18n-equipment-purpose-label" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">Project description <span class="text-red-500">*</span></label>
         <textarea id="equipment-purpose" rows="3" class="w-full bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-3 rounded-xl focus:ring-[#e30613] focus:border-[#e30613] ring-offset-2" placeholder="Required after choosing dates — describe your shoot or project."></textarea>
-        <p class="text-[9px] text-gray-400 mt-1">Stored with your reservation request.</p>
+        <p id="i18n-equipment-purpose-hint" class="text-[9px] text-gray-400 mt-1">Stored with your reservation request.</p>
+        <div id="equipment-usage-scope-wrap" class="mt-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+          <p id="i18n-equipment-usage-scope-label" class="text-[10px] md:text-xs font-bold text-gray-500 uppercase mb-2">Usage type <span class="text-red-500">*</span></p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white cursor-pointer">
+              <input type="radio" name="equipment-usage-scope" value="on_campus" class="rounded-full border-gray-300 text-[#e30613]">
+              <span id="i18n-equipment-usage-scope-on" class="text-[12px] md:text-sm font-semibold text-gray-700">Kampüs İçi Kullanım / On-Campus Use</span>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white cursor-pointer">
+              <input type="radio" name="equipment-usage-scope" value="off_campus" class="rounded-full border-gray-300 text-[#e30613]">
+              <span id="i18n-equipment-usage-scope-off" class="text-[12px] md:text-sm font-semibold text-gray-700">Kampüs Dışı Kullanım / Off-Campus Use</span>
+            </label>
+          </div>
+          <p id="i18n-equipment-usage-scope-hint" class="text-[9px] text-gray-500 mt-2">This selection is required for reservation approval and security workflow.</p>
+        </div>
       </div>
     </div>
     <div id="cam-suggestions" class="hidden mb-4 md:mb-6 bg-white border border-dashed border-[#e30613]/30 rounded-2xl p-3 md:p-4 shadow-sm">
@@ -1364,7 +1378,15 @@
         msgDateTimeRequired: 'Please select pick-up and return dates and times.',
         msgSelectDatesBeforeCart: 'Select pick-up and return date and time first. Your cart only reflects real availability for that window — nothing is reserved until you finish checkout successfully.',
         btnSelectDatesFirst: 'Select dates first',
+        equipmentPurposeLabel: 'Project description',
+        equipmentPurposeHint: 'Stored with your reservation request.',
+        equipmentPurposePlaceholder: 'Required after choosing dates — describe your shoot or project.',
+        equipmentUsageScopeLabel: 'Usage type',
+        equipmentUsageScopeHint: 'This selection is required for reservation approval and security workflow.',
+        equipmentUsageScopeOn: 'On-Campus Use / Kampüs İçi Kullanım',
+        equipmentUsageScopeOff: 'Off-Campus Use / Kampüs Dışı Kullanım',
         msgProjectDescriptionRequired: 'Describe your project in the required field before reserving.',
+        msgEquipmentUsageScopeRequired: 'Select usage type: On-Campus or Off-Campus.',
         msgEmptyCart: 'Add equipment to your cart first.',
         msgNoneSelectedToRemove: 'Choose items to remove from the cart.',
         msgReservationPlaced: 'Reservation placed!',
@@ -1469,7 +1491,15 @@
         msgDateTimeRequired: 'Lutfen teslim ve iade tarih/saatlerini secin.',
         msgSelectDatesBeforeCart: 'Once teslim ve iade icin tarih ile saati secin. Sepet sadece bu araliga gore kontrol edilir; rezervasyon ancak islemi basariyla bitirince olusur.',
         btnSelectDatesFirst: 'Once tarih secin',
+        equipmentPurposeLabel: 'Proje Aciklamasi',
+        equipmentPurposeHint: 'Rezervasyon talebinizle birlikte kaydedilir.',
+        equipmentPurposePlaceholder: 'Tarih seciminden sonra proje aciklamanizi yazin.',
+        equipmentUsageScopeLabel: 'Kullanim Turu',
+        equipmentUsageScopeHint: 'Bu secim, rezervasyon onayi ve guvenlik sureci icin zorunludur.',
+        equipmentUsageScopeOn: 'Kampüs İçi Kullanım / On-Campus Use',
+        equipmentUsageScopeOff: 'Kampüs Dışı Kullanım / Off-Campus Use',
         msgProjectDescriptionRequired: 'Rezervasyon oncesi proje aciklamasi alanini doldurun.',
+        msgEquipmentUsageScopeRequired: 'Lutfen kullanim turunu secin: Kampüs İçi veya Kampüs Dışı.',
         msgEmptyCart: 'Once sepete ekipman ekleyin.',
         msgNoneSelectedToRemove: 'Septten cikarmak icin urun secin.',
         msgReservationPlaced: 'Rezervasyon olusturuldu!',
@@ -1541,6 +1571,12 @@
       setTxt('i18n-studio-title', t('studioTitle'));
       setTxt('i18n-studio-project-name-label', t('studioProjectNameLabel'));
       setTxt('i18n-studio-project-name-hint', t('studioProjectNameHint'));
+      setTxt('i18n-equipment-purpose-label', t('equipmentPurposeLabel'));
+      setTxt('i18n-equipment-purpose-hint', t('equipmentPurposeHint'));
+      setTxt('i18n-equipment-usage-scope-label', t('equipmentUsageScopeLabel'));
+      setTxt('i18n-equipment-usage-scope-hint', t('equipmentUsageScopeHint'));
+      setTxt('i18n-equipment-usage-scope-on', t('equipmentUsageScopeOn'));
+      setTxt('i18n-equipment-usage-scope-off', t('equipmentUsageScopeOff'));
       var spIn = document.getElementById('studio-purpose');
       if (spIn) { spIn.placeholder = t('studioProjectNamePlaceholder'); syncStudioProjectNameCount_(); }
       setTxt('i18n-cart-title', t('cartTitle'));
@@ -1557,7 +1593,7 @@
       var eqSearch = document.getElementById('equipment-search');
       if (eqSearch) eqSearch.placeholder = currentLang === 'tr' ? "Ekipman ara veya 'uygun'" : "Search gear or 'available'...";
       var eqPurpose = document.getElementById('equipment-purpose');
-      if (eqPurpose) eqPurpose.placeholder = currentLang === 'tr' ? 'Tarih seciminden sonra proje aciklamanizi yazin.' : 'Required after choosing dates — describe your shoot or project.';
+      if (eqPurpose) eqPurpose.placeholder = t('equipmentPurposePlaceholder');
       var pdfUrlEl = document.getElementById('studio-pdf-url');
       if (pdfUrlEl && !pdfUrlEl.placeholder) {
         pdfUrlEl.placeholder = 'https://drive.google.com/file/d/.../view';
@@ -2683,6 +2719,25 @@
         try { ta.focus({ preventScroll: true }); } catch (e1) { try { ta.focus(); } catch (e2) {} }
         try { ta.classList.add('ring-2', 'ring-[#e30613]'); setTimeout(function() { ta.classList.remove('ring-2', 'ring-[#e30613]'); }, 2200); } catch (e3) {}
       }, 320);
+    }
+    function getSelectedEquipmentUsageScope(){
+      var selected = document.querySelector('input[name="equipment-usage-scope"]:checked');
+      if (!selected) return '';
+      return String(selected.value || '').trim();
+    }
+    function clearEquipmentUsageScopeSelection(){
+      var nodes = document.querySelectorAll('input[name="equipment-usage-scope"]');
+      Array.prototype.forEach.call(nodes, function(node){
+        if (node && typeof node.checked !== 'undefined') node.checked = false;
+      });
+    }
+    function highlightEquipmentUsageScopeField(){
+      var box = document.getElementById('equipment-usage-scope-wrap');
+      if (!box) return;
+      try {
+        box.classList.add('ring-2', 'ring-[#e30613]');
+        setTimeout(function(){ box.classList.remove('ring-2', 'ring-[#e30613]'); }, 2200);
+      } catch (_e) {}
     }
     function validateCheckoutDatesOrder(){
       var sD=document.getElementById('pickup-date').value,sT=document.getElementById('pickup-time-select').value;
@@ -4184,10 +4239,12 @@
       var sD=document.getElementById('pickup-date').value,sT=document.getElementById('pickup-time-select').value;
       var eD=document.getElementById('return-date').value,eT=document.getElementById('return-time-select').value;
       var pu=document.getElementById('equipment-purpose').value.trim();
+      var usageScope=getSelectedEquipmentUsageScope();
       if(!sD||!sT||!eD||!eT){showAlert(t('modalMissingData'),t('msgDateTimeRequired'),true);return;}
       var dv=validateCheckoutDatesOrder();
       if(!dv.ok){var iw=document.getElementById('checkout-modal-inline-warning');if(iw){iw.textContent=dv.msg;iw.classList.remove('hidden');}showAlert(t('modalMissingData'),dv.msg,true);return;}
       if(!pu){scrollToEquipmentPurposeField();showAlert(t('modalMissingData'),t('msgProjectDescriptionRequired'),true);return;}
+      if(!usageScope){scrollToEquipmentPurposeField();highlightEquipmentUsageScopeField();showAlert(t('modalMissingData'),t('msgEquipmentUsageScopeRequired'),true);return;}
       if(eqCart.length===0){showAlert(t('modalMissingData'),t('msgEmptyCart'),true);return;}
       var body=document.getElementById('checkout-modal-body');
       body.innerHTML='<p class="text-xs text-gray-500 mb-3">Tick the units to include in this reservation request.</p>' +
@@ -4260,6 +4317,8 @@
       var sD=document.getElementById('pickup-date').value,sT=document.getElementById('pickup-time-select').value;
       var eD=document.getElementById('return-date').value,eT=document.getElementById('return-time-select').value;
       var pu=document.getElementById('equipment-purpose').value.trim();
+      var usageScope=getSelectedEquipmentUsageScope();
+      if(!usageScope){scrollToEquipmentPurposeField();highlightEquipmentUsageScopeField();showAlert(t('modalMissingData'),t('msgEquipmentUsageScopeRequired'),true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
       var prepH = checkoutPreparingButtonHtml();
       var btn=document.getElementById('checkout-btn');var ot=btn?btn.innerText:'';if(btn){btn.innerHTML=prepH;btn.disabled=true;}
@@ -4279,7 +4338,8 @@
                 equipment_item_id: String(eqId || ''),
                 start_at: s,
                 end_at: e,
-                note: pu || ''
+                note: pu || '',
+                usage_scope: usageScope
               }
             })
               .then(function(res) {
@@ -4319,6 +4379,7 @@
           document.getElementById('pickup-date').value='';document.getElementById('pickup-time-select').selectedIndex=0;
           document.getElementById('return-date').value='';document.getElementById('return-time-select').selectedIndex=0;
           document.getElementById('equipment-purpose').value='';
+          clearEquipmentUsageScopeSelection();
           equipmentCategoryCache = {};
           loadEquipment(currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY);
         }).catch(function(err){
