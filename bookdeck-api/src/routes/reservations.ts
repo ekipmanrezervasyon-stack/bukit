@@ -711,13 +711,18 @@ const RETURN_REMINDER_FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const RETURN_REMINDER_NINE_AM_WINDOW_MS = 60 * 60 * 1000;
 const RETURN_REMINDER_FOUR_HOURS_WINDOW_MS = 30 * 60 * 1000;
 const RETURN_REMINDER_LOG_KEY_PREFIX = "return_reminder_sent";
+const PICKUP_TIMEOUT_GRACE_MIN = 30;
+const PICKUP_TIMEOUT_BASE_MS = PICKUP_TIMEOUT_GRACE_MIN * 60 * 1000;
+const PICKUP_TIMEOUT_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 const RETURN_REMINDER_MAIL_TEXT_TR =
   "Ekipmanlarınızın iadesi yaklaşmaktadır. İade edceğiniz ekipmanların şarjlarının yapılmış, varsa SD kartlarının çıkarılmış olduğundan, tripodların plate aksesuarlarının kamera üzerinde kalmadığından emin olun. Eksik donanımlı ekipmanlar teslim alınamamakta ve gecikmiş ekipman prosedürü işletilmektedir";
 const RETURN_REMINDER_MAIL_TEXT_EN =
   "Your equipment return is approaching. Please ensure batteries are charged, SD cards are removed (if any), and tripod plate accessories are not left on the camera. Equipment with missing components cannot be accepted and overdue equipment procedures will be applied.";
 
 let returnReminderTimer: NodeJS.Timeout | null = null;
+let pickupTimeoutTimer: NodeJS.Timeout | null = null;
 let returnReminderJobRunning = false;
+let pickupTimeoutJobRunning = false;
 const returnReminderRuntimeSent = new Set<string>();
 
 const BAN_TABLE_CANDIDATES = ["bans", "user_bans", "restrictions_bans"];
@@ -2204,6 +2209,173 @@ const runEquipmentReturnReminderDispatch = async (
   }
 };
 
+type PickupTimeoutDispatchStats = {
+  processed: number;
+  candidates: number;
+  cancelled: number;
+  skippedWithinGrace: number;
+  skippedLateReturnGrace: number;
+  skippedMissingData: number;
+  skippedUpdateRace: number;
+};
+
+const resolveLateReturnGraceMsForPickupReservation = async (
+  row: Record<string, unknown>
+): Promise<number> => {
+  const equipmentItemId = String(row.equipment_item_id || "").trim();
+  const startAtIso = String(row.start_at || "").trim();
+  if (!equipmentItemId || !startAtIso) return 0;
+  const startAtMs = new Date(startAtIso).getTime();
+  if (Number.isNaN(startAtMs)) return 0;
+
+  const prev = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,status,end_at,reviewed_at")
+    .eq("equipment_item_id", equipmentItemId)
+    .in("status", ["returned", "completed"])
+    .lt("start_at", startAtIso)
+    .order("end_at", { ascending: false })
+    .limit(10);
+  if (prev.error) throw new Error(prev.error.message);
+
+  const rows = (prev.data ?? []) as Record<string, unknown>[];
+  for (const p of rows) {
+    const endAtMs = new Date(String(p.end_at || "")).getTime();
+    const reviewedAtMs = new Date(String(p.reviewed_at || "")).getTime();
+    if (Number.isNaN(endAtMs) || Number.isNaN(reviewedAtMs)) continue;
+    const lateMs = reviewedAtMs - endAtMs;
+    if (lateMs <= 0) continue;
+    if (reviewedAtMs <= startAtMs) continue;
+    return lateMs;
+  }
+  return 0;
+};
+
+const runPickupTimeoutDispatch = async (
+  logger?: { error: (payload: unknown, msg: string) => void; info?: (payload: unknown, msg?: string) => void }
+): Promise<PickupTimeoutDispatchStats & { running: boolean }> => {
+  if (pickupTimeoutJobRunning) {
+    return {
+      running: true,
+      processed: 0,
+      candidates: 0,
+      cancelled: 0,
+      skippedWithinGrace: 0,
+      skippedLateReturnGrace: 0,
+      skippedMissingData: 0,
+      skippedUpdateRace: 0
+    };
+  }
+  pickupTimeoutJobRunning = true;
+  const nowMs = Date.now();
+  const stats: PickupTimeoutDispatchStats & { running: boolean } = {
+    running: false,
+    processed: 0,
+    candidates: 0,
+    cancelled: 0,
+    skippedWithinGrace: 0,
+    skippedLateReturnGrace: 0,
+    skippedMissingData: 0,
+    skippedUpdateRace: 0
+  };
+  try {
+    const windowStartIso = new Date(nowMs - PICKUP_TIMEOUT_LOOKBACK_MS).toISOString();
+    const pickupThresholdIso = new Date(nowMs - PICKUP_TIMEOUT_BASE_MS).toISOString();
+    const pending = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,status,start_at")
+      .in("status", ["pending", "approved"])
+      .gte("start_at", windowStartIso)
+      .lte("start_at", pickupThresholdIso)
+      .order("start_at", { ascending: true })
+      .limit(5000);
+    if (pending.error) throw new Error(pending.error.message);
+    const rows = (pending.data ?? []) as Record<string, unknown>[];
+    stats.candidates = rows.length;
+
+    for (const row of rows) {
+      stats.processed += 1;
+      const id = String(row.id || "").trim();
+      const eqId = String(row.equipment_item_id || "").trim();
+      const startAtIso = String(row.start_at || "").trim();
+      const startAtMs = new Date(startAtIso).getTime();
+      if (!id || !eqId || Number.isNaN(startAtMs)) {
+        stats.skippedMissingData += 1;
+        continue;
+      }
+
+      const baseDropMs = startAtMs + PICKUP_TIMEOUT_BASE_MS;
+      let graceFromLateReturnMs = 0;
+      try {
+        graceFromLateReturnMs = await resolveLateReturnGraceMsForPickupReservation(row);
+      } catch (e) {
+        if (logger) logger.error({ err: e, reservationId: id }, "resolve late return grace failed");
+      }
+      const effectiveDropMs = baseDropMs + Math.max(0, graceFromLateReturnMs);
+      if (nowMs < effectiveDropMs) {
+        if (graceFromLateReturnMs > 0) stats.skippedLateReturnGrace += 1;
+        else stats.skippedWithinGrace += 1;
+        continue;
+      }
+
+      const nowIso = new Date().toISOString();
+      const upd = await supabaseAdmin
+        .from("equipment_reservations")
+        .update({
+          status: "cancelled",
+          reviewed_by: "SYSTEM_AUTO_PICKUP_TIMEOUT",
+          reviewed_at: nowIso
+        })
+        .eq("id", id)
+        .in("status", ["pending", "approved"])
+        .select("id,equipment_item_id")
+        .maybeSingle();
+      if (upd.error) {
+        if (logger) logger.error({ err: upd.error, reservationId: id }, "auto pickup timeout update failed");
+        continue;
+      }
+      if (!upd.data) {
+        stats.skippedUpdateRace += 1;
+        continue;
+      }
+
+      const itemUpdated = await supabaseAdmin
+        .from("equipment_items")
+        .update({ status: "AVAILABLE" })
+        .eq("id", eqId)
+        .select("id,equipment_id,name")
+        .maybeSingle();
+      if (itemUpdated.error) {
+        if (logger) logger.error({ err: itemUpdated.error, reservationId: id, equipmentItemId: eqId }, "auto pickup timeout item update failed");
+      } else if (itemUpdated.data) {
+        try {
+          await triggerNotifyForAvailableEquipment(itemUpdated.data, logger);
+        } catch (e) {
+          if (logger) logger.error({ err: e, reservationId: id, equipmentItemId: eqId }, "auto pickup timeout notify failed");
+        }
+      }
+      stats.cancelled += 1;
+    }
+
+    if (logger && typeof logger.info === "function") {
+      logger.info(
+        {
+          candidates: stats.candidates,
+          cancelled: stats.cancelled,
+          skippedWithinGrace: stats.skippedWithinGrace,
+          skippedLateReturnGrace: stats.skippedLateReturnGrace,
+          skippedMissingData: stats.skippedMissingData,
+          skippedUpdateRace: stats.skippedUpdateRace
+        },
+        "pickup timeout dispatch cycle completed"
+      );
+    }
+    return stats;
+  } finally {
+    pickupTimeoutJobRunning = false;
+  }
+};
+
 const listAdminPenalties = async (): Promise<Array<{
   id: string;
   user_id: string;
@@ -2291,10 +2463,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }, 15_000);
     app.log.info({ interval_minutes: intervalMin }, "return reminder scheduler enabled");
   }
+  if (autoRunEnabled && !pickupTimeoutTimer) {
+    pickupTimeoutTimer = setInterval(() => {
+      void runPickupTimeoutDispatch(app.log).catch((e) => {
+        app.log.error({ err: e }, "pickup timeout dispatch cycle failed");
+      });
+    }, intervalMs);
+    if (typeof pickupTimeoutTimer.unref === "function") pickupTimeoutTimer.unref();
+    setTimeout(() => {
+      void runPickupTimeoutDispatch(app.log).catch((e) => {
+        app.log.error({ err: e }, "initial pickup timeout dispatch failed");
+      });
+    }, 20_000);
+    app.log.info({ interval_minutes: intervalMin, grace_minutes: PICKUP_TIMEOUT_GRACE_MIN }, "pickup timeout scheduler enabled");
+  }
   app.addHook("onClose", async () => {
     if (returnReminderTimer) {
       clearInterval(returnReminderTimer);
       returnReminderTimer = null;
+    }
+    if (pickupTimeoutTimer) {
+      clearInterval(pickupTimeoutTimer);
+      pickupTimeoutTimer = null;
     }
   });
 
@@ -3451,6 +3641,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
   app.post("/admin/return-reminders/run", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
     try {
       const stats = await runEquipmentReturnReminderDispatch(req.log);
+      return { ok: true, ...stats };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg });
+    }
+  });
+
+  app.post("/admin/pickup-timeouts/run", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    try {
+      const stats = await runPickupTimeoutDispatch(req.log);
       return { ok: true, ...stats };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
