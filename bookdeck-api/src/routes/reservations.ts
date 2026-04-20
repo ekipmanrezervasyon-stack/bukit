@@ -1447,6 +1447,7 @@ const sendSecurityEquipmentCheckoutPdfCopyEmail = async (
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
       <p>Merhaba,</p>
       <p>Ekipman çıkış formunun güvenlik kopyası ektedir.</p>
+      <p>Öğrencimizin ekteki ekipmanlarla kampüs dışı çıkışı uygundur. Ekipman fazlalığına göre takdiri güvenlik amirliğine ait olmak üzere Cami Kapı Stüdyo Ana Kapısı'na kadar taşıma amaçlı araç girişine müsaade edilmesini rica ederiz. İletişim Fakültesi Stüdyolar Birimi (Acil durumlarda Taylan Yuva'dan bilgi alınabilir).</p>
       <p><strong>Öğrenci:</strong> ${escapeHtml(studentName || "-")}<br>
       <strong>Numara:</strong> ${escapeHtml(studentNumber || "-")}<br>
       <strong>Rezervasyon ID:</strong> ${escapeHtml(reservationId || "-")}<br>
@@ -1456,6 +1457,7 @@ const sendSecurityEquipmentCheckoutPdfCopyEmail = async (
   `;
   const text =
     `Ekipman cikis formu guvenlik kopyasi ektedir.\n` +
+    `Ogrencimizin ekteki ekipmanlarla kampus disi cikisi uygundur. Ekipman fazlaligina gore takdiri guvenlik amirligine ait olmak uzere Cami Kapi Studyo Ana Kapisi'na kadar tasima amacli arac girisine musaade edilmesini rica ederiz. Iletisim Fakultesi Studyolar Birimi (Acil durumlarda Taylan Yuva'dan bilgi alinabilir).\n` +
     `Ogrenci: ${studentName || "-"}\n` +
     `Numara: ${studentNumber || "-"}\n` +
     `Rezervasyon ID: ${reservationId || "-"}\n` +
