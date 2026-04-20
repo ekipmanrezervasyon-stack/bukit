@@ -2660,6 +2660,7 @@
       var locLine = '<p class="text-[10px] mt-2"><span class="font-black text-gray-500">Konum:</span> ' + escAdm(data.locationPhysical || data.location || '-') + '</p>';
       var respLine = '<p class="text-[10px]"><span class="font-black text-gray-500">Sorumlu:</span> ' + escAdm(data.responsiblePhysical || '-') + '</p>';
       var condLine = '<p class="text-[10px]"><span class="font-black text-gray-500">Kondisyon:</span> ' + escAdm(data.condition || '-') + '</p>';
+      var levelLine = '<p class="text-[10px]"><span class="font-black text-gray-500">Seviye:</span> ' + escAdm(data.level || '-') + '</p>';
       var statEn = '<p class="text-[10px]"><span class="font-black text-gray-500">Durum (EN):</span> ' + escAdm(data.statusEnglish || '') + '</p>';
       var editBox = '' +
         '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200">' +
@@ -2684,13 +2685,21 @@
               '<option value="MAINTENANCE"' + ((String(data.status || '').toUpperCase() === 'MAINTENANCE') ? ' selected' : '') + '>MAINTENANCE</option>' +
               '<option value="MAINTANENCE"' + ((String(data.status || '').toUpperCase() === 'MAINTANENCE') ? ' selected' : '') + '>MAINTANENCE</option>' +
             '</select>' +
+            '<select id="inv-edit-level" class="w-full text-xs border rounded-lg p-2">' +
+              '<option value="">Seviye (değiştirme)</option>' +
+              '<option value="1"' + ((String(data.level || '').trim() === '1') ? ' selected' : '') + '>1</option>' +
+              '<option value="2"' + ((String(data.level || '').trim() === '2') ? ' selected' : '') + '>2</option>' +
+              '<option value="3"' + ((String(data.level || '').trim() === '3') ? ' selected' : '') + '>3</option>' +
+              '<option value="4"' + ((String(data.level || '').trim() === '4') ? ' selected' : '') + '>4</option>' +
+              '<option value="5"' + ((String(data.level || '').trim() === '5') ? ' selected' : '') + '>5</option>' +
+            '</select>' +
             '<button type="button" onclick="saveInvMetaChanges()" class="w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Kaydet</button>' +
             '<p id="inv-edit-result" class="text-[10px] text-gray-600"></p>' +
           '</div>' +
         '</div>';
       var availBox = '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200"><p class="text-[10px] font-black text-gray-500 uppercase mb-2">İleri tarihli müsaitlik</p><div class="grid grid-cols-1 gap-2"><input type="datetime-local" id="inv-avail-start" class="w-full text-xs border rounded-lg p-2"><input type="datetime-local" id="inv-avail-end" class="w-full text-xs border rounded-lg p-2"></div><button type="button" onclick="runInvAvailabilityCheck()" class="mt-2 w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Sorgula</button><p id="inv-avail-result" class="text-[10px] mt-2 text-gray-600"></p></div>';
       var canEdit = !!token;
-      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-contain bg-white rounded-2xl shadow-sm border border-gray-100 p-1"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + statEn + '<div class="p-4 rounded-2xl border ' + statusBoxClass + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + statusLabelTr + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
+      panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-contain bg-white rounded-2xl shadow-sm border border-gray-100 p-1"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + levelLine + statEn + '<div class="p-4 rounded-2xl border ' + statusBoxClass + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + statusLabelTr + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
     }).catch(function(e) {
       panel.innerHTML = '<div class="mt-20 text-center text-red-600 text-sm font-medium">' + escAdm((e && e.message) || 'Detay yüklenemedi.') + '</div>';
     });
@@ -2709,7 +2718,10 @@
       location: document.getElementById('inv-edit-location') ? document.getElementById('inv-edit-location').value.trim() : '',
       responsible: document.getElementById('inv-edit-responsible') ? document.getElementById('inv-edit-responsible').value.trim() : '',
       condition_in: document.getElementById('inv-edit-condition-in') ? document.getElementById('inv-edit-condition-in').value : '',
-      status: document.getElementById('inv-edit-status') ? document.getElementById('inv-edit-status').value : ''
+      status: document.getElementById('inv-edit-status') ? document.getElementById('inv-edit-status').value : '',
+      required_level: document.getElementById('inv-edit-level') && document.getElementById('inv-edit-level').value
+        ? Number(document.getElementById('inv-edit-level').value)
+        : undefined
     };
     if (out) { out.textContent = 'Kaydediliyor...'; out.className = 'text-[10px] text-blue-700'; }
     function onSaveOk() {

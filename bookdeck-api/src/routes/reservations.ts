@@ -105,7 +105,8 @@ const inventoryMetaSchema = z.object({
   location: z.string().max(190).optional(),
   responsible: z.string().max(190).optional(),
   condition_in: z.string().max(120).optional(),
-  status: z.enum(["AVAILABLE", "IN_USE", "BROKEN", "MAINTENANCE", "MAINTANENCE"]).optional()
+  status: z.enum(["AVAILABLE", "IN_USE", "BROKEN", "MAINTENANCE", "MAINTANENCE"]).optional(),
+  required_level: z.coerce.number().int().min(1).max(5).optional()
 });
 
 const ticketDecisionSchema = z.object({
@@ -4006,6 +4007,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (incoming.responsible !== undefined && Object.prototype.hasOwnProperty.call(item, "responsible")) patch.responsible = incoming.responsible;
     if (incoming.condition_in !== undefined && Object.prototype.hasOwnProperty.call(item, "condition_in")) patch.condition_in = incoming.condition_in;
     if (incoming.status !== undefined && Object.prototype.hasOwnProperty.call(item, "status")) patch.status = incoming.status;
+    if (incoming.required_level !== undefined && Object.prototype.hasOwnProperty.call(item, "required_level")) patch.required_level = incoming.required_level;
     if (!Object.keys(patch).length) return { ok: true, success: true };
 
     const wasAvailable = String(item.status || "").trim().toUpperCase() === "AVAILABLE";
