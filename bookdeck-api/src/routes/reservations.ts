@@ -620,6 +620,75 @@ const escapeHtml = (v: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const getIstanbulDateParts = (iso: string): { year: string; month: string; day: string; hour: string; minute: string } | null => {
+  const ms = new Date(String(iso || "")).getTime();
+  if (Number.isNaN(ms)) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(new Date(ms));
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const year = String(map.year || "").trim();
+    const month = String(map.month || "").padStart(2, "0");
+    const day = String(map.day || "").padStart(2, "0");
+    const hour = String(map.hour || "").padStart(2, "0");
+    const minute = String(map.minute || "").padStart(2, "0");
+    if (!year || !month || !day) return null;
+    return { year, month, day, hour, minute };
+  } catch {
+    return null;
+  }
+};
+
+const buildIstanbulNineAmTargetIso = (endAtIso: string): string => {
+  const parts = getIstanbulDateParts(endAtIso);
+  if (!parts) return "";
+  const target = new Date(`${parts.year}-${parts.month}-${parts.day}T09:00:00+03:00`).toISOString();
+  return target;
+};
+
+const buildReturnReminderLogKey = (reservationId: string, mode: "day_09" | "minus_4h", targetIso: string): string => {
+  const rid = String(reservationId || "").trim() || "unknown";
+  const targetToken = String(targetIso || "").replace(/[^0-9]/g, "").slice(0, 12) || "unknown";
+  return `${RETURN_REMINDER_LOG_KEY_PREFIX}:${rid}:${mode}:${targetToken}`;
+};
+
+const hasReturnReminderBeenSent = async (logKey: string): Promise<boolean> => {
+  const key = String(logKey || "").trim();
+  if (!key) return true;
+  if (returnReminderRuntimeSent.has(key)) return true;
+  const q = await supabaseAdmin
+    .from("app_config")
+    .select("value")
+    .eq("key", key)
+    .limit(1)
+    .maybeSingle();
+  if (q.error) {
+    if (isMissingTableError(q.error) || isMissingColumnError(q.error)) return false;
+    throw new Error(q.error.message);
+  }
+  return Boolean(q.data);
+};
+
+const markReturnReminderSent = async (logKey: string): Promise<void> => {
+  const key = String(logKey || "").trim();
+  if (!key) return;
+  returnReminderRuntimeSent.add(key);
+  const up = await supabaseAdmin
+    .from("app_config")
+    .upsert({ key, value: new Date().toISOString() }, { onConflict: "key" });
+  if (up.error && !isMissingTableError(up.error) && !isMissingColumnError(up.error)) {
+    throw new Error(up.error.message);
+  }
+};
+
 const isAppAdminRole = (roleRaw: unknown): boolean => {
   const role = String(roleRaw || "").trim().toLowerCase();
   return role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
@@ -635,6 +704,20 @@ const BAN_LEVELS = {
 const DELAY_PICKUP_QUEUE_WINDOW_MIN = 32;
 const DELAY_MINOR_LATE_MAX_MIN = 30;
 const DELAY_SOFT_MAJOR_LATE_YELLOW_CAP = 1;
+const RETURN_REMINDER_DURATION_LONG_MS = 24 * 60 * 60 * 1000;
+const RETURN_REMINDER_DURATION_SHORT_MS = 4 * 60 * 60 * 1000;
+const RETURN_REMINDER_FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const RETURN_REMINDER_NINE_AM_WINDOW_MS = 60 * 60 * 1000;
+const RETURN_REMINDER_FOUR_HOURS_WINDOW_MS = 30 * 60 * 1000;
+const RETURN_REMINDER_LOG_KEY_PREFIX = "return_reminder_sent";
+const RETURN_REMINDER_MAIL_TEXT_TR =
+  "Ekipmanlarınızın iadesi yaklaşmaktadır. İade edceğiniz ekipmanların şarjlarının yapılmış, varsa SD kartlarının çıkarılmış olduğundan, tripodların plate aksesuarlarının kamera üzerinde kalmadığından emin olun. Eksik donanımlı ekipmanlar teslim alınamamakta ve gecikmiş ekipman prosedürü işletilmektedir";
+const RETURN_REMINDER_MAIL_TEXT_EN =
+  "Your equipment return is approaching. Please ensure batteries are charged, SD cards are removed (if any), and tripod plate accessories are not left on the camera. Equipment with missing components cannot be accepted and overdue equipment procedures will be applied.";
+
+let returnReminderTimer: NodeJS.Timeout | null = null;
+let returnReminderJobRunning = false;
+const returnReminderRuntimeSent = new Set<string>();
 
 const BAN_TABLE_CANDIDATES = ["bans", "user_bans", "restrictions_bans"];
 let banTableCache: string | null | undefined = undefined;
@@ -1605,6 +1688,173 @@ const sendTicketReceivedEmail = async (
   }
 };
 
+const sendReservationLifecycleEmail = async (
+  toEmail: string,
+  payload: {
+    kind: "equipment" | "studio";
+    event: "created" | "approved" | "rejected";
+    reservationId: string;
+    requesterName?: string;
+    itemLabel?: string;
+    startAt: string;
+    endAt: string;
+    adminNote?: string;
+  }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Reservation lifecycle mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const scopeTr = payload.kind === "studio" ? "Stüdyo rezervasyonu" : "Ekipman rezervasyonu";
+  const scopeEn = payload.kind === "studio" ? "Studio reservation" : "Equipment reservation";
+  const eventCopy: Record<"created" | "approved" | "rejected", { tr: string; en: string }> = {
+    created: { tr: "oluşturuldu", en: "created" },
+    approved: { tr: "onaylandı", en: "approved" },
+    rejected: { tr: "reddedildi", en: "rejected" }
+  };
+  const eventLabel = eventCopy[payload.event];
+  const requesterName = String(payload.requesterName || "").trim();
+  const itemLabel = String(payload.itemLabel || "").trim();
+  const reservationId = String(payload.reservationId || "").trim();
+  const startLabel = formatMailDateTimeTR(payload.startAt);
+  const endLabel = formatMailDateTimeTR(payload.endAt);
+  const adminNote = String(payload.adminNote || "").trim();
+  const subject = `[${appName}] ${scopeTr} ${eventLabel.tr} / ${scopeEn} ${eventLabel.en}`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p>${scopeTr} talebiniz <strong>${escapeHtml(eventLabel.tr)}</strong>.</p>
+      <p><strong>Rezervasyon ID:</strong> ${escapeHtml(reservationId || "-")}<br>
+      <strong>Kalem:</strong> ${escapeHtml(itemLabel || "-")}<br>
+      <strong>Teslim:</strong> ${escapeHtml(startLabel || "-")}<br>
+      <strong>İade:</strong> ${escapeHtml(endLabel || "-")}</p>
+      ${adminNote ? `<p><strong>Yönetici Notu:</strong><br>${escapeHtml(adminNote)}</p>` : ""}
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p>Your ${scopeEn.toLowerCase()} request is <strong>${escapeHtml(eventLabel.en)}</strong>.</p>
+      <p><strong>Reservation ID:</strong> ${escapeHtml(reservationId || "-")}<br>
+      <strong>Item:</strong> ${escapeHtml(itemLabel || "-")}<br>
+      <strong>Checkout:</strong> ${escapeHtml(startLabel || "-")}<br>
+      <strong>Return:</strong> ${escapeHtml(endLabel || "-")}</p>
+      ${adminNote ? `<p><strong>Admin Note:</strong><br>${escapeHtml(adminNote)}</p>` : ""}
+    </div>
+  `;
+  const text =
+    `TR: ${scopeTr} talebiniz ${eventLabel.tr}.\n` +
+    `Rezervasyon ID: ${reservationId || "-"}\n` +
+    `Kalem: ${itemLabel || "-"}\n` +
+    `Teslim: ${startLabel || "-"}\n` +
+    `Iade: ${endLabel || "-"}\n` +
+    (adminNote ? `Yonetici Notu: ${adminNote}\n` : "") +
+    `\nEN: Your ${scopeEn.toLowerCase()} request is ${eventLabel.en}.\n` +
+    `Reservation ID: ${reservationId || "-"}\n` +
+    `Item: ${itemLabel || "-"}\n` +
+    `Checkout: ${startLabel || "-"}\n` +
+    `Return: ${endLabel || "-"}\n` +
+    (adminNote ? `Admin Note: ${adminNote}\n` : "");
+
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
+const sendTicketDecisionEmail = async (
+  toEmail: string,
+  payload: {
+    ticketNo: string;
+    requesterName?: string;
+    decision: "approved" | "rejected";
+    adminNote: string;
+  }
+): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Ticket decision mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const requesterName = String(payload.requesterName || "").trim();
+  const ticketNo = String(payload.ticketNo || "").trim();
+  const adminNote = String(payload.adminNote || "").trim() || "-";
+  const decisionTr = payload.decision === "approved" ? "Onaylandı" : "Reddedildi";
+  const decisionEn = payload.decision === "approved" ? "Approved" : "Rejected";
+  const subject = `[${appName}] Ticket ${decisionEn} / Talep ${decisionTr} (${ticketNo || "TCK"})`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>Merhaba${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p><strong>${escapeHtml(ticketNo || "-")}</strong> numaralı talebiniz <strong>${escapeHtml(decisionTr)}</strong>.</p>
+      <p><strong>Yönetici Açıklaması:</strong><br>${escapeHtml(adminNote)}</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>Hello${requesterName ? ` ${escapeHtml(requesterName)}` : ""},</p>
+      <p>Your ticket <strong>${escapeHtml(ticketNo || "-")}</strong> is <strong>${escapeHtml(decisionEn)}</strong>.</p>
+      <p><strong>Admin Explanation:</strong><br>${escapeHtml(adminNote)}</p>
+    </div>
+  `;
+  const text =
+    `TR: ${ticketNo || "-"} numarali talebiniz ${decisionTr}.\n` +
+    `Yonetici Aciklamasi: ${adminNote}\n\n` +
+    `EN: Your ticket ${ticketNo || "-"} is ${decisionEn}.\n` +
+    `Admin Explanation: ${adminNote}`;
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
+const sendEquipmentReturnReminderEmail = async (toEmail: string): Promise<void> => {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const from = String(env.OTP_EMAIL_FROM || "").trim();
+  if (!apiKey || !from) {
+    throw new Error("Return reminder mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
+  }
+  const appName = String(env.OTP_APP_NAME || "BUKit").trim();
+  const subject = `[${appName}] Ekipman iade hatırlatması / Equipment return reminder`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
+      <p><strong>TR</strong></p>
+      <p>${escapeHtml(RETURN_REMINDER_MAIL_TEXT_TR)}</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
+      <p><strong>EN</strong></p>
+      <p>${escapeHtml(RETURN_REMINDER_MAIL_TEXT_EN)}</p>
+    </div>
+  `;
+  const text =
+    `TR: ${RETURN_REMINDER_MAIL_TEXT_TR}\n\n` +
+    `EN: ${RETURN_REMINDER_MAIL_TEXT_EN}`;
+  const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
+  if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const raw = await resp.text();
+    throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
+  }
+};
+
 const parsePdfDataUrl = (raw: string): { mimeType: string; base64: string } | null => {
   const value = String(raw || "").trim();
   if (!value) return null;
@@ -1825,6 +2075,134 @@ const triggerNotifyForAvailableEquipment = async (
   return { table, matched: rows.length, sent, failed, keys };
 };
 
+type ReturnReminderDispatchStats = {
+  processed: number;
+  candidates: number;
+  sent: number;
+  skippedNoEmail: number;
+  skippedWindow: number;
+  skippedDuration: number;
+  skippedAlreadySent: number;
+};
+
+const runEquipmentReturnReminderDispatch = async (
+  logger?: { error: (payload: unknown, msg: string) => void; info?: (payload: unknown, msg?: string) => void }
+): Promise<ReturnReminderDispatchStats & { running: boolean }> => {
+  if (returnReminderJobRunning) {
+    return {
+      running: true,
+      processed: 0,
+      candidates: 0,
+      sent: 0,
+      skippedNoEmail: 0,
+      skippedWindow: 0,
+      skippedDuration: 0,
+      skippedAlreadySent: 0
+    };
+  }
+  returnReminderJobRunning = true;
+  const stats: ReturnReminderDispatchStats & { running: boolean } = {
+    running: false,
+    processed: 0,
+    candidates: 0,
+    sent: 0,
+    skippedNoEmail: 0,
+    skippedWindow: 0,
+    skippedDuration: 0,
+    skippedAlreadySent: 0
+  };
+  try {
+    const nowMs = Date.now();
+    const lookbackIso = new Date(nowMs - RETURN_REMINDER_NINE_AM_WINDOW_MS).toISOString();
+    const lookAheadIso = new Date(nowMs + RETURN_REMINDER_DURATION_LONG_MS).toISOString();
+    const q = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,requester_email,start_at,end_at,status")
+      .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
+      .gte("end_at", lookbackIso)
+      .lte("end_at", lookAheadIso)
+      .order("end_at", { ascending: true })
+      .limit(5000);
+    if (q.error) throw new Error(q.error.message);
+    const rows = (q.data ?? []) as Record<string, unknown>[];
+    stats.candidates = rows.length;
+
+    for (const row of rows) {
+      stats.processed += 1;
+      const reservationId = String(row.id || "").trim();
+      const email = String(row.requester_email || "").trim().toLowerCase();
+      const startAt = String(row.start_at || "");
+      const endAt = String(row.end_at || "");
+      const startMs = new Date(startAt).getTime();
+      const endMs = new Date(endAt).getTime();
+      if (!reservationId || Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+        stats.skippedDuration += 1;
+        continue;
+      }
+      const durationMs = endMs - startMs;
+      let mode: "day_09" | "minus_4h" | "" = "";
+      let targetMs = 0;
+      let windowMs = 0;
+      if (durationMs > RETURN_REMINDER_DURATION_LONG_MS) {
+        const targetIso = buildIstanbulNineAmTargetIso(endAt);
+        const t = new Date(targetIso).getTime();
+        if (Number.isNaN(t) || t >= endMs) {
+          stats.skippedDuration += 1;
+          continue;
+        }
+        mode = "day_09";
+        targetMs = t;
+        windowMs = RETURN_REMINDER_NINE_AM_WINDOW_MS;
+      } else if (durationMs < RETURN_REMINDER_DURATION_LONG_MS && durationMs >= RETURN_REMINDER_DURATION_SHORT_MS) {
+        mode = "minus_4h";
+        targetMs = endMs - RETURN_REMINDER_FOUR_HOURS_MS;
+        windowMs = RETURN_REMINDER_FOUR_HOURS_WINDOW_MS;
+      } else {
+        stats.skippedDuration += 1;
+        continue;
+      }
+      if (nowMs < targetMs || nowMs >= targetMs + windowMs || nowMs >= endMs) {
+        stats.skippedWindow += 1;
+        continue;
+      }
+      if (!email || !email.includes("@")) {
+        stats.skippedNoEmail += 1;
+        continue;
+      }
+      const targetIso = new Date(targetMs).toISOString();
+      const logKey = buildReturnReminderLogKey(reservationId, mode, targetIso);
+      const sentBefore = await hasReturnReminderBeenSent(logKey);
+      if (sentBefore) {
+        stats.skippedAlreadySent += 1;
+        continue;
+      }
+      try {
+        await sendEquipmentReturnReminderEmail(email);
+        await markReturnReminderSent(logKey);
+        stats.sent += 1;
+      } catch (e) {
+        if (logger) logger.error({ err: e, reservationId, email, mode, targetIso }, "send return reminder mail failed");
+      }
+    }
+    if (logger && typeof logger.info === "function") {
+      logger.info(
+        {
+          candidates: stats.candidates,
+          sent: stats.sent,
+          skippedNoEmail: stats.skippedNoEmail,
+          skippedWindow: stats.skippedWindow,
+          skippedDuration: stats.skippedDuration,
+          skippedAlreadySent: stats.skippedAlreadySent
+        },
+        "return reminder dispatch cycle completed"
+      );
+    }
+    return stats;
+  } finally {
+    returnReminderJobRunning = false;
+  }
+};
+
 const listAdminPenalties = async (): Promise<Array<{
   id: string;
   user_id: string;
@@ -1894,6 +2272,31 @@ const listAdminPenalties = async (): Promise<Array<{
 };
 
 export const reservationRoutes: FastifyPluginAsync = async (app) => {
+  const autoRunEnabled = String(env.RETURN_REMINDER_AUTORUN || "true").trim().toLowerCase() !== "false";
+  const intervalMinRaw = Number(env.RETURN_REMINDER_INTERVAL_MINUTES || 5);
+  const intervalMin = Number.isFinite(intervalMinRaw) && intervalMinRaw >= 1 ? Math.floor(intervalMinRaw) : 5;
+  const intervalMs = intervalMin * 60_000;
+  if (autoRunEnabled && !returnReminderTimer) {
+    returnReminderTimer = setInterval(() => {
+      void runEquipmentReturnReminderDispatch(app.log).catch((e) => {
+        app.log.error({ err: e }, "return reminder dispatch cycle failed");
+      });
+    }, intervalMs);
+    if (typeof returnReminderTimer.unref === "function") returnReminderTimer.unref();
+    setTimeout(() => {
+      void runEquipmentReturnReminderDispatch(app.log).catch((e) => {
+        app.log.error({ err: e }, "initial return reminder dispatch failed");
+      });
+    }, 15_000);
+    app.log.info({ interval_minutes: intervalMin }, "return reminder scheduler enabled");
+  }
+  app.addHook("onClose", async () => {
+    if (returnReminderTimer) {
+      clearInterval(returnReminderTimer);
+      returnReminderTimer = null;
+    }
+  });
+
   app.get("/me/dashboard-extras", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
     try {
@@ -2167,6 +2570,24 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const { data, error } = await supabaseAdmin.from("studio_reservations").insert(payload).select("*").single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const createdStudio = data as Record<string, unknown>;
+    const studioRequesterEmail = String(createdStudio.requester_email || profile.email || "").trim().toLowerCase();
+    if (studioRequesterEmail && studioRequesterEmail.includes("@")) {
+      try {
+        await sendReservationLifecycleEmail(studioRequesterEmail, {
+          kind: "studio",
+          event: "created",
+          reservationId: String(createdStudio.id || ""),
+          requesterName: String(createdStudio.requester_name || profile.full_name || ""),
+          itemLabel: String((studio as Record<string, unknown>).name || studio_id),
+          startAt: String(createdStudio.start_at || start_at),
+          endAt: String(createdStudio.end_at || end_at),
+          adminNote: String(purpose || "").trim()
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(createdStudio.id || ""), requesterEmail: studioRequesterEmail }, "send studio reservation created mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2367,6 +2788,25 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const createdEq = data as Record<string, unknown>;
+    const createdRequesterEmail = String(createdEq.requester_email || profile.email || "").trim().toLowerCase();
+    if (createdRequesterEmail && createdRequesterEmail.includes("@")) {
+      const decodedNote = decodeEquipmentReservationNote(createdEq.note).note;
+      try {
+        await sendReservationLifecycleEmail(createdRequesterEmail, {
+          kind: "equipment",
+          event: "created",
+          reservationId: String(createdEq.id || ""),
+          requesterName: String(createdEq.requester_name || profile.full_name || ""),
+          itemLabel: String((item as Record<string, unknown>).name || (item as Record<string, unknown>).equipment_id || equipment_item_id),
+          startAt: String(createdEq.start_at || start_at),
+          endAt: String(createdEq.end_at || end_at),
+          adminNote: decodedNote
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(createdEq.id || ""), requesterEmail: createdRequesterEmail }, "send equipment reservation created mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2388,6 +2828,30 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const updated = data as Record<string, unknown>;
+    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
+    if (requesterEmail && requesterEmail.includes("@")) {
+      let studioLabel = String(updated.studio_id || "");
+      const studioId = String(updated.studio_id || "").trim();
+      if (studioId) {
+        const stMeta = await supabaseAdmin.from("studios").select("id,name").eq("id", studioId).limit(1).maybeSingle();
+        if (!stMeta.error && stMeta.data) studioLabel = String((stMeta.data as Record<string, unknown>).name || studioId);
+      }
+      try {
+        await sendReservationLifecycleEmail(requesterEmail, {
+          kind: "studio",
+          event: "approved",
+          reservationId: String(updated.id || id),
+          requesterName: String(updated.requester_name || requesterEmail),
+          itemLabel: studioLabel || "Studio",
+          startAt: String(updated.start_at || ""),
+          endAt: String(updated.end_at || ""),
+          adminNote: String(note || "").trim()
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send studio reservation approved mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2409,6 +2873,30 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const updated = data as Record<string, unknown>;
+    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
+    if (requesterEmail && requesterEmail.includes("@")) {
+      let studioLabel = String(updated.studio_id || "");
+      const studioId = String(updated.studio_id || "").trim();
+      if (studioId) {
+        const stMeta = await supabaseAdmin.from("studios").select("id,name").eq("id", studioId).limit(1).maybeSingle();
+        if (!stMeta.error && stMeta.data) studioLabel = String((stMeta.data as Record<string, unknown>).name || studioId);
+      }
+      try {
+        await sendReservationLifecycleEmail(requesterEmail, {
+          kind: "studio",
+          event: "rejected",
+          reservationId: String(updated.id || id),
+          requesterName: String(updated.requester_name || requesterEmail),
+          itemLabel: studioLabel || "Studio",
+          startAt: String(updated.start_at || ""),
+          endAt: String(updated.end_at || ""),
+          adminNote: String(note || "").trim()
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send studio reservation rejected mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2442,6 +2930,33 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const updated = data as Record<string, unknown>;
+    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
+    if (requesterEmail && requesterEmail.includes("@")) {
+      let itemLabel = String(updated.equipment_item_id || "");
+      const eqItemId = String(updated.equipment_item_id || "").trim();
+      if (eqItemId) {
+        const meta = await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").eq("id", eqItemId).limit(1).maybeSingle();
+        if (!meta.error && meta.data) {
+          itemLabel = String((meta.data as Record<string, unknown>).name || (meta.data as Record<string, unknown>).equipment_id || eqItemId);
+        }
+      }
+      const cleanNote = decodeEquipmentReservationNote(updated.note).note;
+      try {
+        await sendReservationLifecycleEmail(requesterEmail, {
+          kind: "equipment",
+          event: "approved",
+          reservationId: String(updated.id || id),
+          requesterName: String(updated.requester_name || requesterEmail),
+          itemLabel: itemLabel || "Equipment",
+          startAt: String(updated.start_at || ""),
+          endAt: String(updated.end_at || ""),
+          adminNote: cleanNote || String(note || "").trim()
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send equipment reservation approved mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2475,6 +2990,33 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("*")
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
+    const updated = data as Record<string, unknown>;
+    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
+    if (requesterEmail && requesterEmail.includes("@")) {
+      let itemLabel = String(updated.equipment_item_id || "");
+      const eqItemId = String(updated.equipment_item_id || "").trim();
+      if (eqItemId) {
+        const meta = await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").eq("id", eqItemId).limit(1).maybeSingle();
+        if (!meta.error && meta.data) {
+          itemLabel = String((meta.data as Record<string, unknown>).name || (meta.data as Record<string, unknown>).equipment_id || eqItemId);
+        }
+      }
+      const cleanNote = decodeEquipmentReservationNote(updated.note).note;
+      try {
+        await sendReservationLifecycleEmail(requesterEmail, {
+          kind: "equipment",
+          event: "rejected",
+          reservationId: String(updated.id || id),
+          requesterName: String(updated.requester_name || requesterEmail),
+          itemLabel: itemLabel || "Equipment",
+          startAt: String(updated.start_at || ""),
+          endAt: String(updated.end_at || ""),
+          adminNote: cleanNote || String(note || "").trim()
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send equipment reservation rejected mail failed");
+      }
+    }
     return { ok: true, data };
   });
 
@@ -2902,6 +3444,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return reply.code(500).send({ ok: false, success: false, error: msg, sent: 0, skipped: ids.length });
+    }
+  });
+
+  app.post("/admin/return-reminders/run", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    try {
+      const stats = await runEquipmentReturnReminderDispatch(req.log);
+      return { ok: true, ...stats };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg });
     }
   });
 
@@ -3517,7 +4069,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       hasConfiguredTable = true;
       const updatedRows = (updated.data ?? []) as Array<{ ticket_no?: string }>;
       if (updatedRows.length > 0) {
-        return { ok: true, success: true, ticket_no: String(updatedRows[0]?.ticket_no || p.ticket_no), updated_count: updatedRows.length };
+        const ticketNo = String(updatedRows[0]?.ticket_no || p.ticket_no);
+        let mailSent = false;
+        const fresh = await supabaseAdmin.from(table).select("*").eq("ticket_no", ticketNo).limit(1).maybeSingle();
+        if (!fresh.error && fresh.data) {
+          const row = fresh.data as Record<string, unknown>;
+          const toEmail = String(row.requester_email || row.email || "").trim().toLowerCase();
+          const requesterName = String(row.requester_name || row.name || "").trim();
+          if (toEmail && toEmail.includes("@")) {
+            try {
+              await sendTicketDecisionEmail(toEmail, {
+                ticketNo,
+                requesterName,
+                decision: "approved",
+                adminNote: String(p.note || "").trim()
+              });
+              mailSent = true;
+            } catch (e) {
+              req.log.error({ err: e, ticketNo, toEmail }, "send ticket approved mail failed");
+            }
+          }
+        }
+        return { ok: true, success: true, ticket_no: ticketNo, updated_count: updatedRows.length, mail_sent: mailSent };
       }
       const found = await supabaseAdmin.from(table).select("ticket_no,status").eq("ticket_no", p.ticket_no).limit(1);
       if (found.error) {
@@ -3568,7 +4141,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       hasConfiguredTable = true;
       const updatedRows = (updated.data ?? []) as Array<{ ticket_no?: string }>;
       if (updatedRows.length > 0) {
-        return { ok: true, success: true, ticket_no: String(updatedRows[0]?.ticket_no || p.ticket_no), updated_count: updatedRows.length };
+        const ticketNo = String(updatedRows[0]?.ticket_no || p.ticket_no);
+        let mailSent = false;
+        const fresh = await supabaseAdmin.from(table).select("*").eq("ticket_no", ticketNo).limit(1).maybeSingle();
+        if (!fresh.error && fresh.data) {
+          const row = fresh.data as Record<string, unknown>;
+          const toEmail = String(row.requester_email || row.email || "").trim().toLowerCase();
+          const requesterName = String(row.requester_name || row.name || "").trim();
+          if (toEmail && toEmail.includes("@")) {
+            try {
+              await sendTicketDecisionEmail(toEmail, {
+                ticketNo,
+                requesterName,
+                decision: "rejected",
+                adminNote: reason
+              });
+              mailSent = true;
+            } catch (e) {
+              req.log.error({ err: e, ticketNo, toEmail }, "send ticket rejected mail failed");
+            }
+          }
+        }
+        return { ok: true, success: true, ticket_no: ticketNo, updated_count: updatedRows.length, mail_sent: mailSent };
       }
       const found = await supabaseAdmin.from(table).select("ticket_no,status").eq("ticket_no", p.ticket_no).limit(1);
       if (found.error) {

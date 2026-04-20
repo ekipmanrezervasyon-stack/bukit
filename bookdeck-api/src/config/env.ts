@@ -21,6 +21,8 @@ const EnvSchema = z.object({
   OTP_EMAIL_FROM: z.string().optional().default(""),
   OTP_EMAIL_REPLY_TO: z.string().optional().default(""),
   OTP_APP_NAME: z.string().optional().default("BUKit"),
+  RETURN_REMINDER_AUTORUN: z.string().default("true"),
+  RETURN_REMINDER_INTERVAL_MINUTES: z.coerce.number().default(5),
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional().default(""),
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().optional().default(""),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional().default(""),
