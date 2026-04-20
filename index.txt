@@ -2231,8 +2231,21 @@
       if (/^KEY0*\d+$/.test(compact)) return 'KEY';
       return '';
     }
+    function resolveBaseCategoryFromTypeLabel_(raw) {
+      var s = String(raw || '').trim().toLowerCase();
+      if (!s) return '';
+      // Zorunlu kategori önceliği: DB category/typeLabel ne diyorsa önce onu kullan.
+      if (s.indexOf('lens') >= 0 || s.indexOf('optik') >= 0 || s.indexOf('optics') >= 0 || s.indexOf('filtre') >= 0 || s.indexOf('filter') >= 0 || s.indexOf('ops') >= 0) return 'Ops';
+      if (s.indexOf('camera') >= 0 || s.indexOf('kamera') >= 0 || s.indexOf('dslr') >= 0 || s.indexOf('cam') >= 0) return 'Cam';
+      if (s.indexOf('sound') >= 0 || s.indexOf('ses') >= 0 || s.indexOf('audio') >= 0 || s.indexOf('mic') >= 0 || s.indexOf('mikrofon') >= 0) return 'Sound';
+      if (s.indexOf('light') >= 0 || s.indexOf('ışık') >= 0 || s.indexOf('isik') >= 0 || s.indexOf('lighting') >= 0 || s.indexOf('led') >= 0) return 'Light';
+      if (s.indexOf('grip') >= 0 || s.indexOf('tripod') >= 0 || s.indexOf('stand') >= 0 || s.indexOf('gimbal') >= 0 || s.indexOf('key') >= 0) return 'Grip';
+      return '';
+    }
     function getBaseCategory(item){
       var row = item || {};
+      var explicitTypeCategory = resolveBaseCategoryFromTypeLabel_(String(row.category || '') + ' ' + String(row.typeLabel || ''));
+      if (explicitTypeCategory) return explicitTypeCategory;
       var details = Array.isArray(row.details) ? row.details : [];
       var codeCandidates = [
         row.displayId,
@@ -2243,6 +2256,9 @@
         codeCandidates.push(details[di] && details[di].equipment_code);
         codeCandidates.push(details[di] && details[di].equipment_id);
       }
+      var haystack=(String(row.category||'')+' '+String(row.typeLabel||'')+' '+String(row.name||'')+' '+String(row.displayId||row.id||'')).toLowerCase();
+      // Light Stand/Ligthing Stand kalemleri her zaman GRIP altında listelenmeli.
+      if (gripMatchesLightingStandBlob_(haystack)) return 'Grip';
       for (var ci = 0; ci < codeCandidates.length; ci++) {
         var pref = normalizeInventoryCodeForCategory_(codeCandidates[ci]);
         if (pref === 'CAM') return 'Cam';
@@ -2251,9 +2267,6 @@
         if (pref === 'LGH') return 'Light';
         if (pref === 'GRP' || pref === 'KEY') return 'Grip';
       }
-      var haystack=(String(row.category||'')+' '+String(row.typeLabel||'')+' '+String(row.name||'')+' '+String(row.displayId||row.id||'')).toLowerCase();
-      // Light Stand/Ligthing Stand kalemleri her zaman GRIP altında listelenmeli.
-      if (gripMatchesLightingStandBlob_(haystack)) return 'Grip';
       for(var key in catMap){ if(catMap[key].some(function(w){return haystack.includes(w);})) return key; }
       return 'Other';
     }
