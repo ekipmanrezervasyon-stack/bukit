@@ -3976,6 +3976,13 @@
       var cells = {};
       var slotDetails = {};
       var cellAdminCaption = {};
+      function studioSlotTitleFromRow_(row) {
+        var purposeRaw = String((row && row.purpose) || '').trim();
+        var purpose = purposeRaw.replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
+        if (purpose) return purpose;
+        var uname = String((row && (row.requester_name || row.requester_email)) || '').trim();
+        return uname || 'Dolu';
+      }
       slots.forEach(function(s) {
         days.forEach(function(d) {
           var dayDate = new Date(d.iso + 'T00:00:00');
@@ -4001,8 +4008,7 @@
               if (!slotDetails[key]) slotDetails[key] = [];
               slotDetails[key].push(r);
               if (!cellAdminCaption[key]) {
-                var uname = String(r.requester_name || r.requester_email || '').trim();
-                cellAdminCaption[key] = uname || 'Dolu';
+                cellAdminCaption[key] = studioSlotTitleFromRow_(r);
               }
             }
           });
@@ -4112,7 +4118,7 @@
           if (st === 'busy' && details.length) {
             detailTitle = details.map(function(it) {
               var uname = String(it.user_name || '').trim() || 'Bilinmeyen kullanıcı';
-              var purpose = String(it.purpose || '').trim();
+              var purpose = String(it.purpose || '').trim().replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
               return purpose ? (uname + ' - ' + purpose) : uname;
             }).join('\n');
             detailTitle += (detailTitle ? '\n' : '') + 'Tıklayın: düzenle / sil';
