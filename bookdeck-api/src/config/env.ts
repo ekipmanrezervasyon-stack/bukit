@@ -28,7 +28,9 @@ const EnvSchema = z.object({
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional().default(""),
   GOOGLE_EQUIPMENT_FORM_DOC_ID: z.string().optional().default(""),
   GOOGLE_STUDIO_FORM_DOC_ID: z.string().optional().default(""),
-  GOOGLE_PDF_FOLDER_ID: z.string().optional().default("")
+  GOOGLE_PDF_FOLDER_ID: z.string().optional().default(""),
+  GOOGLE_GREEN_STUDIO_CALENDAR_ID: z.string().optional().default(""),
+  GOOGLE_GREEN_STUDIO_ID: z.string().optional().default("")
 });
 
 const parsed = EnvSchema.safeParse(process.env);

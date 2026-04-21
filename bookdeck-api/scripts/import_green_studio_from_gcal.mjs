@@ -34,7 +34,10 @@ const TO_ISO = strArg('to', new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOS
 const COMMIT = boolArg('commit', false);
 const PAGE_LIMIT = Number(strArg('max', '2500')) || 2500;
 const DEFAULT_IMPORT_EMAIL = strArg('default-email', process.env.GCAL_IMPORT_DEFAULT_EMAIL || 'studio.import@bilgi.edu.tr');
+const IMPORT_PROFILE_ID_ARG = strArg('requester-profile-id', process.env.GCAL_IMPORT_PROFILE_ID || '');
 const DRY_RUN = !COMMIT;
+const MIN_VALID_YEAR = 2000;
+const MAX_EVENT_DURATION_MS = 7 * 24 * 3600 * 1000;
 
 const required = (name, value) => {
   if (!String(value || '').trim()) {
@@ -109,6 +112,24 @@ const main = async () => {
   const greenStudioId = normalize(studioRow.data.id);
   const greenAccess = normalize(studioRow.data.access_level) || 'A';
 
+  const resolveFallbackProfileId = async () => {
+    if (IMPORT_PROFILE_ID_ARG) return IMPORT_PROFILE_ID_ARG;
+    const pick = await sb
+      .from('profiles')
+      .select('id,email,role,user_type')
+      .in('role', ['super_admin', 'technician', 'staff'])
+      .limit(1)
+      .maybeSingle();
+    if (pick.error) throw new Error(`Fallback profile lookup failed: ${pick.error.message}`);
+    if (pick.data && normalize(pick.data.id)) return normalize(pick.data.id);
+    const any = await sb.from('profiles').select('id').limit(1).maybeSingle();
+    if (any.error) throw new Error(`Any profile lookup failed: ${any.error.message}`);
+    if (any.data && normalize(any.data.id)) return normalize(any.data.id);
+    throw new Error('No profile row found for requester_profile_id fallback. Set --requester-profile-id explicitly.');
+  };
+
+  const fallbackProfileId = await resolveFallbackProfileId();
+
   const creds = parseServiceAccount();
   const auth = new google.auth.GoogleAuth({ credentials: creds, scopes: ['https://www.googleapis.com/auth/calendar.readonly'] });
   const calendar = google.calendar({ version: 'v3', auth });
@@ -132,6 +153,7 @@ const main = async () => {
     if (!nextPageToken) break;
   }
 
+  let skippedMalformed = 0;
   const normalized = events
     .map((ev) => {
       const startRaw = normalize(ev?.start?.dateTime || ev?.start?.date);
@@ -139,14 +161,28 @@ const main = async () => {
       const startAt = toIso(startRaw);
       const endAt = toIso(endRaw);
       if (!startAt || !endAt) return null;
-      if (new Date(endAt).getTime() <= new Date(startAt).getTime()) return null;
+      const startMs = new Date(startAt).getTime();
+      const endMs = new Date(endAt).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        skippedMalformed += 1;
+        return null;
+      }
+      const startYear = new Date(startMs).getUTCFullYear();
+      if (startYear < MIN_VALID_YEAR) {
+        skippedMalformed += 1;
+        return null;
+      }
+      if ((endMs - startMs) > MAX_EVENT_DURATION_MS) {
+        skippedMalformed += 1;
+        return null;
+      }
       const requester = requesterFromEvent(ev || {});
       return {
-        externalEventId: normalize(ev?.id),
         start_at: startAt,
         end_at: endAt,
         requester_email: requester.email,
         requester_name: requester.name,
+        requester_profile_id: '',
         purpose: purposeFromEvent(ev || {}),
         studio_id: greenStudioId,
         access_level: greenAccess,
@@ -157,6 +193,25 @@ const main = async () => {
       };
     })
     .filter(Boolean);
+
+  const uniqueEmails = Array.from(new Set(normalized.map((r) => normalize(r.requester_email).toLowerCase()).filter(Boolean)));
+  const emailToProfileId = new Map();
+  if (uniqueEmails.length) {
+    const prof = await sb
+      .from('profiles')
+      .select('id,email')
+      .in('email', uniqueEmails);
+    if (prof.error) throw new Error(`Profiles lookup for event owners failed: ${prof.error.message}`);
+    for (const row of (prof.data || [])) {
+      const em = normalize(row.email).toLowerCase();
+      const pid = normalize(row.id);
+      if (em && pid && !emailToProfileId.has(em)) emailToProfileId.set(em, pid);
+    }
+  }
+  normalized.forEach((r) => {
+    const em = normalize(r.requester_email).toLowerCase();
+    r.requester_profile_id = emailToProfileId.get(em) || fallbackProfileId;
+  });
 
   const existingRes = await sb
     .from('studio_reservations')
@@ -181,8 +236,10 @@ const main = async () => {
     dryRun: DRY_RUN,
     range: { from: FROM_ISO, to: TO_ISO },
     studio: { id: greenStudioId, name: normalize(studioRow.data.name), access: greenAccess },
+    fallbackProfileId,
     fetchedEvents: events.length,
     normalizedEvents: normalized.length,
+    skippedMalformed,
     existingInRange: (existingRes.data || []).length,
     toInsert: inserts.length,
     sample: inserts.slice(0, 10).map((x) => ({
