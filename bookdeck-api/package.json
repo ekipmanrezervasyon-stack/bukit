@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "import:green-studio:gcal": "node scripts/import_green_studio_from_gcal.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
