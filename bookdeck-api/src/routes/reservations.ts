@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { generateCheckoutPdf } from "../lib/google-pdf.js";
+import { uploadPdfToDrive } from "../lib/google-drive.js";
 import { getAuthProfile, isAdminRole, requireAuth, requireRoles, type AppRole } from "../modules/auth/guards.js";
 
 const isoDateSchema = z
@@ -1936,6 +1937,32 @@ const buildCheckoutPdfFilename = (payload: {
   return `${parts.join("_")}.pdf`;
 };
 
+const uploadCheckoutPdfArchiveToDrive = async (payload: {
+  kind: "equipment" | "studio";
+  studentName: string;
+  studentNumber?: string;
+  startAt: string;
+  studioName?: string;
+  pdfDataUrl: string;
+}): Promise<string | null> => {
+  const parsed = parsePdfDataUrl(payload.pdfDataUrl);
+  if (!parsed) return null;
+  const fileName = buildCheckoutPdfFilename({
+    kind: payload.kind,
+    studentName: payload.studentName,
+    studentNumber: payload.studentNumber,
+    startAt: payload.startAt,
+    studioName: payload.studioName
+  });
+  const uploaded = await uploadPdfToDrive({
+    fileName,
+    mimeType: parsed.mimeType,
+    base64: parsed.base64,
+    folderId: env.GOOGLE_PDF_FOLDER_ID
+  });
+  return uploaded ? String(uploaded.url || "").trim() || null : null;
+};
+
 const sendCheckoutPdfAttachmentEmail = async (
   toEmail: string,
   payload: {
@@ -3279,6 +3306,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
 
       let pdfUrl: string | null = null;
+      let archiveDriveUrl: string | null = null;
       try {
         pdfUrl = await generateCheckoutPdf({
           kind: "equipment",
@@ -3294,6 +3322,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         req.log.error({ err: e }, "generate equipment checkout pdf failed");
         const msg = e instanceof Error ? e.message : String(e);
         return reply.code(500).send({ ok: false, error: "PDF_GENERATION_FAILED: " + msg });
+      }
+      if (pdfUrl) {
+        const requesterNumberForArchive = await resolveProfileNumberLabel(String(requesterProfileId || ""), requesterEmail);
+        try {
+          archiveDriveUrl = await uploadCheckoutPdfArchiveToDrive({
+            kind: "equipment",
+            studentName: requesterName,
+            studentNumber: requesterNumberForArchive,
+            startAt: reservationStartAt,
+            pdfDataUrl: pdfUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: String(eqRes.id || id) }, "archive equipment checkout pdf to drive failed");
+        }
       }
 
       const eqMark = await updateEquipmentReservationToCheckedOut(id, {
@@ -3394,7 +3436,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           }
         }
       }
-      return { ok: true, success: true, id, status: checkoutStatusUsed, url: pdfUrl || "" };
+      return { ok: true, success: true, id, status: checkoutStatusUsed, url: pdfUrl || "", archive_url: archiveDriveUrl || "" };
     }
 
     const stLookup = await supabaseAdmin
@@ -3427,6 +3469,25 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           projectName: String(stRow.purpose || ""),
           handoverNote: studioHandoverNote
         });
+        let archiveDriveUrl: string | null = null;
+        if (pdfUrl) {
+          const requesterNumberForArchive = await resolveProfileNumberLabel(
+            String(stRow.requester_profile_id || ""),
+            String(stRow.requester_email || "")
+          );
+          try {
+            archiveDriveUrl = await uploadCheckoutPdfArchiveToDrive({
+              kind: "studio",
+              studentName: String(stRow.requester_name || ""),
+              studentNumber: requesterNumberForArchive,
+              startAt: String(stRow.start_at || ""),
+              studioName: String(studioName || studioId || "Studio"),
+              pdfDataUrl: pdfUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(stRow.id || id) }, "archive studio checkout pdf to drive failed");
+          }
+        }
         const requesterEmail = String(stRow.requester_email || "").trim().toLowerCase();
         let stMark = await supabaseAdmin
           .from("studio_reservations")
@@ -3478,7 +3539,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           success: true,
           id,
           status: String((stMark.data as Record<string, unknown> | null)?.status || STUDIO_PICKED_STATUS),
-          url: pdfUrl || ""
+          url: pdfUrl || "",
+          archive_url: archiveDriveUrl || ""
         };
       } catch (e) {
         req.log.error({ err: e }, "generate studio checkout pdf failed");
@@ -4571,6 +4633,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
 
     let pdfUrl: string | null = null;
+    let archiveDriveUrl: string | null = null;
     if (eqIdsForPdf.length) {
       const meta = await supabaseAdmin
         .from("equipment_items")
@@ -4602,6 +4665,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         String((p as Record<string, unknown>).staff_number || "").trim() ||
         String((p as Record<string, unknown>).staff_auto_id || "").trim() ||
         (await resolveProfileNumberLabel("", quickEmail));
+      if (pdfUrl) {
+        try {
+          archiveDriveUrl = await uploadCheckoutPdfArchiveToDrive({
+            kind: "equipment",
+            studentName: name,
+            studentNumber: quickNumber,
+            startAt,
+            pdfDataUrl: pdfUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: results[0] || "quick" }, "archive quick checkout pdf to drive failed");
+        }
+      }
       if (pdfUrl && quickEmail && quickEmail.includes("@")) {
         try {
           await sendCheckoutPdfAttachmentEmail(quickEmail, {
@@ -4633,7 +4709,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    return { ok: true, success: true, reservation_ids: results, url: pdfUrl || "" };
+    return { ok: true, success: true, reservation_ids: results, url: pdfUrl || "", archive_url: archiveDriveUrl || "" };
   });
 
   app.get("/admin/reports/summary", { preHandler: requireRoles(["super_admin"]) }, async (_req, reply) => {
