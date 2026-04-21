@@ -3336,6 +3336,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         } catch (e) {
           req.log.error({ err: e, reservationId: String(eqRes.id || id) }, "archive equipment checkout pdf to drive failed");
         }
+        if (!archiveDriveUrl && String(env.GOOGLE_PDF_FOLDER_ID || "").trim()) {
+          req.log.warn(
+            {
+              reservationId: String(eqRes.id || id),
+              hasFolderId: !!String(env.GOOGLE_PDF_FOLDER_ID || "").trim(),
+              hasServiceAccountJson: !!String(env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim(),
+              hasServiceAccountEmail: !!String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
+              hasServiceAccountPrivateKey: !!String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim()
+            },
+            "equipment checkout pdf archive skipped/no url"
+          );
+        }
       }
 
       const eqMark = await updateEquipmentReservationToCheckedOut(id, {
@@ -3486,6 +3498,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             });
           } catch (e) {
             req.log.error({ err: e, reservationId: String(stRow.id || id) }, "archive studio checkout pdf to drive failed");
+          }
+          if (!archiveDriveUrl && String(env.GOOGLE_PDF_FOLDER_ID || "").trim()) {
+            req.log.warn(
+              {
+                reservationId: String(stRow.id || id),
+                hasFolderId: !!String(env.GOOGLE_PDF_FOLDER_ID || "").trim(),
+                hasServiceAccountJson: !!String(env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim(),
+                hasServiceAccountEmail: !!String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
+                hasServiceAccountPrivateKey: !!String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim()
+              },
+              "studio checkout pdf archive skipped/no url"
+            );
           }
         }
         const requesterEmail = String(stRow.requester_email || "").trim().toLowerCase();
@@ -4676,6 +4700,18 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           });
         } catch (e) {
           req.log.error({ err: e, reservationId: results[0] || "quick" }, "archive quick checkout pdf to drive failed");
+        }
+        if (!archiveDriveUrl && String(env.GOOGLE_PDF_FOLDER_ID || "").trim()) {
+          req.log.warn(
+            {
+              reservationId: results[0] || "quick",
+              hasFolderId: !!String(env.GOOGLE_PDF_FOLDER_ID || "").trim(),
+              hasServiceAccountJson: !!String(env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim(),
+              hasServiceAccountEmail: !!String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
+              hasServiceAccountPrivateKey: !!String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim()
+            },
+            "quick checkout pdf archive skipped/no url"
+          );
         }
       }
       if (pdfUrl && quickEmail && quickEmail.includes("@")) {

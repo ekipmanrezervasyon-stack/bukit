@@ -42,9 +42,13 @@ export const uploadPdfToDrive = async (
   const folderId = String(payload.folderId || env.GOOGLE_PDF_FOLDER_ID || "").trim();
   if (!folderId) return null;
   const drive = createDriveClient();
-  if (!drive) return null;
+  if (!drive) {
+    throw new Error("Google Drive upload is enabled (folder configured) but service account credentials are missing/invalid.");
+  }
   const rawB64 = String(payload.base64 || "").replace(/\s+/g, "");
-  if (!rawB64) return null;
+  if (!rawB64) {
+    throw new Error("Google Drive upload payload has empty base64 content.");
+  }
   const buffer = Buffer.from(rawB64, "base64");
   const createRes = await drive.files.create({
     requestBody: {
@@ -56,7 +60,8 @@ export const uploadPdfToDrive = async (
       mimeType: String(payload.mimeType || "application/pdf"),
       body: Readable.from(buffer)
     },
-    fields: "id,webViewLink,webContentLink"
+    fields: "id,webViewLink,webContentLink",
+    supportsAllDrives: true
   });
   const fileId = String(createRes.data.id || "").trim();
   if (!fileId) return null;
@@ -64,16 +69,17 @@ export const uploadPdfToDrive = async (
     await drive.permissions.create({
       fileId,
       requestBody: { type: "anyone", role: "reader" },
-      fields: "id"
+      fields: "id",
+      supportsAllDrives: true
     });
   } catch {
     // permission may be blocked by workspace policy; keep private link
   }
   const meta = await drive.files.get({
     fileId,
-    fields: "id,webViewLink,webContentLink"
+    fields: "id,webViewLink,webContentLink",
+    supportsAllDrives: true
   });
   const url = String(meta.data.webViewLink || meta.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`).trim();
   return { fileId, url };
 };
-
