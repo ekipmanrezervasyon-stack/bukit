@@ -3979,9 +3979,7 @@
       function studioSlotTitleFromRow_(row) {
         var purposeRaw = String((row && row.purpose) || '').trim();
         var purpose = purposeRaw.replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
-        if (purpose) return purpose;
-        var uname = String((row && (row.requester_name || row.requester_email)) || '').trim();
-        return uname || 'Dolu';
+        return purpose || 'Dolu';
       }
       slots.forEach(function(s) {
         days.forEach(function(d) {
