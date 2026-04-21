@@ -4205,19 +4205,64 @@
       });
       if (!selectedEquipIds.length) { showToast('Ekipmanlı teslim için en az bir ekipman seçin.', 'error'); return; }
     }
-    if (period !== 'once') { showToast('Yeni API sürümünde tekrar eden stüdyo rezervasyonu şimdilik kapalı.', 'error'); return; }
     if (withEquip && selectedEquipIds.length) {
       showToast('Not: Stüdyoya bağlı ekipman ekleme bu endpoint paketinde henüz aktif değil.', 'info');
     }
-    var payload = { studio_id: activeAdminStudioId, start_at: startDt, end_at: endDt, purpose: purpose };
+    var buildWeeklySlots = function(baseDate, startHm, endHm, untilDate) {
+      var out = [];
+      var cur = new Date(baseDate + 'T00:00:00');
+      var lim = new Date(untilDate + 'T00:00:00');
+      if (isNaN(cur.getTime()) || isNaN(lim.getTime())) return out;
+      while (cur.getTime() <= lim.getTime()) {
+        var y = cur.getFullYear();
+        var m = String(cur.getMonth() + 1).padStart(2, '0');
+        var d = String(cur.getDate()).padStart(2, '0');
+        var isoDay = y + '-' + m + '-' + d;
+        out.push({ start_at: isoDay + 'T' + startHm, end_at: isoDay + 'T' + endHm });
+        cur.setDate(cur.getDate() + 7);
+      }
+      return out;
+    };
+    var slots = (period === 'weekly')
+      ? buildWeeklySlots(date, startTime, endTime, endPeriodDt)
+      : [{ start_at: startDt, end_at: endDt }];
+    if (!slots.length) { showToast('Tekrarlı rezervasyon tarihleri oluşturulamadı.', 'error'); return; }
+    var validSlots = slots.filter(function(sl) { return !isPublicHoliday(new Date(String(sl.start_at || ''))); });
+    if (!validSlots.length) { showToast('Seçilen tarih aralığındaki tüm tekrarlar resmi tatile denk geliyor.', 'error'); return; }
+
     var btn = document.getElementById('sr-submit-btn');
     var originalText = btn.innerText;
     btn.innerText = 'OLUŞTURULUYOR...'; btn.disabled = true;
     showToast('Rezervasyon(lar) oluşturuluyor...', 'info');
-    adminApiRequest('/studio-reservations', { method: 'POST', body: payload }).then(function(res) {
+    var created = 0;
+    var failed = 0;
+    var firstErr = '';
+    var seq = Promise.resolve();
+    validSlots.forEach(function(sl) {
+      seq = seq.then(function() {
+        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose };
+        return adminApiRequest('/studio-reservations', { method: 'POST', body: payload })
+          .then(function() { created += 1; })
+          .catch(function(err) {
+            failed += 1;
+            if (!firstErr) firstErr = String((err && err.message) || 'Bilinmeyen hata');
+          });
+      });
+    });
+    seq.then(function() {
       btn.innerText = originalText; btn.disabled = false;
-      showToast('Başarılı! 1 adet stüdyo rezervasyonu oluşturuldu.');
-      clearStudioForm();
+      if (created > 0 && failed === 0) {
+        showToast('Başarılı! ' + created + ' adet stüdyo rezervasyonu oluşturuldu.', 'success');
+        clearStudioForm();
+        renderAdminStudioWeekCalendar();
+        return;
+      }
+      if (created > 0 && failed > 0) {
+        showToast('Kısmi tamamlandı: ' + created + ' oluşturuldu, ' + failed + ' oluşturulamadı. ' + (firstErr || ''), 'info');
+        renderAdminStudioWeekCalendar();
+        return;
+      }
+      showToast('Hata: ' + (firstErr || 'Bilinmeyen hata'), 'error');
     }).catch(function(err) {
       btn.innerText = originalText; btn.disabled = false;
       showToast('Hata: ' + ((err && err.message) || 'Bilinmeyen hata'), 'error');
