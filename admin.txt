@@ -3802,17 +3802,16 @@
   function adminStudioEventDeleteConfirm(mode) {
     var ev = adminStudioEventSelected;
     if (!ev || !ev.id) return;
-    google.script.run.withSuccessHandler(function(res) {
-      if (res && res.success) {
-        showToast('Silindi (' + (res.deleted != null ? res.deleted : 1) + ' kayıt).', 'success');
-        closeAdminStudioEventModal();
-        renderAdminStudioWeekCalendar();
-      } else {
-        showToast('Hata: ' + ((res && res.error) || 'Bilinmeyen'), 'error');
-      }
-    }).withFailureHandler(function(err) {
-      showToast('Hata: ' + (err.message || ''), 'error');
-    }).adminDeleteStudioReservation({ id: String(ev.id), mode: String(mode || 'single') }, currentAuthToken);
+    adminApiRequest('/admin/studio-reservations/delete', {
+      method: 'POST',
+      body: { id: String(ev.id), mode: String(mode || 'single') }
+    }).then(function(res) {
+      showToast('Silindi (' + (res && res.deleted != null ? res.deleted : 1) + ' kayıt).', 'success');
+      closeAdminStudioEventModal();
+      renderAdminStudioWeekCalendar();
+    }).catch(function(err) {
+      showToast('Hata: ' + (err && err.message ? err.message : ''), 'error');
+    });
   }
 
   function fillStudioEventEditTimeDropdowns_() {
@@ -3908,17 +3907,16 @@
       showToast('Bitiş, başlangıçtan sonra olmalı.', 'error');
       return;
     }
-    google.script.run.withSuccessHandler(function(res) {
-      if (res && res.success) {
-        showToast('Güncellendi.', 'success');
-        closeAdminStudioEventModal();
-        renderAdminStudioWeekCalendar();
-      } else {
-        showToast('Hata: ' + ((res && res.error) || 'Bilinmeyen'), 'error');
-      }
-    }).withFailureHandler(function(err) {
-      showToast('Hata: ' + (err.message || ''), 'error');
-    }).adminUpdateStudioReservation({ id: String(ev.id), start_dt: startDt, end_dt: endDt, purpose: purpose }, currentAuthToken);
+    adminApiRequest('/admin/studio-reservations/update', {
+      method: 'POST',
+      body: { id: String(ev.id), start_dt: startDt, end_dt: endDt, purpose: purpose }
+    }).then(function() {
+      showToast('Güncellendi.', 'success');
+      closeAdminStudioEventModal();
+      renderAdminStudioWeekCalendar();
+    }).catch(function(err) {
+      showToast('Hata: ' + (err && err.message ? err.message : ''), 'error');
+    });
   }
 
   function toIsoLocalDate_(d) {

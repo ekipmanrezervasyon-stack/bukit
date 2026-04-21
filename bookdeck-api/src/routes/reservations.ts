@@ -140,6 +140,16 @@ const adminTrafficExtendSchema = z.object({
   id: z.string().min(1),
   new_end_at: isoDateSchema
 });
+const adminStudioUpdateSchema = z.object({
+  id: z.string().min(1),
+  start_dt: isoDateSchema,
+  end_dt: isoDateSchema,
+  purpose: z.string().max(120).optional().default("")
+});
+const adminStudioDeleteSchema = z.object({
+  id: z.string().min(1),
+  mode: z.enum(["single", "following"]).optional().default("single")
+});
 const adminTrafficTransferSchema = z.object({
   id: z.string().min(1),
   query: z.string().min(1).max(190)
@@ -250,6 +260,12 @@ const isMissingProfilesColumnError = (err: unknown, column: string): boolean => 
   const obj = err as { message?: string; details?: string; hint?: string };
   const msg = `${String(obj.message || "")} ${String(obj.details || "")} ${String(obj.hint || "")}`.toLowerCase();
   return msg.includes(`profiles.${String(column || "").toLowerCase()}`) && msg.includes("does not exist");
+};
+
+const toHmKey = (raw: unknown): string => {
+  const d = new Date(String(raw || ""));
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 const lookupProfileByAdminQuery = async (
@@ -3166,6 +3182,167 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     return { ok: true, data };
+  });
+
+  app.post("/admin/studio-reservations/update", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const parsed = adminStudioUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const { id, start_dt, end_dt, purpose } = parsed.data;
+    const startMs = new Date(start_dt).getTime();
+    const endMs = new Date(end_dt).getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+      return reply.code(400).send({ ok: false, error: "Invalid date range." });
+    }
+    if (hasPublicHolidayInRange(start_dt, end_dt)) {
+      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    }
+
+    const existing = await supabaseAdmin
+      .from("studio_reservations")
+      .select("*")
+      .eq("id", id)
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
+    if (!existing.data) return reply.code(404).send({ ok: false, error: "Reservation not found." });
+    const exRow = existing.data as Record<string, unknown>;
+    const studioId = String(exRow.studio_id || "").trim();
+    if (!studioId) return reply.code(400).send({ ok: false, error: "Studio id is missing." });
+
+    const overlap = await supabaseAdmin
+      .from("studio_reservations")
+      .select("id")
+      .eq("studio_id", studioId)
+      .in("status", STUDIO_ACTIVE_RES_STATUSES)
+      .lt("start_at", end_dt)
+      .gt("end_at", start_dt)
+      .neq("id", id)
+      .limit(1);
+    if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
+    if ((overlap.data ?? []).length > 0) {
+      return reply.code(409).send({ ok: false, error: "Studio is not available in selected range." });
+    }
+
+    const upd = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        start_at: start_dt,
+        end_at: end_dt,
+        purpose: String(purpose || "").trim()
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
+    const updated = upd.data as Record<string, unknown>;
+    const st = String(updated.status || "").trim();
+    if (st === STUDIO_APPROVED_STATUS || st === STUDIO_PICKED_STATUS || st === "approved") {
+      try {
+        await upsertApprovedGreenStudioToGoogleCalendar({
+          reservationId: String(updated.id || id),
+          studioId: String(updated.studio_id || studioId),
+          startAt: String(updated.start_at || start_dt),
+          endAt: String(updated.end_at || end_dt),
+          requesterName: String(updated.requester_name || ""),
+          requesterEmail: String(updated.requester_email || ""),
+          purpose: String(updated.purpose || purpose || "")
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(updated.id || id) }, "sync studio reservation to Google Calendar failed on admin update");
+      }
+    }
+    return { ok: true, success: true, data: updated };
+  });
+
+  app.post("/admin/studio-reservations/delete", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminStudioDeleteSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const { id, mode } = parsed.data;
+
+    const lookup = await supabaseAdmin
+      .from("studio_reservations")
+      .select("*")
+      .eq("id", id)
+      .limit(1)
+      .maybeSingle();
+    if (lookup.error) return reply.code(500).send({ ok: false, error: lookup.error.message });
+    if (!lookup.data) return reply.code(404).send({ ok: false, error: "Reservation not found." });
+    const base = lookup.data as Record<string, unknown>;
+
+    let targetIds: string[] = [String(base.id || id)];
+    if (mode === "following") {
+      const studioId = String(base.studio_id || "").trim();
+      const requesterProfileId = String(base.requester_profile_id || "").trim();
+      const requesterEmail = String(base.requester_email || "").trim().toLowerCase();
+      const baseStartAt = String(base.start_at || "");
+      const samePurpose = String(base.purpose || "").trim().toLowerCase();
+      const baseStartHm = toHmKey(base.start_at);
+      const baseEndHm = toHmKey(base.end_at);
+      const filters = await supabaseAdmin
+        .from("studio_reservations")
+        .select("id,status,purpose,start_at,end_at")
+        .eq("studio_id", studioId)
+        .gte("start_at", baseStartAt)
+        .order("start_at", { ascending: true })
+        .limit(500);
+      if (filters.error) return reply.code(500).send({ ok: false, error: filters.error.message });
+      const rows = (filters.data ?? []) as Record<string, unknown>[];
+      targetIds = rows
+        .filter((row) => {
+          const st = String(row.status || "").trim();
+          if ([STUDIO_CANCELLED_STATUS, STUDIO_REJECTED_STATUS, STUDIO_RETURNED_STATUS, "cancelled", "rejected", "completed"].includes(st)) {
+            return false;
+          }
+          const rowPurpose = String(row.purpose || "").trim().toLowerCase();
+          if (rowPurpose !== samePurpose) return false;
+          if (toHmKey(row.start_at) !== baseStartHm || toHmKey(row.end_at) !== baseEndHm) return false;
+          return true;
+        })
+        .map((row) => String(row.id || "").trim())
+        .filter(Boolean);
+      if (requesterProfileId) {
+        const ownerRows = await supabaseAdmin
+          .from("studio_reservations")
+          .select("id")
+          .eq("requester_profile_id", requesterProfileId)
+          .in("id", targetIds);
+        if (ownerRows.error) return reply.code(500).send({ ok: false, error: ownerRows.error.message });
+        targetIds = (ownerRows.data ?? []).map((r) => String((r as Record<string, unknown>).id || "")).filter(Boolean);
+      } else if (requesterEmail) {
+        const ownerRows = await supabaseAdmin
+          .from("studio_reservations")
+          .select("id")
+          .eq("requester_email", requesterEmail)
+          .in("id", targetIds);
+        if (ownerRows.error) return reply.code(500).send({ ok: false, error: ownerRows.error.message });
+        targetIds = (ownerRows.data ?? []).map((r) => String((r as Record<string, unknown>).id || "")).filter(Boolean);
+      }
+      if (!targetIds.length) targetIds = [String(base.id || id)];
+    }
+
+    const upd = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        status: STUDIO_CANCELLED_STATUS,
+        reviewed_by: actor.email,
+        reviewed_at: new Date().toISOString()
+      })
+      .in("id", targetIds)
+      .select("id,studio_id");
+    if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
+    const updatedRows = (upd.data ?? []) as Record<string, unknown>[];
+    for (const row of updatedRows) {
+      try {
+        await deleteGreenStudioFromGoogleCalendar({
+          reservationId: String(row.id || ""),
+          studioId: String(row.studio_id || "")
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(row.id || "") }, "remove studio reservation from Google Calendar failed on admin delete");
+      }
+    }
+    return { ok: true, success: true, deleted: updatedRows.length, ids: updatedRows.map((r) => String(r.id || "")) };
   });
 
   app.post("/admin/equipment-reservations/approve", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
