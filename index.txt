@@ -3364,7 +3364,8 @@
       var s = new Date(sD + 'T' + t);
       if (isNaN(s.getTime())) return '';
       var e = new Date(s.getTime() + 2 * 60 * 60 * 1000);
-      var cap = new Date(sD + 'T21:00:00');
+      var isGreen = String(activeStudioKey || '').trim().toUpperCase() === 'GREEN';
+      var cap = new Date(sD + 'T' + (isGreen ? '22:00:00' : '21:00:00'));
       if (!isNaN(cap.getTime()) && e > cap) e = cap;
       var pad = function(n) { return String(n).padStart(2, '0'); };
       return e.getFullYear() + '-' + pad(e.getMonth() + 1) + '-' + pad(e.getDate()) + 'T' + pad(e.getHours()) + ':' + pad(e.getMinutes());
@@ -4481,6 +4482,29 @@
       label.textContent = optional ? 'Project PDF Drive Link (Optional)' : 'Project PDF Drive Link (Required)';
     }
 
+    function updateStudioTimeWindowUi() {
+      var startSel = document.getElementById('studio-start-time');
+      var endSel = document.getElementById('studio-end-time');
+      if (!startSel || !endSel) return;
+      var prevStart = String(startSel.value || '');
+      var prevEnd = String(endSel.value || '');
+      var isGreen = String(activeStudioKey || '').trim().toUpperCase() === 'GREEN';
+      var maxStart = isGreen ? 21 : 20;
+      var maxEnd = isGreen ? 22 : 21;
+      startSel.innerHTML = '<option value="" disabled selected>Time</option>';
+      endSel.innerHTML = '<option value="" disabled selected>Time</option>';
+      for (var h = 9; h <= maxStart; h++) {
+        var hh = String(h).padStart(2, '0') + ':00';
+        startSel.innerHTML += '<option value="' + hh + '">' + hh + '</option>';
+      }
+      for (var he = 10; he <= maxEnd; he++) {
+        var eh = String(he).padStart(2, '0') + ':00';
+        endSel.innerHTML += '<option value="' + eh + '">' + eh + '</option>';
+      }
+      if (prevStart && startSel.querySelector('option[value="' + prevStart + '"]')) startSel.value = prevStart;
+      if (prevEnd && endSel.querySelector('option[value="' + prevEnd + '"]')) endSel.value = prevEnd;
+    }
+
     window.toggleStudioSelection=function(id,name,studioKey){
       hideStudioCalendarWarning();
       if(!currentTestToken){
@@ -4493,6 +4517,7 @@
         activeStudioKey=resolveStudioCanonicalKey_(sm||{}) || String(id||'').trim().toUpperCase();
       }
       updateStudioPdfRequirementUi();
+      updateStudioTimeWindowUi();
       document.getElementById('selected-studio-name').innerText=name;
       document.getElementById('selected-studio-name').classList.remove('text-gray-300');
       document.getElementById('selected-studio-name').classList.add('text-[#e30613]');
@@ -4581,16 +4606,17 @@
               dow: d.getDay()
             });
           }
+          var studioMeta = getStudioMetaById_(studioId);
+          var studioKey = resolveStudioCanonicalKey_(studioMeta || {}) || String(studioId || '').trim().toUpperCase();
           var slots = [];
-          for (var hm = 9 * 60; hm <= 20 * 60; hm += 60) {
+          var maxStartHour = (studioKey === 'GREEN') ? 21 : 20;
+          for (var hm = 9 * 60; hm <= maxStartHour * 60; hm += 60) {
             var hh = String(Math.floor(hm / 60)).padStart(2, '0');
             var mm = String(hm % 60).padStart(2, '0');
             slots.push({ mins: hm, label: hh + ':' + mm });
           }
           var cells = {};
           var cellBusyStart = {};
-          var studioMeta = getStudioMetaById_(studioId);
-          var studioKey = resolveStudioCanonicalKey_(studioMeta || {}) || String(studioId || '').trim().toUpperCase();
           var weekendOk = !!(studioMeta && studioMeta.weekendOk);
           if (studioKey === 'GREEN') weekendOk = true;
           days.forEach(function(d){

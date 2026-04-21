@@ -2403,18 +2403,35 @@
     }
   }
 
+  function adminIsGreenStudio_(studioId, studioName) {
+    var sid = String(studioId || '').trim().toUpperCase();
+    var sn = String(studioName || '').trim().toUpperCase();
+    if (!sn && sid) {
+      var meta = adminStudiosById[String(studioId || '').trim()] || null;
+      if (meta) sn = String(meta.name || meta.studio_name || meta.code || '').trim().toUpperCase();
+    }
+    if (!sn && sid && String(studioId || '').trim() === String(activeAdminStudioId || '').trim()) {
+      sn = String(activeAdminStudioName || '').trim().toUpperCase();
+    }
+    return sid === 'GREEN' || sn === 'GREEN' || sn === 'GREEN STUDIO' || sn.indexOf('GREEN') >= 0;
+  }
+
   function fillStudioTimeDropdowns() {
     var startEl = document.getElementById('sr-start');
     var endEl = document.getElementById('sr-end');
     if (!startEl || !endEl) return;
+    var isGreen = adminIsGreenStudio_(activeAdminStudioId, activeAdminStudioName);
+    var maxStartHour = isGreen ? 21 : 20;
+    var maxEndHour = isGreen ? 22 : 21;
     startEl.innerHTML = '';
     endEl.innerHTML = '';
-    for (var i = 9; i <= 20; i++) {
+    for (var i = 9; i <= maxStartHour; i++) {
       var h = (i < 10 ? '0' + i : String(i));
       startEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
       endEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
     }
-    endEl.innerHTML += '<option value="21:00">21:00</option>';
+    var eh = (maxEndHour < 10 ? '0' + maxEndHour : String(maxEndHour));
+    endEl.innerHTML += '<option value="' + eh + ':00">' + eh + ':00</option>';
     startEl.value = '09:00';
     endEl.value = '11:00';
   }
@@ -3696,6 +3713,7 @@
     var form = document.getElementById('admin-studio-form');
     form.classList.remove('hidden');
     document.getElementById('form-studio-name').innerText = name;
+    fillStudioTimeDropdowns();
     setTimeout(function() { calWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
   }
 
@@ -3814,19 +3832,23 @@
     });
   }
 
-  function fillStudioEventEditTimeDropdowns_() {
+  function fillStudioEventEditTimeDropdowns_(studioId) {
     var startEl = document.getElementById('se-edit-start');
     var endEl = document.getElementById('se-edit-end');
     if (!startEl || !endEl) return;
+    var isGreen = adminIsGreenStudio_(studioId, '');
+    var maxStartHour = isGreen ? 21 : 20;
+    var maxEndHour = isGreen ? 22 : 21;
     startEl.innerHTML = '';
     endEl.innerHTML = '';
     var i, h;
-    for (i = 9; i <= 20; i++) {
+    for (i = 9; i <= maxStartHour; i++) {
       h = (i < 10 ? '0' + i : String(i));
       startEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
       endEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
     }
-    endEl.innerHTML += '<option value="21:00">21:00</option>';
+    h = (maxEndHour < 10 ? '0' + maxEndHour : String(maxEndHour));
+    endEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
   }
 
   function padHourFromDate_(d) {
@@ -3865,7 +3887,7 @@
       '<div><label class="block text-[10px] font-black text-gray-400 uppercase mb-1">Bitiş</label>' +
       '<select id="se-edit-end" class="w-full p-3 rounded-xl border border-gray-200 text-sm font-bold"></select></div></div>' +
       '<button type="button" onclick="submitAdminStudioEventEdit()" class="w-full py-3 rounded-xl bg-[#e30613] text-white font-black text-sm hover:bg-red-700">Kaydet</button>';
-    fillStudioEventEditTimeDropdowns_();
+    fillStudioEventEditTimeDropdowns_(String(ev.studio_id || ''));
     document.getElementById('se-edit-date').value = dateVal;
     document.getElementById('se-edit-purpose').value = String(ev.purpose || '').trim().substring(0, 20);
     var stSel = padHourFromDate_(ds);
@@ -3967,8 +3989,10 @@
         d.setDate(start.getDate() + di);
         days.push({ iso: toIsoLocalDate_(d), day: d.getDate(), month: d.getMonth() + 1, dow: d.getDay() });
       }
+      var isGreenStudio = adminIsGreenStudio_(studioId, activeAdminStudioName);
+      var maxStartMins = (isGreenStudio ? 21 : 20) * 60;
       var slots = [];
-      for (var mins = 9 * 60; mins <= 21 * 60; mins += 30) {
+      for (var mins = 9 * 60; mins <= maxStartMins; mins += 30) {
         slots.push({ mins: mins, label: String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0') });
       }
       var cells = {};
