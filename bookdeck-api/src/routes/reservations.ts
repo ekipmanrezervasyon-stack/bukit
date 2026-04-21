@@ -3383,12 +3383,29 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (studioMeta.error) return reply.code(500).send({ ok: false, error: studioMeta.error.message });
     if (!studioMeta.data) return reply.code(404).send({ ok: false, error: "Studio not found." });
     const studio = studioMeta.data as Record<string, unknown>;
+    let actorProfileId = String(actor.id || "").trim();
+    if (!actorProfileId) {
+      const actorEmail = String(actor.email || "").trim().toLowerCase();
+      if (actorEmail) {
+        const actorProfile = await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("email", actorEmail)
+          .limit(1)
+          .maybeSingle();
+        if (actorProfile.error) return reply.code(500).send({ ok: false, error: actorProfile.error.message });
+        actorProfileId = String((actorProfile.data as Record<string, unknown> | null)?.id || "").trim();
+      }
+    }
+    if (!actorProfileId) {
+      return reply.code(400).send({ ok: false, error: "Admin profile id could not be resolved." });
+    }
 
     const ins = await supabaseAdmin
       .from("studio_reservations")
       .insert({
         studio_id: String(studio.id || p.studio_id),
-        requester_profile_id: null,
+        requester_profile_id: actorProfileId,
         requester_email: "studio.import@bilgi.edu.tr",
         requester_name: "Studio Maintenance",
         access_level: String(studio.access_level || "A"),
