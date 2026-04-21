@@ -150,6 +150,12 @@ const adminStudioDeleteSchema = z.object({
   id: z.string().min(1),
   mode: z.enum(["single", "following"]).optional().default("single")
 });
+const adminStudioLockSchema = z.object({
+  studio_id: z.string().min(1),
+  reason: z.string().min(1).max(120),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
 const adminTrafficTransferSchema = z.object({
   id: z.string().min(1),
   query: z.string().min(1).max(190)
@@ -266,6 +272,14 @@ const toHmKey = (raw: unknown): string => {
   const d = new Date(String(raw || ""));
   if (Number.isNaN(d.getTime())) return "";
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+const addDaysDateOnly = (dateOnly: string, days: number): string => {
+  const parts = String(dateOnly || "").split("-").map((x) => Number(x));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return "";
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 0, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() + Number(days || 0));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 };
 
 const lookupProfileByAdminQuery = async (
@@ -3343,6 +3357,67 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     return { ok: true, success: true, deleted: updatedRows.length, ids: updatedRows.map((r) => String(r.id || "")) };
+  });
+
+  app.post("/admin/studio-locks", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminStudioLockSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const startDate = String(p.start_date || "");
+    const endDate = String(p.end_date || "");
+    if (endDate < startDate) {
+      return reply.code(400).send({ ok: false, error: "End date must be on/after start date." });
+    }
+    const endExclusiveDate = addDaysDateOnly(endDate, 1);
+    if (!endExclusiveDate) return reply.code(400).send({ ok: false, error: "Invalid date range." });
+    const startAt = `${startDate}T00:00:00+03:00`;
+    const endAt = `${endExclusiveDate}T00:00:00+03:00`;
+
+    const studioMeta = await supabaseAdmin
+      .from("studios")
+      .select("id,name,access_level")
+      .eq("id", String(p.studio_id || "").trim())
+      .limit(1)
+      .maybeSingle();
+    if (studioMeta.error) return reply.code(500).send({ ok: false, error: studioMeta.error.message });
+    if (!studioMeta.data) return reply.code(404).send({ ok: false, error: "Studio not found." });
+    const studio = studioMeta.data as Record<string, unknown>;
+
+    const ins = await supabaseAdmin
+      .from("studio_reservations")
+      .insert({
+        studio_id: String(studio.id || p.studio_id),
+        requester_profile_id: null,
+        requester_email: "studio.import@bilgi.edu.tr",
+        requester_name: "Studio Maintenance",
+        access_level: String(studio.access_level || "A"),
+        status: STUDIO_APPROVED_STATUS,
+        approval_required: false,
+        start_at: startAt,
+        end_at: endAt,
+        purpose: String(p.reason || "").trim(),
+        reviewed_by: String(actor.email || ""),
+        reviewed_at: new Date().toISOString()
+      })
+      .select("*")
+      .single();
+    if (ins.error) return reply.code(500).send({ ok: false, error: ins.error.message });
+    const created = ins.data as Record<string, unknown>;
+    try {
+      await upsertApprovedGreenStudioToGoogleCalendar({
+        reservationId: String(created.id || ""),
+        studioId: String(created.studio_id || ""),
+        startAt: String(created.start_at || startAt),
+        endAt: String(created.end_at || endAt),
+        requesterName: String(created.requester_name || ""),
+        requesterEmail: String(created.requester_email || ""),
+        purpose: String(created.purpose || p.reason || "")
+      });
+    } catch (e) {
+      req.log.error({ err: e, reservationId: String(created.id || "") }, "sync studio maintenance lock to Google Calendar failed");
+    }
+    return { ok: true, success: true, data: created };
   });
 
   app.post("/admin/equipment-reservations/approve", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {

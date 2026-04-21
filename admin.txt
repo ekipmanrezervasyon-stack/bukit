@@ -166,6 +166,39 @@
           <div id="admin-studio-selector" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
             <div class="col-span-full text-center text-gray-400 animate-pulse py-4 text-xs">Stüdyolar yükleniyor...</div>
           </div>
+
+          <div class="bg-white rounded-3xl border border-gray-100 shadow-sm p-5 md:p-6 mb-6">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="text-lg">🔒</span>
+              <div>
+                <h3 class="font-black text-gray-900 text-sm md:text-base">Stüdyoyu Kilitle</h3>
+                <p class="text-[10px] text-gray-500">Saat girmeden tarih aralığıyla stüdyoyu rezervasyona kapatır.</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Stüdyo Seç</label>
+                <select id="sl-studio-id" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613] transition">
+                  <option value="">Stüdyo seçin</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Kilitleme Nedeni</label>
+                <input type="text" id="sl-reason" maxlength="120" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613] transition" placeholder="BAKIM/YENİLEME">
+              </div>
+              <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Başlangıç Günü</label>
+                <input type="date" id="sl-start-date" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613] transition">
+              </div>
+              <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Bitiş Günü</label>
+                <input type="date" id="sl-end-date" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613] transition">
+              </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <button type="button" id="sl-submit-btn" onclick="submitStudioLockRange()" class="bg-[#e30613] text-white font-black py-3 px-6 rounded-xl text-xs hover:bg-red-700 transition">STÜDYOYU KİLİTLE</button>
+            </div>
+          </div>
  
           <div id="admin-calendar-wrapper" class="bg-white rounded-3xl border border-gray-100 shadow-sm mb-6 hidden flex flex-col max-h-[min(85vh,900px)] overflow-hidden">
             <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
@@ -3683,6 +3716,7 @@
         var sid0 = String((s0 && s0.id) || '').trim();
         if (sid0) adminStudiosById[sid0] = s0;
       });
+      populateStudioLockStudioSelect_(studios);
       container.innerHTML = '';
       studios.forEach(function(s) {
         var calData = STUDIO_CALENDARS[s.id] || { icon: '🎬' };
@@ -3714,7 +3748,54 @@
     form.classList.remove('hidden');
     document.getElementById('form-studio-name').innerText = name;
     fillStudioTimeDropdowns();
+    var lockStudioEl = document.getElementById('sl-studio-id');
+    if (lockStudioEl) lockStudioEl.value = String(id || '');
     setTimeout(function() { calWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
+  }
+
+  function populateStudioLockStudioSelect_(studios) {
+    var sel = document.getElementById('sl-studio-id');
+    if (!sel) return;
+    var current = String(sel.value || '');
+    sel.innerHTML = '<option value="">Stüdyo seçin</option>';
+    (studios || []).forEach(function(s) {
+      var sid = String((s && s.id) || '').trim();
+      var sname = String((s && s.name) || sid || '').trim();
+      if (!sid) return;
+      sel.innerHTML += '<option value="' + escAttr(sid) + '">' + escAdm(sname) + '</option>';
+    });
+    if (current && sel.querySelector('option[value="' + current + '"]')) sel.value = current;
+    else if (activeAdminStudioId && sel.querySelector('option[value="' + String(activeAdminStudioId) + '"]')) sel.value = String(activeAdminStudioId);
+  }
+
+  function submitStudioLockRange() {
+    var studioId = String((document.getElementById('sl-studio-id') || {}).value || '').trim();
+    var reason = String((document.getElementById('sl-reason') || {}).value || '').trim();
+    var startDate = String((document.getElementById('sl-start-date') || {}).value || '').trim();
+    var endDate = String((document.getElementById('sl-end-date') || {}).value || '').trim();
+    if (!studioId) { showToast('Stüdyo seçin.', 'error'); return; }
+    if (!reason) { showToast('Kilitleme nedeni zorunlu.', 'error'); return; }
+    if (!startDate || !endDate) { showToast('Başlangıç ve bitiş günlerini girin.', 'error'); return; }
+    if (endDate < startDate) { showToast('Bitiş günü başlangıçtan önce olamaz.', 'error'); return; }
+    var btn = document.getElementById('sl-submit-btn');
+    var old = btn ? btn.innerText : '';
+    if (btn) { btn.disabled = true; btn.innerText = 'KİLİTLENİYOR...'; }
+    adminApiRequest('/admin/studio-locks', {
+      method: 'POST',
+      body: { studio_id: studioId, reason: reason, start_date: startDate, end_date: endDate }
+    }).then(function() {
+      if (btn) { btn.disabled = false; btn.innerText = old || 'STÜDYOYU KİLİTLE'; }
+      showToast('Stüdyo takvimi kilitlendi.', 'success');
+      if (String(activeAdminStudioId || '') !== String(studioId || '')) {
+        var st = adminStudiosById[String(studioId || '').trim()] || null;
+        selectAdminStudio(studioId, String((st && st.name) || studioId));
+      } else {
+        renderAdminStudioWeekCalendar();
+      }
+    }).catch(function(err) {
+      if (btn) { btn.disabled = false; btn.innerText = old || 'STÜDYOYU KİLİTLE'; }
+      showToast('Hata: ' + ((err && err.message) || 'Bilinmeyen hata'), 'error');
+    });
   }
 
   function mondayIsoFrom_(d) {
