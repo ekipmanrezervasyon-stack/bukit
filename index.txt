@@ -4615,6 +4615,9 @@
             var mm = String(hm % 60).padStart(2, '0');
             slots.push({ mins: hm, label: hh + ':' + mm });
           }
+          if (studioKey === 'GREEN') {
+            slots.push({ mins: 22 * 60, label: '22:00', boundary: true });
+          }
           var cells = {};
           var cellBusyStart = {};
           var weekendOk = !!(studioMeta && studioMeta.weekendOk);
@@ -4623,7 +4626,11 @@
             var isClosedDay = safeIsPublicHoliday(new Date(d.iso + 'T00:00:00')) || (!weekendOk && d.dow === 0);
             slots.forEach(function(s){
               var key = d.iso + '|' + s.mins;
-              cells[key] = isClosedDay ? 'closed' : 'free';
+              if (s.boundary) {
+                cells[key] = 'closed';
+              } else {
+                cells[key] = isClosedDay ? 'closed' : 'free';
+              }
             });
           });
           var activeStatuses = { pending:1, approved:1, approved_by_admin:1, key_picked:1, checked_out:1, picked_up:1, key_out:1 };

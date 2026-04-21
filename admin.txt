@@ -3995,6 +3995,9 @@
       for (var mins = 9 * 60; mins <= maxStartMins; mins += 30) {
         slots.push({ mins: mins, label: String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0') });
       }
+      if (isGreenStudio) {
+        slots.push({ mins: 22 * 60, label: '22:00', boundary: true });
+      }
       var cells = {};
       var slotDetails = {};
       var cellAdminCaption = {};
@@ -4006,7 +4009,11 @@
       slots.forEach(function(s) {
         days.forEach(function(d) {
           var dayDate = new Date(d.iso + 'T00:00:00');
-          cells[d.iso + '|' + s.mins] = (adminStudioDayKind_(studioId, dayDate) === 'open') ? 'free' : 'closed';
+          if (s.boundary) {
+            cells[d.iso + '|' + s.mins] = 'closed';
+          } else {
+            cells[d.iso + '|' + s.mins] = (adminStudioDayKind_(studioId, dayDate) === 'open') ? 'free' : 'closed';
+          }
         });
       });
       (rows || []).forEach(function(r) {
