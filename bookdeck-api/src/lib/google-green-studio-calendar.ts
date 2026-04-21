@@ -64,6 +64,27 @@ const resolveGreenStudioId = async (): Promise<string | null> => {
   return greenStudioIdCache;
 };
 
+const isGreenStudioReservation = async (studioIdRaw: string): Promise<boolean> => {
+  const studioId = normalize(studioIdRaw);
+  if (!studioId) return false;
+  const greenStudioId = await resolveGreenStudioId();
+  if (greenStudioId && studioId === greenStudioId) return true;
+  const sidUpper = studioId.toUpperCase();
+  if (sidUpper === "GREEN" || sidUpper.includes("GREEN")) return true;
+
+  const row = await supabaseAdmin
+    .from("studios")
+    .select("id,name,studio_id,code")
+    .eq("id", studioId)
+    .limit(1)
+    .maybeSingle();
+  if (!row.error && row.data) {
+    const nameBlob = `${normalize((row.data as Record<string, unknown>).name)} ${normalize((row.data as Record<string, unknown>).studio_id)} ${normalize((row.data as Record<string, unknown>).code)}`.toUpperCase();
+    if (nameBlob.includes("GREEN")) return true;
+  }
+  return false;
+};
+
 const buildDescription = (p: StudioSyncPayload): string => {
   const parts = [
     `BookDeck Reservation: ${normalize(p.reservationId)}`,
@@ -94,8 +115,8 @@ export const upsertApprovedGreenStudioToGoogleCalendar = async (payload: StudioS
   const reservationId = normalize(payload.reservationId);
   const studioId = normalize(payload.studioId);
   if (!reservationId || !studioId) return { ok: false, skipped: "missing_payload" };
-  const greenStudioId = await resolveGreenStudioId();
-  if (!greenStudioId || studioId !== greenStudioId) return { ok: false, skipped: "not_green_studio" };
+  const isGreen = await isGreenStudioReservation(studioId);
+  if (!isGreen) return { ok: false, skipped: "not_green_studio" };
   const startAt = normalize(payload.startAt);
   const endAt = normalize(payload.endAt);
   if (!startAt || !endAt) return { ok: false, skipped: "missing_datetime" };
@@ -142,8 +163,8 @@ export const deleteGreenStudioFromGoogleCalendar = async (payload: { reservation
   const reservationId = normalize(payload.reservationId);
   const studioId = normalize(payload.studioId);
   if (!reservationId || !studioId) return { ok: false, skipped: "missing_payload" };
-  const greenStudioId = await resolveGreenStudioId();
-  if (!greenStudioId || studioId !== greenStudioId) return { ok: false, skipped: "not_green_studio" };
+  const isGreen = await isGreenStudioReservation(studioId);
+  if (!isGreen) return { ok: false, skipped: "not_green_studio" };
   const cal = getCalendarClient();
   if (!cal) return { ok: false, skipped: "missing_service_account" };
 
