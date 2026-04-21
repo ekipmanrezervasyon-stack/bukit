@@ -2235,11 +2235,13 @@
       var s = String(raw || '').trim().toLowerCase();
       if (!s) return '';
       // Zorunlu kategori önceliği: DB category/typeLabel ne diyorsa önce onu kullan.
+      // Light Stand/Lighting Stand her zaman GRIP olmalı.
+      if (s.indexOf('light stand') >= 0 || s.indexOf('lighting stand') >= 0 || s.indexOf('isik ayagi') >= 0 || s.indexOf('ışık ayağı') >= 0) return 'Grip';
       if (s.indexOf('lens') >= 0 || s.indexOf('optik') >= 0 || s.indexOf('optics') >= 0 || s.indexOf('filtre') >= 0 || s.indexOf('filter') >= 0 || s.indexOf('ops') >= 0) return 'Ops';
       if (s.indexOf('camera') >= 0 || s.indexOf('kamera') >= 0 || s.indexOf('dslr') >= 0 || s.indexOf('cam') >= 0) return 'Cam';
       if (s.indexOf('sound') >= 0 || s.indexOf('ses') >= 0 || s.indexOf('audio') >= 0 || s.indexOf('mic') >= 0 || s.indexOf('mikrofon') >= 0) return 'Sound';
-      if (s.indexOf('light') >= 0 || s.indexOf('ışık') >= 0 || s.indexOf('isik') >= 0 || s.indexOf('lighting') >= 0 || s.indexOf('led') >= 0) return 'Light';
       if (s.indexOf('grip') >= 0 || s.indexOf('tripod') >= 0 || s.indexOf('stand') >= 0 || s.indexOf('gimbal') >= 0 || s.indexOf('key') >= 0) return 'Grip';
+      if (s.indexOf('light') >= 0 || s.indexOf('ışık') >= 0 || s.indexOf('isik') >= 0 || s.indexOf('lighting') >= 0 || s.indexOf('led') >= 0) return 'Light';
       return '';
     }
     function getBaseCategory(item){

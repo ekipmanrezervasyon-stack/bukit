@@ -1908,7 +1908,11 @@
     data.forEach(function(item) {
       var kindRaw = String(item.kind || item.trafficKind || '').trim().toLowerCase();
       var tKind = (kindRaw === 'studio' || kindRaw === 'studio_key') ? 'studio' : 'equipment';
-      trafficMetaByResId[String(item.id || '')] = { kind: tKind };
+      trafficMetaByResId[String(item.id || '')] = {
+        kind: tKind,
+        reservationIds: Array.isArray(item.reservationIds) ? item.reservationIds.slice() : [String(item.id || '')].filter(Boolean),
+        primaryReservationId: String(item.primaryReservationId || item.id || '')
+      };
       var isPickup = (item.type === 'pickup');
       var color = isPickup ? 'border-red-500' : 'border-green-500';
       var badgeColor = isPickup ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
@@ -2872,7 +2876,7 @@
   // ═══ BEKLEYEN ONAYLAR ═══
   function applyPendingPayloadToUi_(payload) {
     var list = (payload && payload.list) ? payload.list : (Array.isArray(payload) ? payload : []);
-    pendingRowsCache = list;
+    pendingRowsCache = groupPendingRows_(list);
     var dup = (payload && payload.duplicateEqWarnings) ? payload.duplicateEqWarnings : [];
     var ban = document.getElementById('pending-dup-banner');
     if (ban) {
@@ -2888,6 +2892,81 @@
     }
     filterPendingLocal();
     updatePendingBadgeFromCache_();
+  }
+
+  function pendingGroupKey_(row) {
+    var r = row || {};
+    var kind = String(r.kind || '').trim().toLowerCase();
+    if (kind !== 'equipment') return kind + '|' + String(r.id || '');
+    return [
+      'equipment',
+      String(r.email || '').trim().toLowerCase(),
+      String(r.userName || '').trim().toLowerCase(),
+      String(r.handoverLabel || '').trim(),
+      String(r.returnLabel || '').trim(),
+      String(r.purpose || '').trim().toLowerCase()
+    ].join('|');
+  }
+
+  function groupPendingRows_(rows) {
+    var src = Array.isArray(rows) ? rows : [];
+    var map = {};
+    var out = [];
+    src.forEach(function(raw) {
+      var row = raw || {};
+      var key = pendingGroupKey_(row);
+      var kind = String(row.kind || '').trim().toLowerCase();
+      if (!map[key]) {
+        var seed = Object.assign({}, row);
+        seed.reservationIds = [String(row.id || '').trim()].filter(Boolean);
+        seed.items = [];
+        seed.__itemSeen = {};
+        map[key] = seed;
+        out.push(seed);
+      }
+      var g = map[key];
+      var rid = String(row.id || '').trim();
+      if (rid && g.reservationIds.indexOf(rid) < 0) g.reservationIds.push(rid);
+      var rowItems = Array.isArray(row.items) ? row.items : [];
+      rowItems.forEach(function(it) {
+        var eqId = String((it && it.eqId) || '').trim();
+        var seenKey = (rid || '') + '|' + (eqId || '');
+        if (g.__itemSeen[seenKey]) return;
+        g.__itemSeen[seenKey] = true;
+        var nextIt = Object.assign({}, it || {});
+        nextIt.reservationId = rid || String(nextIt.reservationId || '').trim();
+        g.items.push(nextIt);
+      });
+      if (kind !== 'equipment' && !g.items.length && rowItems.length) g.items = rowItems.slice();
+    });
+    return out.map(function(g) {
+      var cleaned = Object.assign({}, g);
+      try { delete cleaned.__itemSeen; } catch (_e) {}
+      return cleaned;
+    });
+  }
+
+  function pendingPruneByReservationIds_(ids) {
+    var set = {};
+    (Array.isArray(ids) ? ids : []).forEach(function(x) {
+      var k = String(x || '').trim();
+      if (k) set[k] = true;
+    });
+    pendingRowsCache = (pendingRowsCache || []).map(function(r) {
+      var row = Object.assign({}, r || {});
+      var rs = Array.isArray(row.reservationIds) ? row.reservationIds.slice() : [String(row.id || '').trim()].filter(Boolean);
+      var kept = rs.filter(function(x) { return !set[String(x || '').trim()]; });
+      if (!kept.length) return null;
+      row.reservationIds = kept;
+      row.id = String(row.id || '').trim() || kept[0];
+      if (Array.isArray(row.items)) {
+        row.items = row.items.filter(function(it) {
+          var rid = String((it && it.reservationId) || '').trim();
+          return !rid || kept.indexOf(rid) >= 0;
+        });
+      }
+      return row;
+    }).filter(Boolean);
   }
 
   function updatePendingBadgeFromCache_() {
@@ -3010,18 +3089,41 @@
   function approveReservation(resId) {
     var rid = String(resId || '').trim();
     var checks = Array.from(document.querySelectorAll('input[data-res]')).filter(function(c) { return c.getAttribute('data-res') === rid && c.checked; }).map(function(c) { return c.value; });
-    var isStudioPending = (pendingRowsCache || []).some(function(r) { return String(r.id || '').trim() === rid && r.kind === 'studio'; });
+    var row = (pendingRowsCache || []).find(function(r) { return String(r.id || '').trim() === rid; }) || null;
+    var isStudioPending = !!(row && row.kind === 'studio');
     if (!checks.length && !isStudioPending) { showToast("En az bir cihaz seçin.", "error"); return; }
     if (!checks.length && isStudioPending) { checks = ['__studio_key__']; }
     showToast("İşlem yapılıyor...", "info");
-    var row = (pendingRowsCache || []).find(function(r) { return String(r.id || '').trim() === rid; }) || null;
     var endpoint = (row && row.kind === 'studio')
       ? '/admin/studio-reservations/approve'
       : '/admin/equipment-reservations/approve';
-    adminApiRequest(endpoint, { method: 'POST', body: { id: rid } }).then(function(result) {
+    var rowReservationIds = (row && Array.isArray(row.reservationIds) && row.reservationIds.length)
+      ? row.reservationIds.slice()
+      : [rid];
+    var targetIds = rowReservationIds.slice();
+    if (!isStudioPending && row && Array.isArray(row.items) && checks.length) {
+      var selected = {};
+      checks.forEach(function(x) { selected[String(x || '').trim().toUpperCase()] = true; });
+      targetIds = row.items
+        .filter(function(it) { return selected[String((it && it.eqId) || '').trim().toUpperCase()]; })
+        .map(function(it) { return String((it && it.reservationId) || '').trim(); })
+        .filter(Boolean);
+      if (!targetIds.length) targetIds = rowReservationIds.slice();
+    }
+    var uniq = {};
+    targetIds = targetIds.filter(function(x) {
+      var k = String(x || '').trim();
+      if (!k || uniq[k]) return false;
+      uniq[k] = true;
+      return true;
+    });
+    Promise.all(targetIds.map(function(oneId) {
+      return adminApiRequest(endpoint, { method: 'POST', body: { id: oneId } });
+    })).then(function(results) {
       showToast("Onaylandı!");
+      var result = (results && results[0]) || null;
       if (result && result.studioFormUrl) window.open(result.studioFormUrl, '_blank');
-      removePendingFromCacheById_(rid);
+      pendingPruneByReservationIds_(targetIds);
       filterPendingLocal();
       updatePendingBadgeFromCache_();
       reloadPendingSilent();
@@ -3068,9 +3170,14 @@
       var endpoint = (row && row.kind === 'studio')
         ? '/admin/studio-reservations/reject'
         : '/admin/equipment-reservations/reject';
-      adminApiRequest(endpoint, { method: 'POST', body: { id: rid, note: reason } }).then(function() {
+      var rowReservationIds = (row && Array.isArray(row.reservationIds) && row.reservationIds.length)
+        ? row.reservationIds.slice()
+        : [rid];
+      Promise.all(rowReservationIds.map(function(oneId) {
+        return adminApiRequest(endpoint, { method: 'POST', body: { id: oneId, note: reason } });
+      })).then(function() {
         showToast("Rezervasyon reddedildi.");
-        removePendingFromCacheById_(resId);
+        pendingPruneByReservationIds_(rowReservationIds);
         filterPendingLocal();
         updatePendingBadgeFromCache_();
         reloadPendingSilent();
@@ -3094,6 +3201,91 @@
       seen[key] = true;
       return true;
     });
+  }
+
+  function groupTrafficRows_(rows) {
+    var src = Array.isArray(rows) ? rows : [];
+    var out = [];
+    var map = {};
+    src.forEach(function(raw) {
+      var row = raw || {};
+      var kindRaw = String(row.kind || row.trafficKind || '').trim().toLowerCase();
+      var isStudio = (kindRaw === 'studio' || kindRaw === 'studio_key');
+      var rid = String(row.id || '').trim();
+      var key = isStudio
+        ? ('studio|' + String(row.type || '') + '|' + rid)
+        : [
+          'equipment',
+          String(row.type || '').trim().toLowerCase(),
+          String(row.email || '').trim().toLowerCase(),
+          String(row.userName || '').trim().toLowerCase(),
+          String(row.handoverLabel || '').trim(),
+          String(row.returnLabel || '').trim(),
+          String(row.purpose || '').trim().toLowerCase()
+        ].join('|');
+      if (!map[key]) {
+        var seed = Object.assign({}, row);
+        seed.primaryReservationId = rid;
+        seed.reservationIds = rid ? [rid] : [];
+        seed.items = [];
+        seed.__itemSeen = {};
+        map[key] = seed;
+        out.push(seed);
+      }
+      var g = map[key];
+      if (rid && g.reservationIds.indexOf(rid) < 0) g.reservationIds.push(rid);
+      var items = Array.isArray(row.items) ? row.items : [];
+      items.forEach(function(it) {
+        var eq = String((it && (it.eqId || it.id || it.eqCode)) || '').trim().toUpperCase();
+        var itemRid = String((it && it.reservationId) || rid || '').trim();
+        var seenKey = itemRid + '|' + eq;
+        if (g.__itemSeen[seenKey]) return;
+        g.__itemSeen[seenKey] = true;
+        var nextIt = Object.assign({}, it || {});
+        nextIt.reservationId = itemRid;
+        g.items.push(nextIt);
+      });
+    });
+    return out.map(function(g) {
+      var cleaned = Object.assign({}, g);
+      try { delete cleaned.__itemSeen; } catch (_e) {}
+      return cleaned;
+    });
+  }
+
+  function trafficSelectedReservationIds_(resId) {
+    var rid = String(resId || '').trim();
+    var row = (trafficAllRows || []).find(function(x) { return String((x && x.id) || '') === rid; }) || null;
+    if (!row) return rid ? [rid] : [];
+    var selectedEq = trafficSelectedEqIds(rid).map(function(x) { return String(x || '').trim().toUpperCase(); });
+    var baseIds = (Array.isArray(row.reservationIds) && row.reservationIds.length)
+      ? row.reservationIds.slice()
+      : [String(row.primaryReservationId || row.id || '').trim()].filter(Boolean);
+    if (!selectedEq.length) return baseIds;
+    var selSet = {};
+    selectedEq.forEach(function(x) { selSet[x] = true; });
+    var chosen = [];
+    (row.items || []).forEach(function(it) {
+      var eq = String((it && (it.eqId || it.id || it.eqCode)) || '').trim().toUpperCase();
+      if (!selSet[eq]) return;
+      var oneId = String((it && it.reservationId) || '').trim();
+      if (oneId) chosen.push(oneId);
+    });
+    if (!chosen.length) return baseIds;
+    var seen = {};
+    return chosen.filter(function(x) {
+      var k = String(x || '').trim();
+      if (!k || seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  }
+
+  function trafficPrimaryReservationId_(resId) {
+    var rid = String(resId || '').trim();
+    var row = (trafficAllRows || []).find(function(x) { return String((x && x.id) || '') === rid; }) || null;
+    if (!row) return rid;
+    return String(row.primaryReservationId || row.id || rid).trim();
   }
 
   function trafficEnsureInventoryLoaded_(done) {
@@ -3253,7 +3445,7 @@
     google.script.run.withSuccessHandler(function(data) {
       trafficSearchMode = 'daily';
       trafficGlobalQuery = '';
-      trafficAllRows = data || [];
+      trafficAllRows = groupTrafficRows_(data || []);
       renderTrafficFromCache();
     }).withFailureHandler(function(err) {
       container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">Veri alınamadı: ' + escAdm((err && err.message) || 'Bilinmeyen hata') + '</div>';
@@ -3270,7 +3462,7 @@
       google.script.run.withSuccessHandler(function(data) {
         trafficSearchMode = 'global';
         trafficGlobalQuery = String(qNorm || '');
-        trafficAllRows = data || [];
+        trafficAllRows = groupTrafficRows_(data || []);
         renderTrafficFromCache();
       }).withFailureHandler(function() {
         container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">Arama sırasında hata oluştu.</div>';
@@ -3281,6 +3473,7 @@
   function adminTrafficPdfAct(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast('En az bir kalem seçin.', 'error'); return; }
+    var primaryId = trafficPrimaryReservationId_(resId);
     openAdminUiDialog({
       title: 'PDF Notu',
       desc: 'Stüdyo anahtar teslim notu (opsiyonel).',
@@ -3304,13 +3497,14 @@
           refreshInventoryData();
           loadTraffic();
         } else { container.innerHTML = oldContent; showToast((r && r.error) || 'Hata', 'error'); }
-      }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast(err.message, 'error'); }).adminTrafficPrintPdf(resId, checks, note || '', trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
+      }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast(err.message, 'error'); }).adminTrafficPrintPdf(primaryId, checks, note || '', trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
     });
   }
 
   function adminTrafficExtendAct(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast('Kalem seçin.', 'error'); return; }
+    var targetIds = trafficSelectedReservationIds_(resId);
     var rid = String(resId || '').trim();
     var row = (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid && String(x.type || '').toLowerCase() === 'return'; })
       || (trafficAllRows || []).find(function(x) { return String(x.id || '') === rid; })
@@ -3328,16 +3522,24 @@
       defaultTime: seed.time,
       okText: 'Güncelle'
     }, function(nd) {
-      google.script.run.withSuccessHandler(function(r) {
-        if (r && r.success) { showToast('Güncellendi'); loadTraffic(); }
-        else showToast((r && r.error) || 'Hata', 'error');
-      }).withFailureHandler(function(err) { showToast(err.message, 'error'); }).adminTrafficExtendDeliveries(resId, checks, String(nd).trim(), currentAuthToken);
+      Promise.all(targetIds.map(function(oneId) {
+        return adminApiRequest('/admin/traffic/extend', {
+          method: 'POST',
+          body: { id: String(oneId || '').trim(), new_end_at: String(nd || '').trim() }
+        });
+      })).then(function() {
+        showToast('Güncellendi');
+        loadTraffic();
+      }).catch(function(err) {
+        showToast((err && err.message) || 'Hata', 'error');
+      });
     });
   }
 
   function adminTrafficCancelAct(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast('Kalem seçin.', 'error'); return; }
+    var targetIds = trafficSelectedReservationIds_(resId);
     openAdminUiDialog({
       title: 'Kalemleri İptal Et',
       desc: 'Seçilen rezervasyon kalemleri iptal edilecek. Devam edilsin mi?',
@@ -3345,16 +3547,25 @@
       input: false,
       okText: 'İptal Et'
     }, function() {
-      google.script.run.withSuccessHandler(function(r) {
-        if (r && r.success) { showToast('İptal edildi'); loadTraffic(); refreshInventoryData(); }
-        else showToast((r && r.error) || 'Hata', 'error');
-      }).withFailureHandler(function(err) { showToast(err.message, 'error'); }).adminTrafficCancelDeliveries(resId, checks, currentAuthToken);
+      Promise.all(targetIds.map(function(oneId) {
+        return adminApiRequest('/admin/traffic/cancel', {
+          method: 'POST',
+          body: { id: String(oneId || '').trim() }
+        });
+      })).then(function() {
+        showToast('İptal edildi');
+        loadTraffic();
+        refreshInventoryData();
+      }).catch(function(err) {
+        showToast((err && err.message) || 'Hata', 'error');
+      });
     });
   }
 
   function adminTrafficTransferAct(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast('Kalem seçin.', 'error'); return; }
+    var targetIds = trafficSelectedReservationIds_(resId);
     openAdminUiDialog({
       title: 'Rezervasyonu Devret',
       desc: 'Yeni kullanıcı e-posta veya öğrenci no girin.',
@@ -3365,16 +3576,24 @@
       placeholder: 'student@bilgiedu.net veya öğrenci no',
       okText: 'Devret'
     }, function(q) {
-      google.script.run.withSuccessHandler(function(r) {
-        if (r && r.success) { showToast('Devredildi'); loadTraffic(); }
-        else showToast((r && r.error) || 'Hata', 'error');
-      }).withFailureHandler(function(err) { showToast(err.message, 'error'); }).adminTrafficTransferDeliveries(resId, checks, String(q).trim(), currentAuthToken);
+      Promise.all(targetIds.map(function(oneId) {
+        return adminApiRequest('/admin/traffic/transfer', {
+          method: 'POST',
+          body: { id: String(oneId || '').trim(), query: String(q || '').trim() }
+        });
+      })).then(function() {
+        showToast('Devredildi');
+        loadTraffic();
+      }).catch(function(err) {
+        showToast((err && err.message) || 'Hata', 'error');
+      });
     });
   }
 
   function submitPartialCheckout(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast("Çıkış yapmak için en az bir cihaz seçin.", "error"); return; }
+    var primaryId = trafficPrimaryReservationId_(resId);
     var meta = trafficMetaByResId[String(resId || '')] || {};
     var studioHandoverNote = '';
     if (meta.kind === 'studio') {
@@ -3403,12 +3622,13 @@
         }
         refreshInventoryData();
       } else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
-    }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckout(resId, checks, studioHandoverNote, trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
+    }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckout(primaryId, checks, studioHandoverNote, trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
   }
 
   function submitPartialCheckin(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast("İade almak için en az bir cihaz seçin.", "error"); return; }
+    var targetIds = trafficSelectedReservationIds_(resId);
     var actId = trafficSafeDomId(resId);
     var sel = document.getElementById('traffic-return-status-' + actId);
     var handover = sel ? String(sel.value || '').trim() : '';
@@ -3417,10 +3637,19 @@
     if (!container) return;
     var oldContent = container.innerHTML;
     container.innerHTML = '<div class="text-center p-3 text-xs font-bold text-green-600 animate-pulse">İade İşleniyor...</div>';
-    google.script.run.withSuccessHandler(function(r) {
-      if (r.success) { showToast("İade Alındı!"); loadTraffic(); refreshInventoryData(); }
-      else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
-    }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckin(resId, checks, handover, currentAuthToken);
+    Promise.all(targetIds.map(function(oneId) {
+      return adminApiRequest('/admin/traffic/checkin', {
+        method: 'POST',
+        body: { id: String(oneId || '').trim(), studio_handover_note: String(handover || '').trim() }
+      });
+    })).then(function() {
+      showToast("İade Alındı!");
+      loadTraffic();
+      refreshInventoryData();
+    }).catch(function(err) {
+      container.innerHTML = oldContent;
+      showToast("Sistem Hatası: " + ((err && err.message) || 'Hata'), "error");
+    });
   }
 
   // ═══ STÜDYO TAKVİMİ ═══
