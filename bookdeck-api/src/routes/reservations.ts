@@ -41,6 +41,8 @@ const EQUIPMENT_CHECKED_OUT_STATUS = "IN_USE";
 const EQUIPMENT_USAGE_SCOPE_ON_CAMPUS = "on_campus";
 const EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS = "off_campus";
 type EquipmentUsageScope = typeof EQUIPMENT_USAGE_SCOPE_ON_CAMPUS | typeof EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS;
+type EquipmentLifecycleEvent = "created" | "approved" | "rejected";
+type EquipmentGroupMailItem = { name: string; code: string };
 const EQUIPMENT_NOTE_USAGE_MARKER_REGEX = /\[USAGE_SCOPE:(ON_CAMPUS|OFF_CAMPUS)\]\s*$/i;
 const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
@@ -756,6 +758,9 @@ let pickupTimeoutTimer: NodeJS.Timeout | null = null;
 let returnReminderJobRunning = false;
 let pickupTimeoutJobRunning = false;
 const returnReminderRuntimeSent = new Set<string>();
+const equipmentLifecycleMailTimers = new Map<string, NodeJS.Timeout>();
+const equipmentLifecycleMailLocks = new Set<string>();
+const equipmentLifecycleMailSentAt = new Map<string, number>();
 
 const BAN_TABLE_CANDIDATES = ["bans", "user_bans", "restrictions_bans"];
 let banTableCache: string | null | undefined = undefined;
@@ -1429,7 +1434,10 @@ const listOverdueEquipmentRows = async (): Promise<Array<{
   });
 };
 
-const sendOverdueReminderEmail = async (toEmail: string, payload: { name: string; id: string; due: string }): Promise<void> => {
+const sendOverdueReminderEmail = async (
+  toEmail: string,
+  payload: { due: string; items: Array<{ name: string; id: string }> }
+): Promise<void> => {
   const apiKey = String(env.RESEND_API_KEY || "").trim();
   const from = String(env.OTP_EMAIL_FROM || "").trim();
   if (!apiKey || !from) {
@@ -1442,25 +1450,36 @@ const sendOverdueReminderEmail = async (toEmail: string, payload: { name: string
     ? dueRaw
     : new Date(dueMs).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
   const subject = `[${appName}] Iade hatirlatmasi / Equipment return reminder`;
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const listHtml = items.length
+    ? `<ul>${items
+        .map((x) => `<li><strong>${escapeHtml(String(x.name || "-"))}</strong> (${escapeHtml(String(x.id || "-"))})</li>`)
+        .join("")}</ul>`
+    : `<p><strong>${escapeHtml("Equipment")}</strong></p>`;
+  const listText = items.length
+    ? items.map((x) => `${String(x.name || "-")} (${String(x.id || "-")})`).join(", ")
+    : "Equipment";
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
       <p><strong>TR</strong></p>
       <p>Merhaba,</p>
-      <p>Asagidaki ekipmanin iade suresi <strong>gecmistir</strong>:</p>
-      <p><strong>${escapeHtml(payload.name)}</strong> (${escapeHtml(payload.id)})<br>Son iade: ${escapeHtml(dueLabel)}</p>
+      <p>Asagidaki ekipmanlarin iade suresi <strong>gecmistir</strong>:</p>
+      ${listHtml}
+      <p>Son iade: ${escapeHtml(dueLabel)}</p>
       <p>Lutfen en kisa surede ekipman ofisine iade ediniz.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
       <p><strong>EN</strong></p>
       <p>Hello,</p>
       <p>This is a reminder that the following equipment is <strong>overdue</strong> for return:</p>
-      <p><strong>${escapeHtml(payload.name)}</strong> (${escapeHtml(payload.id)})<br>Due: ${escapeHtml(dueLabel)}</p>
+      ${listHtml}
+      <p>Due: ${escapeHtml(dueLabel)}</p>
       <p>Please return it to the equipment office as soon as possible.</p>
     </div>
   `;
   const text =
-    `TR: Iade suresi gecen ekipman: ${payload.name} (${payload.id})\n` +
+    `TR: Iade suresi gecen ekipmanlar: ${listText}\n` +
     `Son iade: ${dueLabel}\n\n` +
-    `EN: Overdue equipment: ${payload.name} (${payload.id})\n` +
+    `EN: Overdue equipment: ${listText}\n` +
     `Due: ${dueLabel}`;
 
   const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
@@ -1730,10 +1749,11 @@ const sendReservationLifecycleEmail = async (
   toEmail: string,
   payload: {
     kind: "equipment" | "studio";
-    event: "created" | "approved" | "rejected";
+    event: EquipmentLifecycleEvent;
     reservationId: string;
     requesterName?: string;
     itemLabel?: string;
+    itemLabels?: string[];
     startAt: string;
     endAt: string;
     adminNote?: string;
@@ -1755,10 +1775,18 @@ const sendReservationLifecycleEmail = async (
   const eventLabel = eventCopy[payload.event];
   const requesterName = String(payload.requesterName || "").trim();
   const itemLabel = String(payload.itemLabel || "").trim();
+  const itemLabels = Array.isArray(payload.itemLabels)
+    ? payload.itemLabels.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
   const reservationId = String(payload.reservationId || "").trim();
   const startLabel = formatMailDateTimeTR(payload.startAt);
   const endLabel = formatMailDateTimeTR(payload.endAt);
   const adminNote = String(payload.adminNote || "").trim();
+  const listHtml =
+    payload.kind === "equipment" && itemLabels.length
+      ? `<ul>${itemLabels.map((it) => `<li>${escapeHtml(it)}</li>`).join("")}</ul>`
+      : "";
+  const listText = payload.kind === "equipment" && itemLabels.length ? itemLabels.map((it) => `- ${it}`).join("\n") : "";
   const subject = `[${appName}] ${scopeTr} ${eventLabel.tr} / ${scopeEn} ${eventLabel.en}`;
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
@@ -1769,6 +1797,7 @@ const sendReservationLifecycleEmail = async (
       <strong>Kalem:</strong> ${escapeHtml(itemLabel || "-")}<br>
       <strong>Teslim:</strong> ${escapeHtml(startLabel || "-")}<br>
       <strong>İade:</strong> ${escapeHtml(endLabel || "-")}</p>
+      ${listHtml ? `<p><strong>Tüm Ürünler:</strong></p>${listHtml}` : ""}
       ${adminNote ? `<p><strong>Yönetici Notu:</strong><br>${escapeHtml(adminNote)}</p>` : ""}
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
       <p><strong>EN</strong></p>
@@ -1778,6 +1807,7 @@ const sendReservationLifecycleEmail = async (
       <strong>Item:</strong> ${escapeHtml(itemLabel || "-")}<br>
       <strong>Checkout:</strong> ${escapeHtml(startLabel || "-")}<br>
       <strong>Return:</strong> ${escapeHtml(endLabel || "-")}</p>
+      ${listHtml ? `<p><strong>All Items:</strong></p>${listHtml}` : ""}
       ${adminNote ? `<p><strong>Admin Note:</strong><br>${escapeHtml(adminNote)}</p>` : ""}
     </div>
   `;
@@ -1787,12 +1817,14 @@ const sendReservationLifecycleEmail = async (
     `Kalem: ${itemLabel || "-"}\n` +
     `Teslim: ${startLabel || "-"}\n` +
     `Iade: ${endLabel || "-"}\n` +
+    (listText ? `Tum Urunler:\n${listText}\n` : "") +
     (adminNote ? `Yonetici Notu: ${adminNote}\n` : "") +
     `\nEN: Your ${scopeEn.toLowerCase()} request is ${eventLabel.en}.\n` +
     `Reservation ID: ${reservationId || "-"}\n` +
     `Item: ${itemLabel || "-"}\n` +
     `Checkout: ${startLabel || "-"}\n` +
     `Return: ${endLabel || "-"}\n` +
+    (listText ? `All Items:\n${listText}\n` : "") +
     (adminNote ? `Admin Note: ${adminNote}\n` : "");
 
   const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
@@ -1806,6 +1838,124 @@ const sendReservationLifecycleEmail = async (
     const raw = await resp.text();
     throw new Error(`Resend send failed (${resp.status}): ${raw || resp.statusText}`);
   }
+};
+
+const listEquipmentItemsForReservationRange = async (
+  anchorReservationId: string,
+  statusMode: EquipmentLifecycleEvent
+): Promise<{
+  reservationId: string;
+  requesterName: string;
+  requesterEmail: string;
+  startAt: string;
+  endAt: string;
+  itemLabels: string[];
+  adminNote: string;
+}> => {
+  const anchor = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,equipment_item_id,requester_name,requester_profile_id,requester_email,start_at,end_at,status,note")
+    .eq("id", String(anchorReservationId || "").trim())
+    .limit(1)
+    .maybeSingle();
+  if (anchor.error) throw new Error(anchor.error.message);
+  if (!anchor.data) throw new Error("Reservation not found for lifecycle mail.");
+  const a = anchor.data as Record<string, unknown>;
+  const requesterProfileId = String(a.requester_profile_id || "").trim();
+  const requesterEmail = String(a.requester_email || "").trim().toLowerCase();
+  const startAt = String(a.start_at || "");
+  const endAt = String(a.end_at || "");
+  let q = supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,equipment_item_id,status,note")
+    .eq("start_at", startAt)
+    .eq("end_at", endAt)
+    .limit(300);
+  if (requesterProfileId) q = q.eq("requester_profile_id", requesterProfileId);
+  else q = q.eq("requester_email", requesterEmail);
+  const allRows = await q;
+  if (allRows.error) throw new Error(allRows.error.message);
+  let rows = (allRows.data ?? []) as Record<string, unknown>[];
+  if (statusMode === "rejected") rows = rows.filter((r) => String(r.status || "").trim().toLowerCase() === "rejected");
+  if (statusMode === "approved")
+    rows = rows.filter((r) => !["rejected", "cancelled", "returned", "completed"].includes(String(r.status || "").trim().toLowerCase()));
+  if (statusMode === "created")
+    rows = rows.filter((r) => !["rejected", "cancelled", "returned", "completed"].includes(String(r.status || "").trim().toLowerCase()));
+  if (!rows.length) rows = [a];
+  const eqIds = Array.from(new Set(rows.map((r) => String(r.equipment_item_id || "").trim()).filter(Boolean)));
+  const itemsMeta = eqIds.length
+    ? await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
+    : { data: [], error: null };
+  if (itemsMeta.error) throw new Error(itemsMeta.error.message);
+  const labelById = new Map(
+    ((itemsMeta.data ?? []) as Record<string, unknown>[]).map((r) => [
+      String(r.id || ""),
+      String(r.name || r.equipment_id || r.id || "")
+    ])
+  );
+  const itemLabels = rows.map((r) => {
+    const eqId = String(r.equipment_item_id || "");
+    return String(labelById.get(eqId) || eqId || "Equipment");
+  });
+  const cleanNote = decodeEquipmentReservationNote(a.note).note;
+  return {
+    reservationId: String(a.id || anchorReservationId),
+    requesterName: String(a.requester_name || requesterEmail || ""),
+    requesterEmail,
+    startAt,
+    endAt,
+    itemLabels,
+    adminNote: cleanNote
+  };
+};
+
+const scheduleGroupedEquipmentLifecycleEmail = (
+  reservationId: string,
+  event: EquipmentLifecycleEvent,
+  fallbackNote = ""
+): void => {
+  const timerKey = `${event}:${String(reservationId || "").trim()}`;
+  const old = equipmentLifecycleMailTimers.get(timerKey);
+  if (old) clearTimeout(old);
+  const timer = setTimeout(async () => {
+    try {
+      const group = await listEquipmentItemsForReservationRange(reservationId, event);
+      const sendKey = `${event}:${group.requesterEmail}:${group.startAt}:${group.endAt}`;
+      const now = Date.now();
+      const last = Number(equipmentLifecycleMailSentAt.get(sendKey) || 0);
+      if (last && now - last < 5 * 60 * 1000) return;
+      if (equipmentLifecycleMailLocks.has(sendKey)) return;
+      equipmentLifecycleMailLocks.add(sendKey);
+      try {
+        if (!group.requesterEmail || !group.requesterEmail.includes("@")) return;
+        const firstLabel = group.itemLabels[0] || "Equipment";
+        await sendReservationLifecycleEmail(group.requesterEmail, {
+          kind: "equipment",
+          event,
+          reservationId: group.reservationId,
+          requesterName: group.requesterName,
+          itemLabel: firstLabel,
+          itemLabels: group.itemLabels,
+          startAt: group.startAt,
+          endAt: group.endAt,
+          adminNote: group.adminNote || String(fallbackNote || "").trim()
+        });
+        equipmentLifecycleMailSentAt.set(sendKey, now);
+        if (equipmentLifecycleMailSentAt.size > 2000) {
+          const keys = Array.from(equipmentLifecycleMailSentAt.keys());
+          for (let i = 0; i < 200; i += 1) {
+            const k = keys[i];
+            if (k) equipmentLifecycleMailSentAt.delete(k);
+          }
+        }
+      } finally {
+        equipmentLifecycleMailLocks.delete(sendKey);
+      }
+    } catch {
+      // swallow: caller paths already log failures around mail calls
+    }
+  }, 1800);
+  equipmentLifecycleMailTimers.set(timerKey, timer);
 };
 
 const sendTicketDecisionEmail = async (
@@ -1860,7 +2010,10 @@ const sendTicketDecisionEmail = async (
   }
 };
 
-const sendEquipmentReturnReminderEmail = async (toEmail: string): Promise<void> => {
+const sendEquipmentReturnReminderEmail = async (
+  toEmail: string,
+  payload?: { items?: Array<{ name: string; id: string }>; dueAt?: string }
+): Promise<void> => {
   const apiKey = String(env.RESEND_API_KEY || "").trim();
   const from = String(env.OTP_EMAIL_FROM || "").trim();
   if (!apiKey || !from) {
@@ -1868,17 +2021,32 @@ const sendEquipmentReturnReminderEmail = async (toEmail: string): Promise<void> 
   }
   const appName = String(env.OTP_APP_NAME || "BUKit").trim();
   const subject = `[${appName}] Ekipman iade hatırlatması / Equipment return reminder`;
+  const items = Array.isArray(payload?.items) ? payload?.items ?? [] : [];
+  const listHtml = items.length
+    ? `<ul>${items
+        .map((x) => `<li><strong>${escapeHtml(String(x.name || "-"))}</strong> (${escapeHtml(String(x.id || "-"))})</li>`)
+        .join("")}</ul>`
+    : "";
+  const listText = items.length ? items.map((x) => `${String(x.name || "-")} (${String(x.id || "-")})`).join(", ") : "";
+  const dueLabel = payload?.dueAt ? formatMailDateTimeTR(String(payload.dueAt || "")) : "";
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
       <p><strong>TR</strong></p>
       <p>${escapeHtml(RETURN_REMINDER_MAIL_TEXT_TR)}</p>
+      ${listHtml ? `<p><strong>Ekipmanlar:</strong></p>${listHtml}` : ""}
+      ${dueLabel ? `<p><strong>Planlanan İade:</strong> ${escapeHtml(dueLabel)}</p>` : ""}
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
       <p><strong>EN</strong></p>
       <p>${escapeHtml(RETURN_REMINDER_MAIL_TEXT_EN)}</p>
+      ${listHtml ? `<p><strong>Items:</strong></p>${listHtml}` : ""}
+      ${dueLabel ? `<p><strong>Planned Return:</strong> ${escapeHtml(dueLabel)}</p>` : ""}
     </div>
   `;
   const text =
     `TR: ${RETURN_REMINDER_MAIL_TEXT_TR}\n\n` +
+    (listText ? `Ekipmanlar: ${listText}\n` : "") +
+    (dueLabel ? `Planlanan Iade: ${dueLabel}\n` : "") +
+    `\n` +
     `EN: ${RETURN_REMINDER_MAIL_TEXT_EN}`;
   const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
   if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
@@ -2181,7 +2349,7 @@ const runEquipmentReturnReminderDispatch = async (
     const lookAheadIso = new Date(nowMs + RETURN_REMINDER_DURATION_LONG_MS).toISOString();
     const q = await supabaseAdmin
       .from("equipment_reservations")
-      .select("id,requester_email,start_at,end_at,status")
+      .select("id,equipment_item_id,requester_email,start_at,end_at,status")
       .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES)
       .gte("end_at", lookbackIso)
       .lte("end_at", lookAheadIso)
@@ -2190,6 +2358,31 @@ const runEquipmentReturnReminderDispatch = async (
     if (q.error) throw new Error(q.error.message);
     const rows = (q.data ?? []) as Record<string, unknown>[];
     stats.candidates = rows.length;
+
+    const eqIds = Array.from(new Set(rows.map((r) => String(r.equipment_item_id || "").trim()).filter(Boolean)));
+    const itemsMeta = eqIds.length
+      ? await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
+      : { data: [], error: null };
+    if (itemsMeta.error) throw new Error(itemsMeta.error.message);
+    const itemLabelById = new Map(
+      ((itemsMeta.data ?? []) as Record<string, unknown>[]).map((r) => [
+        String(r.id || ""),
+        {
+          name: String(r.name || r.equipment_id || r.id || "Equipment"),
+          id: String(r.equipment_id || r.id || "")
+        }
+      ])
+    );
+    const grouped = new Map<
+      string,
+      {
+        email: string;
+        mode: "day_09" | "minus_4h";
+        targetIso: string;
+        endAt: string;
+        items: Array<{ name: string; id: string }>;
+      }
+    >();
 
     for (const row of rows) {
       stats.processed += 1;
@@ -2234,18 +2427,25 @@ const runEquipmentReturnReminderDispatch = async (
         continue;
       }
       const targetIso = new Date(targetMs).toISOString();
-      const logKey = buildReturnReminderLogKey(reservationId, mode, targetIso);
-      const sentBefore = await hasReturnReminderBeenSent(logKey);
+      const token = String(targetIso || "").replace(/[^0-9]/g, "").slice(0, 12) || "unknown";
+      const groupKey = `${RETURN_REMINDER_LOG_KEY_PREFIX}:grp:${email}:${startAt}:${endAt}:${mode}:${token}`;
+      const it = itemLabelById.get(String(row.equipment_item_id || "").trim()) || { name: "Equipment", id: String(row.equipment_item_id || "") };
+      const g = grouped.get(groupKey) || { email, mode, targetIso, endAt, items: [] };
+      g.items.push(it);
+      grouped.set(groupKey, g);
+    }
+    for (const [groupKey, group] of grouped.entries()) {
+      const sentBefore = await hasReturnReminderBeenSent(groupKey);
       if (sentBefore) {
         stats.skippedAlreadySent += 1;
         continue;
       }
       try {
-        await sendEquipmentReturnReminderEmail(email);
-        await markReturnReminderSent(logKey);
+        await sendEquipmentReturnReminderEmail(group.email, { items: group.items, dueAt: group.endAt });
+        await markReturnReminderSent(groupKey);
         stats.sent += 1;
       } catch (e) {
-        if (logger) logger.error({ err: e, reservationId, email, mode, targetIso }, "send return reminder mail failed");
+        if (logger) logger.error({ err: e, email: group.email, mode: group.mode, targetIso: group.targetIso }, "send return reminder mail failed");
       }
     }
     if (logger && typeof logger.info === "function") {
@@ -3066,22 +3266,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const createdEq = data as Record<string, unknown>;
-    const createdRequesterEmail = String(createdEq.requester_email || profile.email || "").trim().toLowerCase();
-    if (createdRequesterEmail && createdRequesterEmail.includes("@")) {
-      const decodedNote = decodeEquipmentReservationNote(createdEq.note).note;
+    const createdReservationId = String(createdEq.id || "");
+    if (createdReservationId) {
       try {
-        await sendReservationLifecycleEmail(createdRequesterEmail, {
-          kind: "equipment",
-          event: "created",
-          reservationId: String(createdEq.id || ""),
-          requesterName: String(createdEq.requester_name || profile.full_name || ""),
-          itemLabel: String((item as Record<string, unknown>).name || (item as Record<string, unknown>).equipment_id || equipment_item_id),
-          startAt: String(createdEq.start_at || start_at),
-          endAt: String(createdEq.end_at || end_at),
-          adminNote: decodedNote
-        });
+        scheduleGroupedEquipmentLifecycleEmail(createdReservationId, "created");
       } catch (e) {
-        req.log.error({ err: e, reservationId: String(createdEq.id || ""), requesterEmail: createdRequesterEmail }, "send equipment reservation created mail failed");
+        req.log.error({ err: e, reservationId: createdReservationId }, "schedule equipment reservation created grouped mail failed");
       }
     }
     return { ok: true, data };
@@ -3468,31 +3658,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const updated = data as Record<string, unknown>;
-    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
-    if (requesterEmail && requesterEmail.includes("@")) {
-      let itemLabel = String(updated.equipment_item_id || "");
-      const eqItemId = String(updated.equipment_item_id || "").trim();
-      if (eqItemId) {
-        const meta = await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").eq("id", eqItemId).limit(1).maybeSingle();
-        if (!meta.error && meta.data) {
-          itemLabel = String((meta.data as Record<string, unknown>).name || (meta.data as Record<string, unknown>).equipment_id || eqItemId);
-        }
-      }
-      const cleanNote = decodeEquipmentReservationNote(updated.note).note;
-      try {
-        await sendReservationLifecycleEmail(requesterEmail, {
-          kind: "equipment",
-          event: "approved",
-          reservationId: String(updated.id || id),
-          requesterName: String(updated.requester_name || requesterEmail),
-          itemLabel: itemLabel || "Equipment",
-          startAt: String(updated.start_at || ""),
-          endAt: String(updated.end_at || ""),
-          adminNote: cleanNote || String(note || "").trim()
-        });
-      } catch (e) {
-        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send equipment reservation approved mail failed");
-      }
+    try {
+      scheduleGroupedEquipmentLifecycleEmail(String(updated.id || id), "approved", String(note || "").trim());
+    } catch (e) {
+      req.log.error({ err: e, reservationId: String(updated.id || id) }, "schedule equipment reservation approved grouped mail failed");
     }
     return { ok: true, data };
   });
@@ -3528,31 +3697,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const updated = data as Record<string, unknown>;
-    const requesterEmail = String(updated.requester_email || "").trim().toLowerCase();
-    if (requesterEmail && requesterEmail.includes("@")) {
-      let itemLabel = String(updated.equipment_item_id || "");
-      const eqItemId = String(updated.equipment_item_id || "").trim();
-      if (eqItemId) {
-        const meta = await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").eq("id", eqItemId).limit(1).maybeSingle();
-        if (!meta.error && meta.data) {
-          itemLabel = String((meta.data as Record<string, unknown>).name || (meta.data as Record<string, unknown>).equipment_id || eqItemId);
-        }
-      }
-      const cleanNote = decodeEquipmentReservationNote(updated.note).note;
-      try {
-        await sendReservationLifecycleEmail(requesterEmail, {
-          kind: "equipment",
-          event: "rejected",
-          reservationId: String(updated.id || id),
-          requesterName: String(updated.requester_name || requesterEmail),
-          itemLabel: itemLabel || "Equipment",
-          startAt: String(updated.start_at || ""),
-          endAt: String(updated.end_at || ""),
-          adminNote: cleanNote || String(note || "").trim()
-        });
-      } catch (e) {
-        req.log.error({ err: e, reservationId: String(updated.id || id), requesterEmail }, "send equipment reservation rejected mail failed");
-      }
+    try {
+      scheduleGroupedEquipmentLifecycleEmail(String(updated.id || id), "rejected", String(note || "").trim());
+    } catch (e) {
+      req.log.error({ err: e, reservationId: String(updated.id || id) }, "schedule equipment reservation rejected grouped mail failed");
     }
     return { ok: true, data };
   });
@@ -4017,6 +4165,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const byId = new Map(list.map((r) => [String(r.id || "").trim(), r]));
       let sent = 0;
       let skipped = 0;
+      const groups = new Map<string, { email: string; due: string; items: Array<{ name: string; id: string }> }>();
       for (const id of ids) {
         const row = byId.get(id);
         if (!row) {
@@ -4028,11 +4177,17 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           skipped += 1;
           continue;
         }
+        const gk = `${email}|${String(row.due || "")}`;
+        const g = groups.get(gk) || { email, due: String(row.due || ""), items: [] };
+        g.items.push({ name: String(row.name || row.id || "Equipment"), id: String(row.id || "") });
+        groups.set(gk, g);
+      }
+      for (const g of groups.values()) {
         try {
-          await sendOverdueReminderEmail(email, { name: row.name, id: row.id, due: row.due });
+          await sendOverdueReminderEmail(g.email, { due: g.due, items: g.items });
           sent += 1;
         } catch (e) {
-          req.log.error({ err: e, equipmentId: row.id, email }, "send overdue reminder failed");
+          req.log.error({ err: e, email: g.email }, "send overdue reminder failed");
           skipped += 1;
         }
       }
