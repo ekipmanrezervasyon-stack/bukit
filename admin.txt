@@ -4101,7 +4101,7 @@
         var rid = String(r.studio_id || '').trim();
         if (rid !== String(studioId || '').trim()) return;
         var status = String(r.status || '').toLowerCase();
-        if (['cancelled', 'rejected', 'returned', 'completed', 'no_show'].indexOf(status) >= 0) return;
+        if (['cancelled', 'cancelled_by_user', 'rejected', 'rejected_by_admin', 'returned', 'key_returned', 'completed', 'no_show'].indexOf(status) >= 0) return;
         var sd = new Date(r.start_at);
         var ed = new Date(r.end_at);
         if (isNaN(sd.getTime()) || isNaN(ed.getTime()) || ed <= sd) return;
@@ -4150,7 +4150,7 @@
         var list = (rows || []).filter(function(r) {
           if (String(r.studio_id || '').trim() !== String(studioId || '').trim()) return false;
           var st = String(r.status || '').toLowerCase();
-          if (['cancelled', 'rejected', 'returned', 'completed', 'no_show'].indexOf(st) >= 0) return false;
+          if (['cancelled', 'cancelled_by_user', 'rejected', 'rejected_by_admin', 'returned', 'key_returned', 'completed', 'no_show'].indexOf(st) >= 0) return false;
           var rs = new Date(String(r.start_at || '')).getTime();
           var re = new Date(String(r.end_at || '')).getTime();
           var ds = new Date(iso + 'T00:00:00').getTime();
