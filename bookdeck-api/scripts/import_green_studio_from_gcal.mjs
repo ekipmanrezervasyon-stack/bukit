@@ -68,6 +68,10 @@ const toIso = (value) => {
 };
 
 const compactWhitespace = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const extractGcalMarker = (purpose) => {
+  const m = String(purpose || '').match(/\[gcal:([^\]]+)\]/i);
+  return m ? String(m[1] || '').trim() : '';
+};
 
 const truncate = (s, n) => {
   const t = String(s || '');
@@ -215,20 +219,39 @@ const main = async () => {
 
   const existingRes = await sb
     .from('studio_reservations')
-    .select('id,start_at,end_at,purpose,studio_id')
+    .select('id,start_at,end_at,purpose,studio_id,requester_email,requester_name')
     .eq('studio_id', greenStudioId)
     .gte('start_at', FROM_ISO)
     .lte('end_at', TO_ISO)
     .limit(20000);
   if (existingRes.error) throw new Error(`Existing reservations query failed: ${existingRes.error.message}`);
+  const existingRows = existingRes.data || [];
+  const existingByMarker = new Map();
+  existingRows.forEach((r) => {
+    const marker = extractGcalMarker(r.purpose);
+    if (marker && !existingByMarker.has(marker)) existingByMarker.set(marker, r);
+  });
 
-  const existingKeys = new Set(
-    (existingRes.data || []).map((r) => `${normalize(r.studio_id)}|${toIso(r.start_at)}|${toIso(r.end_at)}|${compactWhitespace(r.purpose || '')}`)
-  );
-
-  const inserts = normalized.filter((r) => {
-    const k = `${normalize(r.studio_id)}|${toIso(r.start_at)}|${toIso(r.end_at)}|${compactWhitespace(r.purpose || '')}`;
-    return !existingKeys.has(k);
+  const updates = [];
+  const inserts = [];
+  normalized.forEach((r) => {
+    const marker = extractGcalMarker(r.purpose);
+    if (!marker) {
+      inserts.push(r);
+      return;
+    }
+    const existing = existingByMarker.get(marker);
+    if (!existing) {
+      inserts.push(r);
+      return;
+    }
+    const patch = {};
+    if (compactWhitespace(existing.purpose) !== compactWhitespace(r.purpose)) patch.purpose = r.purpose;
+    if (toIso(existing.start_at) !== toIso(r.start_at)) patch.start_at = r.start_at;
+    if (toIso(existing.end_at) !== toIso(r.end_at)) patch.end_at = r.end_at;
+    if (normalize(existing.requester_email).toLowerCase() !== normalize(r.requester_email).toLowerCase()) patch.requester_email = r.requester_email;
+    if (normalize(existing.requester_name) !== normalize(r.requester_name)) patch.requester_name = r.requester_name;
+    if (Object.keys(patch).length) updates.push({ id: normalize(existing.id), patch });
   });
 
   const report = {
@@ -241,6 +264,7 @@ const main = async () => {
     normalizedEvents: normalized.length,
     skippedMalformed,
     existingInRange: (existingRes.data || []).length,
+    toUpdate: updates.length,
     toInsert: inserts.length,
     sample: inserts.slice(0, 10).map((x) => ({
       start_at: x.start_at,
@@ -253,7 +277,19 @@ const main = async () => {
 
   console.log(JSON.stringify(report, null, 2));
 
-  if (DRY_RUN || inserts.length === 0) return;
+  if (DRY_RUN) return;
+
+  let updated = 0;
+  for (const u of updates) {
+    const q = await sb.from('studio_reservations').update(u.patch).eq('id', u.id).select('id').single();
+    if (q.error) throw new Error(`Update failed for reservation ${u.id}: ${q.error.message}`);
+    updated += 1;
+  }
+
+  if (inserts.length === 0) {
+    console.log(JSON.stringify({ ok: true, inserted: 0, updated }, null, 2));
+    return;
+  }
 
   const chunkSize = 200;
   let inserted = 0;
@@ -266,7 +302,7 @@ const main = async () => {
     inserted += (ins.data || []).length;
   }
 
-  console.log(JSON.stringify({ ok: true, inserted }, null, 2));
+  console.log(JSON.stringify({ ok: true, inserted, updated }, null, 2));
 };
 
 main().catch((err) => {
