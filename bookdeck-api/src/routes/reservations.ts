@@ -16,7 +16,8 @@ const studioCreateSchema = z.object({
   studio_id: z.string().min(1),
   start_at: isoDateSchema,
   end_at: isoDateSchema,
-  purpose: z.string().max(120).optional().default("")
+  purpose: z.string().max(120).optional().default(""),
+  requester_email: z.string().email().max(190).optional()
 });
 
 const equipmentCreateSchema = z.object({
@@ -3103,11 +3104,34 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(409).send({ ok: false, error: "Studio is not available in selected range." });
     }
 
+    let targetProfileId = String(profile.id || "").trim();
+    let targetEmail = String(profile.email || "").trim().toLowerCase();
+    let targetName = String(profile.full_name || profile.email || "").trim();
+    const requestedOwnerEmail = String(parsed.data.requester_email || "").trim().toLowerCase();
+    if (isAdminRole(profile.role) && requestedOwnerEmail) {
+      const ownerLookup = await supabaseAdmin
+        .from("profiles")
+        .select("id,email,full_name")
+        .eq("email", requestedOwnerEmail)
+        .limit(1)
+        .maybeSingle();
+      if (ownerLookup.error) return reply.code(500).send({ ok: false, error: ownerLookup.error.message });
+      if (!ownerLookup.data) {
+        return reply.code(404).send({ ok: false, error: "Owner profile not found for requester_email." });
+      }
+      targetProfileId = String((ownerLookup.data as Record<string, unknown>).id || "").trim();
+      targetEmail = String((ownerLookup.data as Record<string, unknown>).email || requestedOwnerEmail).trim().toLowerCase();
+      targetName = String((ownerLookup.data as Record<string, unknown>).full_name || targetEmail).trim();
+    }
+    if (!targetProfileId || !targetEmail || !targetEmail.includes("@")) {
+      return reply.code(400).send({ ok: false, error: "Valid requester profile/email is required." });
+    }
+
     const payload = {
       studio_id,
-      requester_profile_id: profile.id,
-      requester_email: profile.email,
-      requester_name: profile.full_name || profile.email,
+      requester_profile_id: targetProfileId,
+      requester_email: targetEmail,
+      requester_name: targetName,
       access_level: String(studio.access_level || "A"),
       status: isAdminRole(profile.role) ? STUDIO_APPROVED_STATUS : STUDIO_PENDING_STATUS,
       approval_required: !isAdminRole(profile.role),
@@ -3137,14 +3161,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         req.log.error({ err: e, reservationId: String(createdStudio.id || "") }, "sync approved studio reservation to Google Calendar failed");
       }
     }
-    const studioRequesterEmail = String(createdStudio.requester_email || profile.email || "").trim().toLowerCase();
+    const studioRequesterEmail = String(createdStudio.requester_email || targetEmail || profile.email || "").trim().toLowerCase();
     if (studioRequesterEmail && studioRequesterEmail.includes("@")) {
       try {
         await sendReservationLifecycleEmail(studioRequesterEmail, {
           kind: "studio",
           event: "created",
           reservationId: String(createdStudio.id || ""),
-          requesterName: String(createdStudio.requester_name || profile.full_name || ""),
+          requesterName: String(createdStudio.requester_name || targetName || profile.full_name || ""),
           itemLabel: String((studio as Record<string, unknown>).name || studio_id),
           startAt: String(createdStudio.start_at || startAt),
           endAt: String(createdStudio.end_at || endAt),

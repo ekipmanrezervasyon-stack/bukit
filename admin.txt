@@ -4471,7 +4471,7 @@
 
   function submitAdminStudioReservation() {
     if (!activeAdminStudioId) { showToast('Lütfen bir stüdyo seçin.', 'error'); return; }
-    var email = document.getElementById('sr-email').value;
+    var email = String(document.getElementById('sr-email').value || '').trim().toLowerCase();
     var date = document.getElementById('sr-date').value;
     var period = document.getElementById('sr-period').value;
     var startTime = document.getElementById('sr-start').value;
@@ -4534,7 +4534,7 @@
     var seq = Promise.resolve();
     validSlots.forEach(function(sl) {
       seq = seq.then(function() {
-        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose };
+        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose, requester_email: email };
         return adminApiRequest('/studio-reservations', { method: 'POST', body: payload })
           .then(function() { created += 1; })
           .catch(function(err) {
