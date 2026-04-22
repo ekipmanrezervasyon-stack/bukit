@@ -4239,7 +4239,7 @@
       }
       var maxStartMins = 21 * 60;
       var slots = [];
-      for (var mins = 9 * 60; mins <= maxStartMins; mins += 30) {
+      for (var mins = 9 * 60; mins <= maxStartMins; mins += 60) {
         slots.push({ mins: mins, label: String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0') });
       }
       slots.push({ mins: 22 * 60, label: '22:00', boundary: true });
@@ -4275,7 +4275,7 @@
             var key = d.iso + '|' + s.mins;
             if (String(cells[key]) === 'closed') return;
             var cellStart = new Date(d.iso + 'T' + String(Math.floor(s.mins / 60)).padStart(2, '0') + ':' + String(s.mins % 60).padStart(2, '0') + ':00');
-            var cellEnd = new Date(cellStart.getTime() + 30 * 60 * 1000);
+            var cellEnd = new Date(cellStart.getTime() + 60 * 60 * 1000);
             if (sd < cellEnd && ed > cellStart) {
               cells[key] = 'busy';
               if (!slotDetails[key]) slotDetails[key] = [];
@@ -4407,7 +4407,7 @@
             var firstPurpose = String((details[0] && details[0].purpose) || '').trim().replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
             cap = firstPurpose || '';
           }
-          var prevKey = d.iso + '|' + (s.mins - 30);
+          var prevKey = d.iso + '|' + (s.mins - 60);
           var prevState = String(cells[prevKey] || '');
           var prevCap = String(cellAdminCaption[prevKey] || '').trim();
           if (!prevCap && prevState === 'busy') {
