@@ -1758,10 +1758,10 @@
     if (u) openAdminStudentPdfView(u);
   }
 
-  function trafficReturnStatusSelectHtml(actId, trafficKind) {
-    var id = 'traffic-return-status-' + actId;
+  function trafficReturnStatusSelectHtml(actId, trafficKind, itemKey) {
+    var id = 'traffic-return-status-' + actId + '-' + trafficSafeDomId(itemKey || 'item');
     var isStudio = (trafficKind === 'studio');
-    var h = '<div class="mb-3"><label class="block text-[9px] font-black text-gray-500 uppercase mb-1 tracking-wider">İade Teslim Durumu</label><select id="' + id + '" class="w-full text-xs border border-gray-200 rounded-lg p-2.5 bg-white font-medium outline-none focus:border-[#e30613]">';
+    var h = '<div class="pl-7 mt-1.5" onclick="event.stopPropagation();"><label class="block text-[8px] font-black text-gray-400 uppercase mb-0.5 tracking-wide">İade Teslim Durumu</label><select id="' + id + '" class="w-full max-w-xs text-[10px] border border-gray-200 rounded-lg p-2 bg-white outline-none focus:border-[#e30613]" onclick="event.stopPropagation();">';
     h += '<option value="">— Seçin —</option>';
     if (!isStudio) {
       h += '<optgroup label="Ekipman (Condition In)">';
@@ -1957,7 +1957,7 @@
       var resAttr = String(item.id || '').replace(/"/g, '&quot;');
       var ridJs = String(item.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       var actId = trafficSafeDomId(item.id);
-      var returnStatusHtml = (!isPickup) ? trafficReturnStatusSelectHtml(actId, tKind) : '';
+      var returnStatusHtml = '';
       var pickupStatusHtml = (isPickup && tKind === 'studio') ? trafficStudioPickupStatusSelectHtml(actId) : '';
       var itemsHtml = item.items.map(function(i) {
         var statusStr = String(i.invStatus || '').toUpperCase();
@@ -2004,11 +2004,16 @@
           rowName = isStudioKeyItem ? (String(i.eqCode || '').trim() || 'STUDIO KEY') : 'Ekipman';
         }
         var rowCode = String(i.eqCode || '').trim();
+        var returnBlock = '';
+        if (!isPickup && isCheckable) {
+          var returnKey = String((i && (i.eqId || i.id || i.eqCode || i.reservationId)) || '').trim();
+          returnBlock = trafficReturnStatusSelectHtml(actId, tKind, returnKey);
+        }
         return '<div class="rounded-lg border border-gray-100 bg-gray-50/50 p-2">' +
           '<label class="flex items-center gap-3 text-xs bg-white p-2 rounded-lg border border-gray-100 ' + (isCheckable ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50') + '">' +
           '<input type="checkbox" ' + (isCheckable ? 'checked' : 'disabled') + ' class="w-4 h-4 text-blue-600 rounded" data-traffic-res="' + resAttr + '" value="' + vid + '">' +
           '<div class="flex-1 font-medium text-gray-800">' + escAdm(rowName) + (rowCode ? (' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(rowCode) + ')</span>') : '') + '</div>' +
-          '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + '</div>';
+          '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + returnBlock + '</div>';
       }).join('');
       var mainBtn = isPickup
         ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="w-full bg-gray-900 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-black transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR TESLİM ET & STÜDYO FORMU ÜRET' : '📦 ÇIKIŞ YAP & PDF ÜRET') + '</button>'
@@ -2019,9 +2024,7 @@
           '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">Devret</button>' +
           '</div>'
         : '<div class="grid grid-cols-2 gap-2 mt-2">' +
-          '<button type="button" onclick="adminTrafficPdfAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">PDF / form</button>' +
           '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">İadeyi uzat</button>' +
-          '<button type="button" onclick="adminTrafficCancelAct(\'' + ridJs + '\')" class="bg-white border border-red-100 text-red-700 text-[9px] font-black py-2 rounded-lg hover:bg-red-50">İptal</button>' +
           '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">Devret</button>' +
           '</div>';
       var addUi = '';
@@ -2064,7 +2067,7 @@
       var retFmt = formatAdminCardDtTr_(item.returnLabel || '');
       var trafSched = (item.handoverLabel || item.returnLabel) ? '<p class="text-[11px] md:text-sm text-gray-600 mt-1"><span class="font-black">Teslim:</span> ' + escAdm(handFmt || '—') + ' <span class="font-black">· İade:</span> ' + escAdm(retFmt || '—') + '</p>' : '';
       var topTime = String(item.time || '').trim() || (isPickup ? handFmt : retFmt) || '—';
-      container.innerHTML += '<div class="bg-gray-50 p-6 rounded-3xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-4"><div class="min-w-0 flex-1"><h4 class="font-bold text-sm text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="shrink-0 self-start text-base md:text-lg font-black text-gray-700 bg-white px-3 py-1.5 rounded-md border border-gray-200">' + escAdm(topTime) + '</span></div><div class="space-y-2 mb-5" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-2" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
+      container.innerHTML += '<div class="bg-gray-50 p-4 md:p-5 rounded-2xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-3"><div class="min-w-0 flex-1"><h4 class="font-bold text-sm text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="shrink-0 self-start text-base md:text-lg font-black text-gray-700 bg-white px-3 py-1.5 rounded-md border border-gray-200">' + escAdm(topTime) + '</span></div><div class="space-y-2 mb-3" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-1" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
   }
@@ -3679,16 +3682,39 @@
   function submitPartialCheckin(resId) {
     var checks = trafficSelectedEqIds(resId);
     if (!checks.length) { showToast("İade almak için en az bir cihaz seçin.", "error"); return; }
+    var selectedEqSet = {};
+    checks.forEach(function(eqId) { selectedEqSet[String(eqId || '').trim().toUpperCase()] = true; });
+    var rid = String(resId || '').trim();
+    var row = (trafficAllRows || []).find(function(x) { return String((x && x.id) || '') === rid; }) || null;
     var targetIds = trafficSelectedReservationIds_(resId);
     var actId = trafficSafeDomId(resId);
-    var sel = document.getElementById('traffic-return-status-' + actId);
-    var handover = sel ? String(sel.value || '').trim() : '';
-    if (!handover) { showToast('İade teslim durumunu seçin.', 'error'); return; }
+    var handoverByResId = {};
+    var missing = [];
+    (row && row.items ? row.items : []).forEach(function(it) {
+      var eq = String((it && (it.eqId || it.id || it.eqCode)) || '').trim().toUpperCase();
+      if (!eq || !selectedEqSet[eq]) return;
+      var oneResId = String((it && it.reservationId) || '').trim();
+      if (!oneResId) return;
+      var itemKey = String((it && (it.eqId || it.id || it.eqCode || it.reservationId)) || '').trim();
+      var sel = document.getElementById('traffic-return-status-' + actId + '-' + trafficSafeDomId(itemKey));
+      var v = sel ? String(sel.value || '').trim() : '';
+      if (!v) {
+        missing.push(itemKey || eq || oneResId);
+        return;
+      }
+      handoverByResId[oneResId] = v;
+    });
+    if (missing.length) { showToast('Seçili her ürün için iade teslim durumu seçin.', 'error'); return; }
     var container = trafficActionContainer(resId);
     if (!container) return;
     var oldContent = container.innerHTML;
     container.innerHTML = '<div class="text-center p-3 text-xs font-bold text-green-600 animate-pulse">İade İşleniyor...</div>';
     Promise.all(targetIds.map(function(oneId) {
+      var handover = String(handoverByResId[String(oneId || '').trim()] || '').trim();
+      if (!handover) {
+        var first = Object.keys(handoverByResId || {})[0];
+        handover = first ? String(handoverByResId[first] || '').trim() : '';
+      }
       return adminApiRequest('/admin/traffic/checkin', {
         method: 'POST',
         body: { id: String(oneId || '').trim(), studio_handover_note: String(handover || '').trim() }
