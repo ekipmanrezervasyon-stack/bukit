@@ -76,7 +76,9 @@
         <button onclick="goPage('reports')" id="nav-reports" class="sidebar-item nav-super-only hidden w-full flex items-center px-6 py-4 text-sm font-bold text-gray-500 hover:bg-gray-50 transition border-t border-gray-100">📊 Raporlama</button>
         <button onclick="goPage('special-access')" id="nav-special-access" class="sidebar-item nav-super-only hidden w-full flex items-center px-6 py-4 text-sm font-bold text-gray-500 hover:bg-gray-50 transition">🔐 Özel İzinler</button>
         <button onclick="goPage('iiw')" id="nav-iiw" class="sidebar-item w-full flex items-center px-6 py-4 text-sm font-bold text-gray-500 hover:bg-gray-50 transition">🎓 IIW</button>
-        <button onclick="goPage('bize')" id="nav-bize" class="sidebar-item nav-full-only w-full flex items-center px-6 py-4 text-sm font-bold text-gray-500 hover:bg-gray-50 transition border-t border-gray-100">✉️ Bize Ulaşın</button>
+        <button onclick="goPage('bize')" id="nav-bize" class="sidebar-item nav-full-only w-full flex items-center justify-between px-6 py-4 text-sm font-bold text-gray-500 hover:bg-gray-50 transition border-t border-gray-100">
+          <div class="flex items-center">✉️ Bize Ulaşın</div><span id="bize-count" class="badge-notif bg-[#e30613] text-white text-[10px] px-2 py-0.5 rounded-full hidden">0</span>
+        </button>
       </nav>
     </aside>
 
@@ -715,6 +717,7 @@
   var allEq = [];
   var qcCart = [];
   var lastPendingCount = 0;
+  var lastBizeCount = 0;
   var currentAuthToken = '';
   var pendingRowsCache = [];
   var pendingExtraItemsByRes = {};
@@ -1281,6 +1284,14 @@
       },
       getPendingCount: function() {
         return adminApiRequest('/admin/pending', { method: 'GET' })
+          .then(function(res) {
+            var list = (res && res.list) || [];
+            return Array.isArray(list) ? list.length : 0;
+          })
+          .catch(function() { return 0; });
+      },
+      getAdminContactCount: function() {
+        return adminApiRequest('/admin/contact-messages', { method: 'GET' })
           .then(function(res) {
             var list = (res && res.list) || [];
             return Array.isArray(list) ? list.length : 0;
@@ -2637,11 +2648,20 @@
     if (document.visibilityState === 'hidden') return;
     google.script.run.withSuccessHandler(function(count) {
       var badge = document.getElementById('pending-count');
+      var shouldPlay = false;
       if (count > 0) {
-        badge.innerText = count; badge.classList.remove('hidden');
-        if (count > lastPendingCount) try { document.getElementById('notif-sound').play(); } catch(e) {}
-      } else badge.classList.add('hidden');
+        if (badge) { badge.innerText = count; badge.classList.remove('hidden'); }
+        if (count > lastPendingCount) shouldPlay = true;
+      } else if (badge) badge.classList.add('hidden');
       lastPendingCount = count;
+      google.script.run.withSuccessHandler(function(bizeCount) {
+        var newBizeCount = Number(bizeCount || 0);
+        if (newBizeCount > Number(lastBizeCount || 0)) shouldPlay = true;
+        updateBizeBadge_(newBizeCount);
+        if (shouldPlay) {
+          try { document.getElementById('notif-sound').play(); } catch(e) {}
+        }
+      }).getAdminContactCount(currentAuthToken);
     }).getPendingCount(currentAuthToken);
   }
 
@@ -3104,6 +3124,19 @@
       badge.classList.add('hidden');
     }
     lastPendingCount = n;
+  }
+
+  function updateBizeBadge_(count) {
+    var badge = document.getElementById('bize-count');
+    if (!badge) return;
+    var n = Number(count || 0);
+    if (n > 0) {
+      badge.innerText = String(n);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+    lastBizeCount = n;
   }
 
   /** Sunucudan tam liste; yükleme yazısı yok — onay/red sonrası sessiz senkron için. */
@@ -4919,6 +4952,7 @@
     box.innerHTML = '<p class="text-gray-400 text-sm">Yükleniyor…</p>';
     adminApiRequest('/admin/contact-messages').then(function(res) {
       var list = res.list || [];
+      updateBizeBadge_(Array.isArray(list) ? list.length : 0);
       if (!list.length) { box.innerHTML = '<p class="text-gray-400">Mesaj yok.</p>'; return; }
       box.innerHTML = list.map(function(r) {
         var bzDom = String(r.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
