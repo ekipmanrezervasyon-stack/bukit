@@ -2030,10 +2030,10 @@
           '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + returnBlock + '</div>';
       }).join('');
       var footerMainBtn = isPickup
-        ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="min-w-[126px] bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-blue-700 transition shadow-sm">📄 PDF Form</button>'
-        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="min-w-[126px] bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-blue-700 transition shadow-sm">📥 İade Al</button>';
-      var footerActionBtns = '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="min-w-[126px] bg-gray-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-gray-600 transition shadow-sm">⇄ Devret</button>' +
-        '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="min-w-[126px] bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-green-700 transition shadow-sm">↻ Uzat</button>';
+        ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-blue-600 text-white text-base font-semibold shadow-sm hover:bg-blue-700 transition-colors duration-150">📄 PDF Form</button>'
+        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-blue-600 text-white text-base font-semibold shadow-sm hover:bg-blue-700 transition-colors duration-150">📥 İade Al</button>';
+      var footerActionBtns = '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-gray-500 text-white text-base font-semibold shadow-sm hover:bg-gray-600 transition-colors duration-150">⇄ Devret</button>' +
+        '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-green-600 text-white text-base font-semibold shadow-sm hover:bg-green-700 transition-colors duration-150">↻ Uzat</button>';
       var addUi = '';
       if (isPickup) {
         addUi = '<div class="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-2.5">' +
@@ -2042,8 +2042,8 @@
           '<div id="traffic-extra-search-' + actId + '" class="mt-2 space-y-1"></div>' +
           '</div>';
       }
-      var trafContact = '<p class="text-[11px] text-gray-500 mt-1 [overflow-wrap:anywhere] break-words">' + escAdm(item.email || '') + '</p>';
-      if (item.phone) trafContact += '<p class="text-[11px] text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
+      var trafContact = '<p class="text-xs text-gray-500 mt-1 [overflow-wrap:anywhere] break-words">' + escAdm(item.email || '') + '</p>';
+      if (item.phone) trafContact += '<p class="text-xs text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
       var studioKeyLine = '';
       var studioPurposeLine = '';
       if (tKind === 'studio') {
@@ -2076,36 +2076,35 @@
         return isPickup ? 'Ekipman Teslim Kartı' : 'Ekipman İade Kartı';
       })();
       var timeLabel = isPickup ? 'Teslim Saati' : 'İade Saati';
-      var identityLine = '<p class="text-[12px] md:text-sm text-gray-700 mt-1.5 [overflow-wrap:anywhere] break-words">Rezervasyon Sahibi ve Kimlik no: ' + escAdm(item.userName || '—') + ' - ' + escAdm(item.studentId || '—') + '</p>';
+      var ownerLine = escAdm(item.userName || '—') + ' - ' + escAdm(item.studentId || '—');
       var firstItemName = (item.items || []).map(function(i) { return String(i && i.name || '').trim(); }).filter(Boolean)[0] || (tKind === 'studio' ? 'Stüdyo Anahtarı' : 'Ekipman');
       var deliveryStatusChip = isPickup ? 'TESLİMAT BEKLENİYOR' : 'İADE BEKLENİYOR';
-      var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">' +
-        '<div class="text-gray-700"><span class="font-bold">Teslim Tarihi:</span> <span class="ml-1">📅 ' + escAdm(handFmt || '—') + '</span></div>' +
-        '<div class="text-gray-700"><span class="font-bold">İade Tarihi:</span> <span class="ml-1">📅 ' + escAdm(retFmt || '—') + '</span></div>' +
+      var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-100">' +
+        '<div><p class="text-sm font-medium text-gray-600 mb-1">Teslim Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(handFmt || '—') + '</span></div></div>' +
+        '<div><p class="text-sm font-medium text-gray-600 mb-1">İade Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(retFmt || '—') + '</span></div></div>' +
       '</div>';
       var topBand = isPickup ? 'bg-red-600' : 'bg-green-600';
-      var buttonsHtml = '<div class="space-y-2 mt-3">' + pickupStatusHtml + returnStatusHtml +
-        '<div class="flex flex-wrap justify-end gap-2">' + footerMainBtn + footerActionBtns + '</div>' +
-      '</div>' + addUi;
       container.innerHTML += '<div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">' +
-        '<div class="h-2 ' + topBand + '"></div>' +
-        '<div class="p-4 md:p-5">' +
-          '<div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-3">' +
-            '<div class="min-w-0 flex-1">' +
-              '<h4 class="font-bold text-2xl text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(cardTitle) + '</h4>' +
-            '</div>' +
-            '<span class="shrink-0 self-start text-lg text-right font-bold text-gray-700 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">' + escAdm(timeLabel) + ': ' + escAdm(topTime) + '</span>' +
-          '</div>' +
-          identityLine + trafContact + studioKeyLine + studioPurposeLine +
-          '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">' +
-            '<div class="text-sm"><span class="text-gray-600 font-semibold">Ekipman Adı:</span><div class="font-semibold text-gray-900 mt-0.5">' + escAdm(firstItemName) + '</div></div>' +
-            '<div class="text-sm"><span class="text-gray-600 font-semibold">Teslim Durumu:</span><div class="mt-0.5"><span class="inline-flex items-center gap-1.5 bg-yellow-100 text-yellow-700 border border-yellow-300 px-2.5 py-1 rounded-full text-[11px] font-bold">⏰ ' + escAdm(deliveryStatusChip) + '</span></div></div>' +
-          '</div>' +
-          trafSched +
-          '<span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + ' mt-2 inline-block">' + flowBadge + '</span>' +
-          '<div class="space-y-2 mt-3 mb-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
-          '<div class="mt-1" id="action-container-' + actId + '">' + buttonsHtml + '</div>' +
+        '<div class="h-3 ' + topBand + '"></div>' +
+        '<div class="p-6 pb-2 flex items-center justify-between gap-3">' +
+          '<h4 class="text-3xl font-bold text-gray-900">' + escAdm(cardTitle) + '</h4>' +
+          '<div class="text-lg font-medium text-gray-700 text-right">' + escAdm(timeLabel) + ': <span>' + escAdm(topTime) + '</span></div>' +
         '</div>' +
+        '<div class="p-6 pt-2 space-y-6">' +
+          '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">' +
+            '<div><p class="text-sm font-medium text-gray-600">Rezervasyon Sahibi ve Kimlik no:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + ownerLine + '</p>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
+            '<div class="md:text-right"><p class="text-sm font-medium text-gray-600 md:inline-block md:mr-3">Teslim Durumu:</p><div class="inline-flex items-center px-4 py-1.5 rounded-full bg-yellow-100 text-yellow-700 text-sm font-bold shadow-sm">⏰ <span class="ml-1">' + escAdm(deliveryStatusChip) + '</span></div></div>' +
+          '</div>' +
+          '<div><p class="text-sm font-medium text-gray-600">Ekipman Adı:</p><p class="text-lg font-semibold text-gray-900">' + escAdm(firstItemName) + '</p></div>' +
+          trafSched +
+          '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
+          '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
+          '<div class="space-y-2">' + pickupStatusHtml + returnStatusHtml + '</div>' +
+        '</div>' +
+        '<div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end space-x-4">' +
+          footerMainBtn + footerActionBtns +
+        '</div>' +
+        (addUi ? ('<div class="p-4 border-t border-gray-100">' + addUi + '</div>') : '') +
       '</div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
