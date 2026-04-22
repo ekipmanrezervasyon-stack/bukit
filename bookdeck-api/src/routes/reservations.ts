@@ -2086,9 +2086,19 @@ const parsePdfDataUrl = (raw: string): { mimeType: string; base64: string } | nu
 };
 
 const formatMailDateTimeTR = (iso: string): string => {
-  const ms = new Date(String(iso || "")).getTime();
-  if (Number.isNaN(ms)) return String(iso || "");
-  return new Date(ms).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+  const raw = String(iso || "").trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  // Keep reservation wall-clock as stored; avoid double timezone shifting in emails.
+  if (m) return `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}`;
+  const ms = new Date(raw).getTime();
+  if (Number.isNaN(ms)) return raw;
+  const d = new Date(ms);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} ${hh}:${mi}`;
 };
 
 const formatPdfFilenameDateToken = (iso: string): string => {
