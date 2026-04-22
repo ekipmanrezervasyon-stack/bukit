@@ -666,7 +666,7 @@
           </div>
           <div>
             <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">İade Saati</label>
-            <input id="admin-ui-dialog-time" type="time" step="60" class="w-full p-3 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613]" />
+            <input id="admin-ui-dialog-time" type="time" step="3600" class="w-full p-3 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613]" />
           </div>
         </div>
       </div>
@@ -867,6 +867,18 @@
       date: String(d.getFullYear()) + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
       time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
     };
+  }
+
+  function normalizeHourTime_(timeRaw) {
+    var m = String(timeRaw || '').trim().match(/^(\d{2}):(\d{2})$/);
+    if (!m) return '';
+    return m[1] + ':00';
+  }
+
+  function normalizeHourDateTimeLocal_(dtRaw) {
+    var m = String(dtRaw || '').trim().match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/);
+    if (!m) return String(dtRaw || '').trim();
+    return m[1] + 'T' + m[2] + ':00:00';
   }
 
   function adminApiRequest(path, opts) {
@@ -2096,12 +2108,14 @@
           trafSched +
           '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
           '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
-          '<div class="space-y-2">' + pickupStatusHtml + returnStatusHtml + '</div>' +
         '</div>' +
-        '<div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end space-x-4">' +
-          footerMainBtn + footerActionBtns +
+        '<div id="action-container-' + actId + '">' +
+          '<div class="p-6 pt-0 space-y-2">' + pickupStatusHtml + returnStatusHtml + '</div>' +
+          '<div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end space-x-4">' +
+            footerMainBtn + footerActionBtns +
+          '</div>' +
+          (addUi ? ('<div class="p-4 border-t border-gray-100">' + addUi + '</div>') : '') +
         '</div>' +
-        (addUi ? ('<div class="p-4 border-t border-gray-100">' + addUi + '</div>') : '') +
       '</div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
@@ -3601,20 +3615,21 @@
     var seed = splitRawIsoDateTime_((row && (row.returnLabel || row.time)) || '');
     openAdminUiDialog({
       title: 'Yeni İade Zamanı',
-      desc: 'Yeni iade tarihini ve saatini seçin.',
+      desc: 'Yeni iade tarihini ve saatini seçin (saat başı).',
       tone: 'warning',
       input: true,
       inputMode: 'datetime_split',
       required: true,
       requiredMessage: 'Yeni iade tarihi ve saati zorunlu.',
       defaultDate: seed.date,
-      defaultTime: seed.time,
+      defaultTime: normalizeHourTime_(seed.time),
       okText: 'Güncelle'
     }, function(nd) {
+      var normalizedDt = normalizeHourDateTimeLocal_(nd);
       Promise.all(targetIds.map(function(oneId) {
         return adminApiRequest('/admin/traffic/extend', {
           method: 'POST',
-          body: { id: String(oneId || '').trim(), new_end_at: String(nd || '').trim() }
+          body: { id: String(oneId || '').trim(), new_end_at: String(normalizedDt || '').trim() }
         });
       })).then(function() {
         showToast('Güncellendi');
