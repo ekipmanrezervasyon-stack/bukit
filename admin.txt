@@ -2845,9 +2845,33 @@
             '<p id="inv-edit-result" class="text-[10px] text-gray-600"></p>' +
           '</div>' +
         '</div>';
-      var availBox = '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200"><p class="text-[10px] font-black text-gray-500 uppercase mb-2">İleri tarihli müsaitlik</p><div class="grid grid-cols-1 gap-2"><input type="datetime-local" id="inv-avail-start" class="w-full text-xs border rounded-lg p-2"><input type="datetime-local" id="inv-avail-end" class="w-full text-xs border rounded-lg p-2"></div><button type="button" onclick="runInvAvailabilityCheck()" class="mt-2 w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Sorgula</button><p id="inv-avail-result" class="text-[10px] mt-2 text-gray-600"></p></div>';
+      var availBox =
+        '<div class="mt-4 p-4 bg-white rounded-2xl border border-gray-200">' +
+          '<p class="text-[10px] font-black text-gray-500 uppercase mb-2">İleri tarihli müsaitlik</p>' +
+          '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">' +
+            '<div>' +
+              '<label class="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Başlangıç Tarihi</label>' +
+              '<input type="date" id="inv-avail-start-date" class="w-full text-xs border border-gray-200 rounded-lg p-2.5 bg-white font-bold outline-none focus:border-[#e30613]">' +
+            '</div>' +
+            '<div>' +
+              '<label class="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Başlangıç Saati</label>' +
+              '<select id="inv-avail-start-time" class="w-full text-xs border border-gray-200 rounded-lg p-2.5 bg-white font-bold outline-none focus:border-[#e30613]"></select>' +
+            '</div>' +
+            '<div>' +
+              '<label class="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Bitiş Tarihi</label>' +
+              '<input type="date" id="inv-avail-end-date" class="w-full text-xs border border-gray-200 rounded-lg p-2.5 bg-white font-bold outline-none focus:border-[#e30613]">' +
+            '</div>' +
+            '<div>' +
+              '<label class="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Bitiş Saati</label>' +
+              '<select id="inv-avail-end-time" class="w-full text-xs border border-gray-200 rounded-lg p-2.5 bg-white font-bold outline-none focus:border-[#e30613]"></select>' +
+            '</div>' +
+          '</div>' +
+          '<button type="button" onclick="runInvAvailabilityCheck()" class="mt-2 w-full bg-gray-900 text-white text-[10px] font-black py-2 rounded-lg">Sorgula</button>' +
+          '<p id="inv-avail-result" class="text-[10px] mt-2 text-gray-600"></p>' +
+        '</div>';
       var canEdit = !!token;
       panel.innerHTML = '<div class="space-y-4"><img src="' + (data.photo || 'https://via.placeholder.com/400x250') + '" class="w-full h-40 object-contain bg-white rounded-2xl shadow-sm border border-gray-100 p-1"><div><p class="text-[10px] font-black text-gray-400 uppercase">' + escAdm(data.type || '') + ' · ' + escAdm(data.equipmentCode || data.id) + '</p><h2 class="text-lg font-black">' + escAdm(data.name) + '</h2></div>' + locLine + respLine + condLine + levelLine + statEn + '<div class="p-4 rounded-2xl border ' + statusBoxClass + '"><p class="text-[9px] font-black uppercase mb-1">Durum</p><p class="text-base font-black uppercase">' + statusLabelTr + '</p>' + currentUserHtml + prevHtml + '</div><div><h3 class="font-black text-[10px] uppercase text-gray-400 mb-2">Son hareketler</h3><div class="bg-white rounded-xl border border-gray-100 p-3 max-h-40 overflow-y-auto">' + historyHtml + '</div></div>' + (canEdit ? (editBox + availBox) : '<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Düzenleme ve ileri tarih kontrolü için admin oturumu gerekli.</p>') + '</div>';
+      if (canEdit) fillInvAvailabilityTimeDropdowns();
     }).catch(function(e) {
       panel.innerHTML = '<div class="mt-20 text-center text-red-600 text-sm font-medium">' + escAdm((e && e.message) || 'Detay yüklenemedi.') + '</div>';
     });
@@ -2894,20 +2918,50 @@
     });
   }
 
+  function fillInvAvailabilityTimeDropdowns() {
+    var sDate = document.getElementById('inv-avail-start-date');
+    var eDate = document.getElementById('inv-avail-end-date');
+    var sTime = document.getElementById('inv-avail-start-time');
+    var eTime = document.getElementById('inv-avail-end-time');
+    if (!sDate || !eDate || !sTime || !eTime) return;
+    sTime.innerHTML = '';
+    eTime.innerHTML = '';
+    for (var i = 9; i <= 22; i++) {
+      var h = (i < 10 ? '0' + i : String(i));
+      var opt = '<option value="' + h + ':00">' + h + ':00</option>';
+      sTime.innerHTML += opt;
+      eTime.innerHTML += opt;
+    }
+    var today = new Date();
+    var y = today.getFullYear();
+    var m = String(today.getMonth() + 1).padStart(2, '0');
+    var d = String(today.getDate()).padStart(2, '0');
+    var isoDay = y + '-' + m + '-' + d;
+    sDate.value = isoDay;
+    eDate.value = isoDay;
+    sTime.value = '09:00';
+    eTime.value = '11:00';
+  }
+
   function runInvAvailabilityCheck() {
     var id = lastInvDetailId;
-    var s = document.getElementById('inv-avail-start');
-    var e = document.getElementById('inv-avail-end');
+    var sDate = document.getElementById('inv-avail-start-date');
+    var eDate = document.getElementById('inv-avail-end-date');
+    var sTime = document.getElementById('inv-avail-start-time');
+    var eTime = document.getElementById('inv-avail-end-time');
     var out = document.getElementById('inv-avail-result');
-    if (!id || !s || !e || !out) return;
-    if (!s.value || !e.value) { out.textContent = 'Başlangıç ve bitiş seçin.'; out.className = 'text-[10px] mt-2 text-red-600'; return; }
+    if (!id || !sDate || !eDate || !sTime || !eTime || !out) return;
+    if (!sDate.value || !eDate.value || !sTime.value || !eTime.value) { out.textContent = 'Başlangıç ve bitiş seçin.'; out.className = 'text-[10px] mt-2 text-red-600'; return; }
+    var sVal = sDate.value + 'T' + sTime.value;
+    var eVal = eDate.value + 'T' + eTime.value;
+    if (new Date(eVal).getTime() <= new Date(sVal).getTime()) { out.textContent = 'Bitiş, başlangıçtan sonra olmalı.'; out.className = 'text-[10px] mt-2 text-red-600'; return; }
     if (!ensureAdminToken_()) { out.textContent = 'Oturum jetonu gerekli.'; return; }
     out.textContent = 'Kontrol…';
     google.script.run.withSuccessHandler(function(r) {
       if (r.error) { out.textContent = r.error; out.className = 'text-[10px] mt-2 text-red-600'; return; }
       out.textContent = r.available ? 'Seçilen aralıkta çakışma görünmüyor (müsait).' : ('Çakışma: ' + JSON.stringify(r.conflict || {}));
       out.className = 'text-[10px] mt-2 ' + (r.available ? 'text-green-700' : 'text-amber-800');
-    }).adminCheckItemAvailabilityBridge(id, s.value, e.value, currentAuthToken);
+    }).adminCheckItemAvailabilityBridge(id, sVal, eVal, currentAuthToken);
   }
 
   // ═══ HIZLI ÇIKIŞ ═══
