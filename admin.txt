@@ -2033,9 +2033,9 @@
           '</div>';
       }
       var buttonsHtml = '<div class="space-y-1">' + pickupStatusHtml + returnStatusHtml + mainBtn + extraBtns + addUi + '</div>';
-      var trafContact = '<p class="text-[9px] text-gray-500 mt-0.5">' + escAdm(item.email || '') + '</p>';
-      if (item.phone) trafContact += '<p class="text-[9px] text-gray-600">📞 ' + escAdm(item.phone) + '</p>';
-      if (item.studentId) trafContact += '<p class="text-[9px] text-gray-500">🎓 ' + escAdm(item.studentId) + '</p>';
+      var trafContact = '<p class="text-[9px] text-gray-500 mt-0.5 [overflow-wrap:anywhere] break-words">' + escAdm(item.email || '') + '</p>';
+      if (item.phone) trafContact += '<p class="text-[9px] text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
+      if (item.studentId) trafContact += '<p class="text-[9px] text-gray-500 [overflow-wrap:anywhere] break-words">🎓 ' + escAdm(item.studentId) + '</p>';
       var studioKeyLine = '';
       var studioPurposeLine = '';
       if (tKind === 'studio') {
@@ -2057,14 +2057,14 @@
         var stFlow = isPickup ? 'Anahtar Teslimi' : 'Anahtar İadesi';
         studioKeyLine = '<p class="text-[10px] font-black text-indigo-700 mt-1.5">🎬 ' + escAdm(stName) + (stKeyId ? ' · 🔑 ' + escAdm(stKeyId) : '') + ' · ' + stFlow + '</p>';
         if (String(item.purpose || '').trim()) {
-          studioPurposeLine = '<p class="text-[10px] font-bold text-gray-700 mt-1">📝 Proje: ' + escAdm(String(item.purpose || '').trim()) + '</p>';
+          studioPurposeLine = '<p class="text-[10px] font-bold text-gray-700 mt-1 [overflow-wrap:anywhere] break-words">📝 Proje: ' + escAdm(String(item.purpose || '').trim()) + '</p>';
         }
       }
       var handFmt = formatAdminCardDtTr_(item.handoverLabel || '');
       var retFmt = formatAdminCardDtTr_(item.returnLabel || '');
       var trafSched = (item.handoverLabel || item.returnLabel) ? '<p class="text-[11px] md:text-sm text-gray-600 mt-1"><span class="font-black">Teslim:</span> ' + escAdm(handFmt || '—') + ' <span class="font-black">· İade:</span> ' + escAdm(retFmt || '—') + '</p>' : '';
       var topTime = String(item.time || '').trim() || (isPickup ? handFmt : retFmt) || '—';
-      container.innerHTML += '<div class="bg-gray-50 p-6 rounded-3xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-4"><div><h4 class="font-bold text-sm text-gray-900">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="text-base md:text-lg font-black text-gray-700 bg-white px-3 py-1.5 rounded-md border border-gray-200">' + escAdm(topTime) + '</span></div><div class="space-y-2 mb-5" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-2" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
+      container.innerHTML += '<div class="bg-gray-50 p-6 rounded-3xl border-l-8 ' + color + ' shadow-sm border border-gray-200"><div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-4"><div class="min-w-0 flex-1"><h4 class="font-bold text-sm text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(item.userName) + '</h4>' + trafContact + studioKeyLine + studioPurposeLine + trafSched + '<span class="text-[9px] font-bold uppercase px-2 py-0.5 rounded ' + badgeColor + ' mt-1 inline-block">' + flowBadge + '</span></div><span class="shrink-0 self-start text-base md:text-lg font-black text-gray-700 bg-white px-3 py-1.5 rounded-md border border-gray-200">' + escAdm(topTime) + '</span></div><div class="space-y-2 mb-5" id="traffic-items-' + actId + '">' + itemsHtml + '</div><div class="mt-2" id="action-container-' + actId + '">' + buttonsHtml + '</div></div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
   }
