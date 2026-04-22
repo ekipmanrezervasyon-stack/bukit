@@ -2113,27 +2113,30 @@
       var topBand = isPickup ? 'bg-red-600' : 'bg-green-600';
       container.innerHTML += '<div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">' +
         '<div class="h-3 ' + topBand + '"></div>' +
-        '<div class="p-6 pb-2">' +
-          '<h4 class="text-3xl font-bold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis">' + escAdm(cardTitle) + '</h4>' +
-        '</div>' +
-        '<div class="p-6 pt-2 space-y-6">' +
-          '<div>' +
-            '<p class="text-sm font-medium text-gray-600">Rezervasyon Sahibi ve Kimlik no:</p>' +
-            '<p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + ownerLine + '</p>' +
-            trafContact + studioKeyLine + studioPurposeLine +
+        '<details class="group">' +
+          '<summary class="list-none cursor-pointer p-6 pb-4 flex items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">' +
+            '<div class="min-w-0">' +
+              '<h4 class="text-2xl font-bold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis">' + escAdm(cardTitle) + '</h4>' +
+              '<p class="text-sm font-medium text-gray-600 mt-2">Rezervasyon Sahibi ve Kimlik no:</p>' +
+              '<p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + ownerLine + '</p>' +
+            '</div>' +
+            '<span class="mt-1 text-gray-400 text-lg transition-transform group-open:rotate-180">⌄</span>' +
+          '</summary>' +
+          '<div class="px-6 pb-6 pt-0 space-y-6">' +
+            '<div>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
+            '<div><p class="text-sm font-medium text-gray-600">Ekipman Adı:</p><p class="text-lg font-semibold text-gray-900">' + escAdm(firstItemName) + '</p></div>' +
+            trafSched +
+            '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
+            '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
           '</div>' +
-          '<div><p class="text-sm font-medium text-gray-600">Ekipman Adı:</p><p class="text-lg font-semibold text-gray-900">' + escAdm(firstItemName) + '</p></div>' +
-          trafSched +
-          '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
-          '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
-        '</div>' +
-        '<div id="action-container-' + actId + '">' +
-          '<div class="p-6 pt-0 space-y-2">' + pickupStatusHtml + returnStatusHtml + '</div>' +
-          '<div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end space-x-4">' +
-            footerMainBtn + footerActionBtns +
+          '<div id="action-container-' + actId + '">' +
+            '<div class="px-6 pb-4 pt-0 space-y-2">' + pickupStatusHtml + returnStatusHtml + '</div>' +
+            '<div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end space-x-4">' +
+              footerMainBtn + footerActionBtns +
+            '</div>' +
+            (addUi ? ('<div class="p-4 border-t border-gray-100">' + addUi + '</div>') : '') +
           '</div>' +
-          (addUi ? ('<div class="p-4 border-t border-gray-100">' + addUi + '</div>') : '') +
-        '</div>' +
+        '</details>' +
       '</div>';
       if (isPickup) trafficRenderExtraPicked_(String(item.id || ''));
     });
