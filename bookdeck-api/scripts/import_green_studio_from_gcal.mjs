@@ -80,10 +80,18 @@ const truncate = (s, n) => {
 };
 
 const purposeFromEvent = (ev) => {
-  const summary = compactWhitespace(ev.summary || 'GREEN STUDIO BLOCK');
-  const desc = compactWhitespace(ev.description || '');
+  const summaryRaw = compactWhitespace(ev.summary || '');
+  const descRaw = compactWhitespace(ev.description || '');
+  const summaryIsGeneric =
+    !summaryRaw ||
+    /^green studio block$/i.test(summaryRaw) ||
+    /^busy$/i.test(summaryRaw);
+  const title = summaryIsGeneric ? (descRaw || 'GREEN STUDIO BLOCK') : summaryRaw;
+  const desc = (!summaryIsGeneric && descRaw && descRaw.toLowerCase() !== summaryRaw.toLowerCase())
+    ? ` — ${truncate(descRaw, 70)}`
+    : '';
   const marker = ` [gcal:${normalize(ev.id).slice(0, 24)}]`;
-  const base = desc ? `${summary} — ${truncate(desc, 70)}` : summary;
+  const base = `${title}${desc}`;
   return truncate(base, Math.max(16, 120 - marker.length)) + marker;
 };
 

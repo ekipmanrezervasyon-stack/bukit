@@ -4246,6 +4246,7 @@
       var cells = {};
       var slotDetails = {};
       var cellAdminCaption = {};
+      var captionPlacedByEventDay = {};
       function studioSlotTitleFromRow_(row) {
         var purposeRaw = String((row && row.purpose) || '').trim();
         var purpose = purposeRaw.replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
@@ -4279,8 +4280,10 @@
               cells[key] = 'busy';
               if (!slotDetails[key]) slotDetails[key] = [];
               slotDetails[key].push(r);
-              if (!cellAdminCaption[key]) {
+              var eventDayKey = String((r && r.id) || '') + '|' + d.iso;
+              if (!captionPlacedByEventDay[eventDayKey] && !cellAdminCaption[key]) {
                 cellAdminCaption[key] = studioSlotTitleFromRow_(r);
+                captionPlacedByEventDay[eventDayKey] = true;
               }
             }
           });
@@ -4400,7 +4403,21 @@
             detailTitle = st === 'closed' ? 'Kapalı' : 'Sınır slotu';
           }
           var cap = String(cellAdminCaption[k] || '').trim();
-          var inner = (st === 'busy' && cap) ? ('<span class="block leading-tight text-[10px] md:text-[11px] font-bold text-rose-950/95 px-0.5 line-clamp-3 text-left [overflow-wrap:anywhere]">' + escAdm(cap) + '</span>') : '';
+          if (!cap && st === 'busy' && details.length) {
+            var firstPurpose = String((details[0] && details[0].purpose) || '').trim().replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
+            cap = firstPurpose || '';
+          }
+          var prevKey = d.iso + '|' + (s.mins - 30);
+          var prevState = String(cells[prevKey] || '');
+          var prevCap = String(cellAdminCaption[prevKey] || '').trim();
+          if (!prevCap && prevState === 'busy') {
+            var prevDetails = Array.isArray(slotDetails[prevKey]) ? slotDetails[prevKey] : [];
+            if (prevDetails.length) {
+              prevCap = String((prevDetails[0] && prevDetails[0].purpose) || '').trim().replace(/\s*\[gcal:[^\]]+\]\s*$/i, '').trim();
+            }
+          }
+          var showCaption = (st === 'busy' && cap) && !(prevState === 'busy' && prevCap && prevCap === cap);
+          var inner = showCaption ? ('<span class="block leading-tight text-[10px] md:text-[11px] font-bold text-rose-950/95 px-0.5 line-clamp-3 text-left [overflow-wrap:anywhere]">' + escAdm(cap) + '</span>') : '';
           return '<td class="p-0.5 border-b border-gray-100"><button type="button"' + data + busyKey + ' class="admin-studio-slot w-full min-h-[1.8rem] md:min-h-[2rem] py-0.5 rounded-sm flex items-center justify-center ' + cls + '" title="' + escAttr(detailTitle) + '">' + inner + '</button></td>';
         }).join('');
         return '<tr><td class="pr-1 py-0.5 text-[8px] text-gray-500 font-mono">' + escAdm(s.label) + '</td>' + line + '</tr>';
