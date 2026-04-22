@@ -653,6 +653,29 @@ const parseIsoDate = (v: string): string => {
   return new Date(t).toISOString().slice(0, 10);
 };
 
+const TZ_SUFFIX_RE = /(Z|[+\-]\d{2}:\d{2})$/i;
+const LOCAL_DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/;
+const normalizeIsoDateTimeInput = (v: string): string => {
+  const raw = String(v || "").trim();
+  if (!raw) return "";
+  if (TZ_SUFFIX_RE.test(raw)) {
+    const t = new Date(raw).getTime();
+    return Number.isNaN(t) ? "" : new Date(t).toISOString();
+  }
+  const m = raw.match(LOCAL_DATETIME_RE);
+  if (m) {
+    const day = String(m[1] || "");
+    const hh = String(m[2] || "00").padStart(2, "0");
+    const mm = String(m[3] || "00").padStart(2, "0");
+    const ss = String(m[4] || "00").padStart(2, "0");
+    const withOffset = `${day}T${hh}:${mm}:${ss}+03:00`;
+    const t = new Date(withOffset).getTime();
+    return Number.isNaN(t) ? "" : new Date(t).toISOString();
+  }
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? "" : new Date(t).toISOString();
+};
+
 const escapeHtml = (v: string): string =>
   String(v || "")
     .replace(/&/g, "&amp;")
@@ -3045,10 +3068,13 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { studio_id, start_at, end_at, purpose } = parsed.data;
-    const s = new Date(start_at).getTime();
-    const e = new Date(end_at).getTime();
+    const startAt = normalizeIsoDateTimeInput(start_at);
+    const endAt = normalizeIsoDateTimeInput(end_at);
+    if (!startAt || !endAt) return reply.code(400).send({ ok: false, error: "Invalid datetime." });
+    const s = new Date(startAt).getTime();
+    const e = new Date(endAt).getTime();
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
-    if (hasPublicHolidayInRange(start_at, end_at)) {
+    if (hasPublicHolidayInRange(startAt, endAt)) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
     }
 
@@ -3069,8 +3095,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id")
       .eq("studio_id", studio_id)
       .in("status", STUDIO_ACTIVE_RES_STATUSES)
-      .lt("start_at", end_at)
-      .gt("end_at", start_at)
+      .lt("start_at", endAt)
+      .gt("end_at", startAt)
       .limit(1);
     if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
     if ((overlap.data ?? []).length > 0) {
@@ -3085,8 +3111,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       access_level: String(studio.access_level || "A"),
       status: isAdminRole(profile.role) ? STUDIO_APPROVED_STATUS : STUDIO_PENDING_STATUS,
       approval_required: !isAdminRole(profile.role),
-      start_at,
-      end_at,
+      start_at: startAt,
+      end_at: endAt,
       purpose
     };
 
@@ -3120,8 +3146,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           reservationId: String(createdStudio.id || ""),
           requesterName: String(createdStudio.requester_name || profile.full_name || ""),
           itemLabel: String((studio as Record<string, unknown>).name || studio_id),
-          startAt: String(createdStudio.start_at || start_at),
-          endAt: String(createdStudio.end_at || end_at),
+          startAt: String(createdStudio.start_at || startAt),
+          endAt: String(createdStudio.end_at || endAt),
           adminNote: String(purpose || "").trim()
         });
       } catch (e) {
@@ -3458,12 +3484,15 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const parsed = adminStudioUpdateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const { id, start_dt, end_dt, purpose } = parsed.data;
-    const startMs = new Date(start_dt).getTime();
-    const endMs = new Date(end_dt).getTime();
+    const startDt = normalizeIsoDateTimeInput(start_dt);
+    const endDt = normalizeIsoDateTimeInput(end_dt);
+    if (!startDt || !endDt) return reply.code(400).send({ ok: false, error: "Invalid datetime." });
+    const startMs = new Date(startDt).getTime();
+    const endMs = new Date(endDt).getTime();
     if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
       return reply.code(400).send({ ok: false, error: "Invalid date range." });
     }
-    if (hasPublicHolidayInRange(start_dt, end_dt)) {
+    if (hasPublicHolidayInRange(startDt, endDt)) {
       return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
     }
 
@@ -3484,8 +3513,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .select("id")
       .eq("studio_id", studioId)
       .in("status", STUDIO_ACTIVE_RES_STATUSES)
-      .lt("start_at", end_dt)
-      .gt("end_at", start_dt)
+      .lt("start_at", endDt)
+      .gt("end_at", startDt)
       .neq("id", id)
       .limit(1);
     if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
@@ -3496,8 +3525,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const upd = await supabaseAdmin
       .from("studio_reservations")
       .update({
-        start_at: start_dt,
-        end_at: end_dt,
+        start_at: startDt,
+        end_at: endDt,
         purpose: String(purpose || "").trim()
       })
       .eq("id", id)
@@ -3511,8 +3540,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         const sync = await upsertApprovedGreenStudioToGoogleCalendar({
           reservationId: String(updated.id || id),
           studioId: String(updated.studio_id || studioId),
-          startAt: String(updated.start_at || start_dt),
-          endAt: String(updated.end_at || end_dt),
+          startAt: String(updated.start_at || startDt),
+          endAt: String(updated.end_at || endDt),
           requesterName: String(updated.requester_name || ""),
           requesterEmail: String(updated.requester_email || ""),
           purpose: String(updated.purpose || purpose || "")
