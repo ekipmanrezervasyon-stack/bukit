@@ -3784,9 +3784,14 @@
     adminApiRequest('/admin/studio-locks', {
       method: 'POST',
       body: { studio_id: studioId, reason: reason, start_date: startDate, end_date: endDate }
-    }).then(function() {
+    }).then(function(res) {
       if (btn) { btn.disabled = false; btn.innerText = old || 'STÜDYOYU KİLİTLE'; }
-      showToast('Stüdyo takvimi kilitlendi.', 'success');
+      var sync = res && res.calendar_sync ? res.calendar_sync : null;
+      if (sync && sync.ok === false) {
+        showToast('Kilit kaydedildi; Google Takvim senkronu atlandı (' + String(sync.skipped || 'unknown') + ').', 'info');
+      } else {
+        showToast('Stüdyo takvimi kilitlendi.', 'success');
+      }
       if (String(activeAdminStudioId || '') !== String(studioId || '')) {
         var st = adminStudiosById[String(studioId || '').trim()] || null;
         selectAdminStudio(studioId, String((st && st.name) || studioId));

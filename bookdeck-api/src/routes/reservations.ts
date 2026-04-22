@@ -3617,8 +3617,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (ins.error) return reply.code(500).send({ ok: false, error: ins.error.message });
     const created = ins.data as Record<string, unknown>;
+    let calendarSync: { ok: boolean; skipped?: string; eventId?: string } = { ok: false, skipped: "not_attempted" };
     try {
-      await upsertApprovedGreenStudioToGoogleCalendar({
+      calendarSync = await upsertApprovedGreenStudioToGoogleCalendar({
         reservationId: String(created.id || ""),
         studioId: String(created.studio_id || ""),
         startAt: String(created.start_at || startAt),
@@ -3627,10 +3628,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         requesterEmail: String(created.requester_email || ""),
         purpose: String(created.purpose || p.reason || "")
       });
+      if (!calendarSync.ok) {
+        req.log.warn(
+          { reservationId: String(created.id || ""), studioId: String(created.studio_id || ""), skipped: String(calendarSync.skipped || "") },
+          "studio maintenance lock calendar sync skipped"
+        );
+      }
     } catch (e) {
       req.log.error({ err: e, reservationId: String(created.id || "") }, "sync studio maintenance lock to Google Calendar failed");
     }
-    return { ok: true, success: true, data: created };
+    return { ok: true, success: true, data: created, calendar_sync: calendarSync };
   });
 
   app.post("/admin/studio-locks/unlock", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
