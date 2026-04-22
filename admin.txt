@@ -2029,18 +2029,11 @@
           '<div class="flex-1 font-medium text-gray-800">' + escAdm(rowName) + (rowCode ? (' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(rowCode) + ')</span>') : '') + '</div>' +
           '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + returnBlock + '</div>';
       }).join('');
-      var mainBtn = isPickup
-        ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="w-full bg-gray-900 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-black transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR TESLİM ET & STÜDYO FORMU ÜRET' : '📦 ÇIKIŞ YAP & PDF ÜRET') + '</button>'
-        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="w-full bg-green-600 text-white text-[10px] font-bold py-3 rounded-xl hover:bg-green-700 transition shadow-sm">' + (tKind === 'studio' ? '🗝️ ANAHTAR İADE AL (PDF yok)' : '📥 İADE AL (PDF yok)') + '</button>';
-      var extraBtns = isPickup
-        ? '<div class="grid grid-cols-2 gap-2 mt-2">' +
-          '<button type="button" onclick="adminTrafficCancelAct(\'' + ridJs + '\')" class="bg-white border border-red-100 text-red-700 text-[9px] font-black py-2 rounded-lg hover:bg-red-50">İptal</button>' +
-          '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">Devret</button>' +
-          '</div>'
-        : '<div class="grid grid-cols-2 gap-2 mt-2">' +
-          '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">İadeyi uzat</button>' +
-          '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="bg-white border border-gray-200 text-gray-800 text-[9px] font-black py-2 rounded-lg hover:bg-gray-50">Devret</button>' +
-          '</div>';
+      var footerMainBtn = isPickup
+        ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="min-w-[126px] bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-blue-700 transition shadow-sm">📄 PDF Form</button>'
+        : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="min-w-[126px] bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-blue-700 transition shadow-sm">📥 İade Al</button>';
+      var footerActionBtns = '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="min-w-[126px] bg-gray-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-gray-600 transition shadow-sm">⇄ Devret</button>' +
+        '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="min-w-[126px] bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-green-700 transition shadow-sm">↻ Uzat</button>';
       var addUi = '';
       if (isPickup) {
         addUi = '<div class="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-2.5">' +
@@ -2049,9 +2042,8 @@
           '<div id="traffic-extra-search-' + actId + '" class="mt-2 space-y-1"></div>' +
           '</div>';
       }
-      var buttonsHtml = '<div class="space-y-1">' + pickupStatusHtml + returnStatusHtml + mainBtn + extraBtns + addUi + '</div>';
-      var trafContact = '<p class="text-[9px] text-gray-500 mt-0.5 [overflow-wrap:anywhere] break-words">' + escAdm(item.email || '') + '</p>';
-      if (item.phone) trafContact += '<p class="text-[9px] text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
+      var trafContact = '<p class="text-[11px] text-gray-500 mt-1 [overflow-wrap:anywhere] break-words">' + escAdm(item.email || '') + '</p>';
+      if (item.phone) trafContact += '<p class="text-[11px] text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
       var studioKeyLine = '';
       var studioPurposeLine = '';
       if (tKind === 'studio') {
@@ -2085,22 +2077,33 @@
       })();
       var timeLabel = isPickup ? 'Teslim Saati' : 'İade Saati';
       var identityLine = '<p class="text-[12px] md:text-sm text-gray-700 mt-1.5 [overflow-wrap:anywhere] break-words">Rezervasyon Sahibi ve Kimlik no: ' + escAdm(item.userName || '—') + ' - ' + escAdm(item.studentId || '—') + '</p>';
-      var trafSched = (item.handoverLabel || item.returnLabel)
-        ? '<p class="text-[12px] md:text-sm text-gray-700 mt-2"><span class="font-black">Teslim Tarihi:</span> ' + escAdm(handFmt || '—') + '<span class="ml-4 font-black">İade Tarihi:</span> ' + escAdm(retFmt || '—') + '</p>'
-        : '';
+      var firstItemName = (item.items || []).map(function(i) { return String(i && i.name || '').trim(); }).filter(Boolean)[0] || (tKind === 'studio' ? 'Stüdyo Anahtarı' : 'Ekipman');
+      var deliveryStatusChip = isPickup ? 'TESLİMAT BEKLENİYOR' : 'İADE BEKLENİYOR';
+      var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">' +
+        '<div class="text-gray-700"><span class="font-bold">Teslim Tarihi:</span> <span class="ml-1">📅 ' + escAdm(handFmt || '—') + '</span></div>' +
+        '<div class="text-gray-700"><span class="font-bold">İade Tarihi:</span> <span class="ml-1">📅 ' + escAdm(retFmt || '—') + '</span></div>' +
+      '</div>';
       var topBand = isPickup ? 'bg-red-600' : 'bg-green-600';
+      var buttonsHtml = '<div class="space-y-2 mt-3">' + pickupStatusHtml + returnStatusHtml +
+        '<div class="flex flex-wrap justify-end gap-2">' + footerMainBtn + footerActionBtns + '</div>' +
+      '</div>' + addUi;
       container.innerHTML += '<div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">' +
         '<div class="h-2 ' + topBand + '"></div>' +
         '<div class="p-4 md:p-5">' +
-          '<div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-2">' +
+          '<div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3 mb-3">' +
             '<div class="min-w-0 flex-1">' +
-              '<h4 class="font-black text-xl text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(cardTitle) + '</h4>' +
-              identityLine + trafContact + studioKeyLine + studioPurposeLine + trafSched +
-              '<span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + ' mt-2 inline-block">' + flowBadge + '</span>' +
+              '<h4 class="font-bold text-2xl text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(cardTitle) + '</h4>' +
             '</div>' +
-            '<span class="shrink-0 self-start text-lg md:text-2xl font-black text-gray-700 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">' + escAdm(timeLabel) + ': ' + escAdm(topTime) + '</span>' +
+            '<span class="shrink-0 self-start text-lg text-right font-bold text-gray-700 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">' + escAdm(timeLabel) + ': ' + escAdm(topTime) + '</span>' +
           '</div>' +
-          '<div class="space-y-2 mb-3" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
+          identityLine + trafContact + studioKeyLine + studioPurposeLine +
+          '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">' +
+            '<div class="text-sm"><span class="text-gray-600 font-semibold">Ekipman Adı:</span><div class="font-semibold text-gray-900 mt-0.5">' + escAdm(firstItemName) + '</div></div>' +
+            '<div class="text-sm"><span class="text-gray-600 font-semibold">Teslim Durumu:</span><div class="mt-0.5"><span class="inline-flex items-center gap-1.5 bg-yellow-100 text-yellow-700 border border-yellow-300 px-2.5 py-1 rounded-full text-[11px] font-bold">⏰ ' + escAdm(deliveryStatusChip) + '</span></div></div>' +
+          '</div>' +
+          trafSched +
+          '<span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + ' mt-2 inline-block">' + flowBadge + '</span>' +
+          '<div class="space-y-2 mt-3 mb-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
           '<div class="mt-1" id="action-container-' + actId + '">' + buttonsHtml + '</div>' +
         '</div>' +
       '</div>';
