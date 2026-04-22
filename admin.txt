@@ -352,9 +352,11 @@
             <input type="text" id="traffic-search-q" oninput="renderTrafficFromCache()" class="w-full max-w-xl bg-white border border-gray-200 px-4 py-2.5 rounded-xl text-sm outline-none focus:border-[#e30613]" placeholder="Ara (genel): ad-soyad veya öğrenci no…" autocomplete="off">
           </div>
           <div class="mb-5">
-            <div class="inline-flex w-full sm:w-auto items-center gap-2 rounded-2xl border border-gray-200 bg-white p-1">
-              <button type="button" id="traffic-tab-pickup" onclick="setTrafficViewTab('pickup')" class="px-4 py-2 rounded-xl text-xs font-black transition">Depodan Çıkış <span id="traffic-tab-pickup-count" class="ml-1">0</span></button>
-              <button type="button" id="traffic-tab-return" onclick="setTrafficViewTab('return')" class="px-4 py-2 rounded-xl text-xs font-black transition">Depoya İade <span id="traffic-tab-return-count" class="ml-1">0</span></button>
+            <div class="inline-flex w-full flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-1">
+              <button type="button" id="traffic-tab-pickup-equipment" onclick="setTrafficViewTab('pickup_equipment')" class="px-4 py-2 rounded-xl text-xs font-black transition">DEPODAN EKİPMAN TESLİM <span id="traffic-tab-pickup-equipment-count" class="ml-1">0</span></button>
+              <button type="button" id="traffic-tab-pickup-key" onclick="setTrafficViewTab('pickup_key')" class="px-4 py-2 rounded-xl text-xs font-black transition">DEPODAN ANAHTAR TESLİM <span id="traffic-tab-pickup-key-count" class="ml-1">0</span></button>
+              <button type="button" id="traffic-tab-return-equipment" onclick="setTrafficViewTab('return_equipment')" class="px-4 py-2 rounded-xl text-xs font-black transition">DEPOYA EKİPMAN İADE <span id="traffic-tab-return-equipment-count" class="ml-1">0</span></button>
+              <button type="button" id="traffic-tab-return-key" onclick="setTrafficViewTab('return_key')" class="px-4 py-2 rounded-xl text-xs font-black transition">DEPOYA ANAHTAR İADE <span id="traffic-tab-return-key-count" class="ml-1">0</span></button>
             </div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="traffic-container"></div>
@@ -722,7 +724,7 @@
   var trafficSearchMode = 'daily'; // daily | global
   var trafficGlobalQuery = '';
   var trafficSearchTimer = null;
-  var trafficViewTab = 'pickup'; // pickup | return
+  var trafficViewTab = 'pickup_equipment'; // pickup_equipment | pickup_key | return_equipment | return_key
   var userLookupDebounceTimer = null;
   var adminIsIiwOnly = false;
   var adminIsSuper = false;
@@ -1869,36 +1871,46 @@
     return m;
   }
 
-  function trafficCountByType_(type) {
+  function trafficTabMatches_(item, tab) {
+    var t = String(item && item.type || '').toLowerCase();
+    var kindRaw = String(item && (item.kind || item.trafficKind) || '').trim().toLowerCase();
+    var isKey = (kindRaw === 'studio' || kindRaw === 'studio_key');
+    if (tab === 'pickup_equipment') return t === 'pickup' && !isKey;
+    if (tab === 'pickup_key') return t === 'pickup' && isKey;
+    if (tab === 'return_equipment') return t === 'return' && !isKey;
+    if (tab === 'return_key') return t === 'return' && isKey;
+    return false;
+  }
+
+  function trafficCountByTab_(tab) {
     return (trafficAllRows || []).filter(function(x) {
-      return String(x && x.type || '').toLowerCase() === String(type || '').toLowerCase();
+      return trafficTabMatches_(x, tab);
     }).length;
   }
 
   function trafficRefreshTabUi_() {
-    var pickupBtn = document.getElementById('traffic-tab-pickup');
-    var returnBtn = document.getElementById('traffic-tab-return');
-    var pickupCountEl = document.getElementById('traffic-tab-pickup-count');
-    var returnCountEl = document.getElementById('traffic-tab-return-count');
-    var pickupCount = trafficCountByType_('pickup');
-    var returnCount = trafficCountByType_('return');
-    if (pickupCountEl) pickupCountEl.textContent = String(pickupCount);
-    if (returnCountEl) returnCountEl.textContent = String(returnCount);
+    var config = [
+      { tab: 'pickup_equipment', btnId: 'traffic-tab-pickup-equipment', countId: 'traffic-tab-pickup-equipment-count', active: 'bg-red-600 text-white shadow-sm', idle: 'bg-white text-red-700 hover:bg-red-50 border border-red-200' },
+      { tab: 'pickup_key', btnId: 'traffic-tab-pickup-key', countId: 'traffic-tab-pickup-key-count', active: 'bg-red-600 text-white shadow-sm', idle: 'bg-white text-red-700 hover:bg-red-50 border border-red-200' },
+      { tab: 'return_equipment', btnId: 'traffic-tab-return-equipment', countId: 'traffic-tab-return-equipment-count', active: 'bg-green-600 text-white shadow-sm', idle: 'bg-white text-green-700 hover:bg-green-50 border border-green-200' },
+      { tab: 'return_key', btnId: 'traffic-tab-return-key', countId: 'traffic-tab-return-key-count', active: 'bg-green-600 text-white shadow-sm', idle: 'bg-white text-green-700 hover:bg-green-50 border border-green-200' }
+    ];
     var baseBtn = 'px-4 py-2 rounded-xl text-xs font-black transition';
-    if (pickupBtn) {
-      pickupBtn.className = baseBtn + (trafficViewTab === 'pickup'
-        ? ' bg-gray-900 text-white shadow-sm'
-        : ' bg-white text-gray-600 hover:bg-gray-50');
-    }
-    if (returnBtn) {
-      returnBtn.className = baseBtn + (trafficViewTab === 'return'
-        ? ' bg-gray-900 text-white shadow-sm'
-        : ' bg-white text-gray-600 hover:bg-gray-50');
-    }
+    config.forEach(function(cfg) {
+      var btn = document.getElementById(cfg.btnId);
+      var countEl = document.getElementById(cfg.countId);
+      var count = trafficCountByTab_(cfg.tab);
+      if (countEl) countEl.textContent = String(count);
+      if (btn) {
+        btn.className = baseBtn + ' ' + (trafficViewTab === cfg.tab ? cfg.active : cfg.idle);
+      }
+    });
   }
 
   function setTrafficViewTab(tab) {
-    trafficViewTab = String(tab || '').toLowerCase() === 'return' ? 'return' : 'pickup';
+    var next = String(tab || '').toLowerCase();
+    var allowed = ['pickup_equipment', 'pickup_key', 'return_equipment', 'return_key'];
+    trafficViewTab = allowed.indexOf(next) >= 0 ? next : 'pickup_equipment';
     trafficRefreshTabUi_();
     renderTrafficFromCache();
   }
@@ -1920,11 +1932,7 @@
     }
     trafficRefreshTabUi_();
     var filteredByQuery = (trafficAllRows || []).filter(function(item) { return trafficRowMatchesQuery(item, q); });
-    var data = filteredByQuery.filter(function(item) {
-      var t = String(item && item.type || '').toLowerCase();
-      if (trafficViewTab === 'return') return t === 'return';
-      return t === 'pickup';
-    });
+    var data = filteredByQuery.filter(function(item) { return trafficTabMatches_(item, trafficViewTab); });
     trafficMetaByResId = {};
     if (!trafficAllRows.length) {
       container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">İşlem kaydı yok.</div>';
@@ -1935,7 +1943,13 @@
       return;
     }
     if (!data.length) {
-      container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">' + (trafficViewTab === 'pickup' ? 'Depodan çıkış sekmesinde kayıt yok.' : 'Depoya iade sekmesinde kayıt yok.') + '</div>';
+      var emptyTextByTab = {
+        pickup_equipment: 'Depodan ekipman teslim sekmesinde kayıt yok.',
+        pickup_key: 'Depodan anahtar teslim sekmesinde kayıt yok.',
+        return_equipment: 'Depoya ekipman iade sekmesinde kayıt yok.',
+        return_key: 'Depoya anahtar iade sekmesinde kayıt yok.'
+      };
+      container.innerHTML = '<div class="col-span-2 text-center text-gray-400 italic mt-10 font-medium">' + (emptyTextByTab[trafficViewTab] || 'Bu sekmede kayıt yok.') + '</div>';
       return;
     }
     container.innerHTML = '';
