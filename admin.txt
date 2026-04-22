@@ -195,7 +195,8 @@
                 <input type="date" id="sl-end-date" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-[#e30613] transition">
               </div>
             </div>
-            <div class="mt-4 flex justify-end">
+            <div class="mt-4 flex justify-end gap-2">
+              <button type="button" id="sl-unlock-btn" onclick="submitStudioUnlockRange()" class="bg-gray-800 text-white font-black py-3 px-6 rounded-xl text-xs hover:bg-gray-900 transition">KİLİDİ KALDIR</button>
               <button type="button" id="sl-submit-btn" onclick="submitStudioLockRange()" class="bg-[#e30613] text-white font-black py-3 px-6 rounded-xl text-xs hover:bg-red-700 transition">STÜDYOYU KİLİTLE</button>
             </div>
           </div>
@@ -3794,6 +3795,37 @@
       }
     }).catch(function(err) {
       if (btn) { btn.disabled = false; btn.innerText = old || 'STÜDYOYU KİLİTLE'; }
+      showToast('Hata: ' + ((err && err.message) || 'Bilinmeyen hata'), 'error');
+    });
+  }
+
+  function submitStudioUnlockRange() {
+    var studioId = String((document.getElementById('sl-studio-id') || {}).value || '').trim();
+    var reason = String((document.getElementById('sl-reason') || {}).value || '').trim();
+    var startDate = String((document.getElementById('sl-start-date') || {}).value || '').trim();
+    var endDate = String((document.getElementById('sl-end-date') || {}).value || '').trim();
+    if (!studioId) { showToast('Stüdyo seçin.', 'error'); return; }
+    if (!startDate || !endDate) { showToast('Başlangıç ve bitiş günlerini girin.', 'error'); return; }
+    if (endDate < startDate) { showToast('Bitiş günü başlangıçtan önce olamaz.', 'error'); return; }
+    var btn = document.getElementById('sl-unlock-btn');
+    var old = btn ? btn.innerText : '';
+    if (btn) { btn.disabled = true; btn.innerText = 'KALDIRILIYOR...'; }
+    adminApiRequest('/admin/studio-locks/unlock', {
+      method: 'POST',
+      body: { studio_id: studioId, reason: reason, start_date: startDate, end_date: endDate }
+    }).then(function(res) {
+      if (btn) { btn.disabled = false; btn.innerText = old || 'KİLİDİ KALDIR'; }
+      var unlocked = Number((res && res.unlocked) || 0);
+      if (unlocked > 0) showToast('Kilit kaldırıldı: ' + unlocked + ' kayıt.', 'success');
+      else showToast('Bu aralıkta kaldırılacak kilit bulunamadı.', 'info');
+      if (String(activeAdminStudioId || '') !== String(studioId || '')) {
+        var st = adminStudiosById[String(studioId || '').trim()] || null;
+        selectAdminStudio(studioId, String((st && st.name) || studioId));
+      } else {
+        renderAdminStudioWeekCalendar();
+      }
+    }).catch(function(err) {
+      if (btn) { btn.disabled = false; btn.innerText = old || 'KİLİDİ KALDIR'; }
       showToast('Hata: ' + ((err && err.message) || 'Bilinmeyen hata'), 'error');
     });
   }

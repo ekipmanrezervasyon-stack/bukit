@@ -158,6 +158,12 @@ const adminStudioLockSchema = z.object({
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
+const adminStudioUnlockSchema = z.object({
+  studio_id: z.string().min(1),
+  reason: z.string().max(120).optional().default(""),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
 const adminTrafficTransferSchema = z.object({
   id: z.string().min(1),
   query: z.string().min(1).max(190)
@@ -3625,6 +3631,69 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       req.log.error({ err: e, reservationId: String(created.id || "") }, "sync studio maintenance lock to Google Calendar failed");
     }
     return { ok: true, success: true, data: created };
+  });
+
+  app.post("/admin/studio-locks/unlock", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = adminStudioUnlockSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const p = parsed.data;
+    const startDate = String(p.start_date || "");
+    const endDate = String(p.end_date || "");
+    if (endDate < startDate) {
+      return reply.code(400).send({ ok: false, error: "End date must be on/after start date." });
+    }
+    const endExclusiveDate = addDaysDateOnly(endDate, 1);
+    if (!endExclusiveDate) return reply.code(400).send({ ok: false, error: "Invalid date range." });
+    const startAt = `${startDate}T00:00:00+03:00`;
+    const endAt = `${endExclusiveDate}T00:00:00+03:00`;
+    const studioId = String(p.studio_id || "").trim();
+    const reason = String(p.reason || "").trim();
+
+    let q = supabaseAdmin
+      .from("studio_reservations")
+      .select("id,studio_id")
+      .eq("studio_id", studioId)
+      .eq("requester_email", "studio.import@bilgi.edu.tr")
+      .eq("requester_name", "Studio Maintenance")
+      .in("status", [STUDIO_APPROVED_STATUS, STUDIO_PENDING_STATUS, STUDIO_PICKED_STATUS, "approved"])
+      .lt("start_at", endAt)
+      .gt("end_at", startAt)
+      .limit(2000);
+    if (reason) q = q.eq("purpose", reason);
+    const hit = await q;
+    if (hit.error) return reply.code(500).send({ ok: false, error: hit.error.message });
+    const rows = (hit.data ?? []) as Record<string, unknown>[];
+    if (!rows.length) return { ok: true, success: true, unlocked: 0, ids: [] as string[] };
+
+    const ids = rows.map((r) => String(r.id || "")).filter(Boolean);
+    const upd = await supabaseAdmin
+      .from("studio_reservations")
+      .update({
+        status: STUDIO_CANCELLED_STATUS,
+        reviewed_by: String(actor.email || ""),
+        reviewed_at: new Date().toISOString()
+      })
+      .in("id", ids)
+      .select("id,studio_id");
+    if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
+    const updatedRows = (upd.data ?? []) as Record<string, unknown>[];
+    for (const row of updatedRows) {
+      try {
+        await deleteGreenStudioFromGoogleCalendar({
+          reservationId: String(row.id || ""),
+          studioId: String(row.studio_id || "")
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: String(row.id || "") }, "remove studio maintenance lock from Google Calendar failed");
+      }
+    }
+    return {
+      ok: true,
+      success: true,
+      unlocked: updatedRows.length,
+      ids: updatedRows.map((r) => String(r.id || "")).filter(Boolean)
+    };
   });
 
   app.post("/admin/equipment-reservations/approve", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
