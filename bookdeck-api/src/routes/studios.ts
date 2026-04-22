@@ -164,8 +164,17 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     let query = supabaseAdmin.from("studio_reservations").select("*").order("start_at", { ascending: true });
     if (q.status) query = query.eq("status", q.status);
     if (q.requester_email) query = query.eq("requester_email", q.requester_email);
-    if (q.from) query = query.gte("start_at", q.from);
-    if (q.to) query = query.lte("end_at", q.to);
+    const from = String(q.from || "").trim();
+    const to = String(q.to || "").trim();
+    // Range queries must include reservations that overlap the window,
+    // not only rows fully contained in it.
+    if (from && to) {
+      query = query.lt("start_at", to).gt("end_at", from);
+    } else if (from) {
+      query = query.gt("end_at", from);
+    } else if (to) {
+      query = query.lt("start_at", to);
+    }
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     return { ok: true, data: data ?? [] };
