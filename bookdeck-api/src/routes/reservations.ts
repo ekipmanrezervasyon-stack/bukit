@@ -3048,7 +3048,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const createdStudio = data as Record<string, unknown>;
     if (String(createdStudio.status || "") === STUDIO_APPROVED_STATUS) {
       try {
-        await upsertApprovedGreenStudioToGoogleCalendar({
+        const sync = await upsertApprovedGreenStudioToGoogleCalendar({
           reservationId: String(createdStudio.id || ""),
           studioId: String(createdStudio.studio_id || ""),
           startAt: String(createdStudio.start_at || ""),
@@ -3057,6 +3057,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           requesterEmail: String(createdStudio.requester_email || ""),
           purpose: String(createdStudio.purpose || "")
         });
+        if (!sync.ok) {
+          req.log.warn({ reservationId: String(createdStudio.id || ""), skipped: String(sync.skipped || "") }, "sync approved studio reservation skipped");
+        }
       } catch (e) {
         req.log.error({ err: e, reservationId: String(createdStudio.id || "") }, "sync approved studio reservation to Google Calendar failed");
       }
@@ -3310,7 +3313,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const updated = data as Record<string, unknown>;
     try {
-      await upsertApprovedGreenStudioToGoogleCalendar({
+      const sync = await upsertApprovedGreenStudioToGoogleCalendar({
         reservationId: String(updated.id || id),
         studioId: String(updated.studio_id || ""),
         startAt: String(updated.start_at || ""),
@@ -3319,6 +3322,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         requesterEmail: String(updated.requester_email || ""),
         purpose: String(updated.purpose || "")
       });
+      if (!sync.ok) {
+        req.log.warn({ reservationId: String(updated.id || id), skipped: String(sync.skipped || "") }, "sync approved studio reservation skipped");
+      }
     } catch (e) {
       req.log.error({ err: e, reservationId: String(updated.id || id) }, "sync approved studio reservation to Google Calendar failed");
     }
@@ -3455,7 +3461,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const st = String(updated.status || "").trim();
     if (st === STUDIO_APPROVED_STATUS || st === STUDIO_PICKED_STATUS || st === "approved") {
       try {
-        await upsertApprovedGreenStudioToGoogleCalendar({
+        const sync = await upsertApprovedGreenStudioToGoogleCalendar({
           reservationId: String(updated.id || id),
           studioId: String(updated.studio_id || studioId),
           startAt: String(updated.start_at || start_dt),
@@ -3464,6 +3470,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           requesterEmail: String(updated.requester_email || ""),
           purpose: String(updated.purpose || purpose || "")
         });
+        if (!sync.ok) {
+          req.log.warn({ reservationId: String(updated.id || id), skipped: String(sync.skipped || "") }, "sync studio reservation skipped on admin update");
+        }
       } catch (e) {
         req.log.error({ err: e, reservationId: String(updated.id || id) }, "sync studio reservation to Google Calendar failed on admin update");
       }
@@ -4578,7 +4587,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const stRow = st.data as Record<string, unknown>;
       if (String(stRow.status || "") === STUDIO_APPROVED_STATUS) {
         try {
-          await upsertApprovedGreenStudioToGoogleCalendar({
+          const sync = await upsertApprovedGreenStudioToGoogleCalendar({
             reservationId: String(stRow.id || id),
             studioId: String(stRow.studio_id || ""),
             startAt: String(stRow.start_at || ""),
@@ -4587,6 +4596,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             requesterEmail: String(stRow.requester_email || ""),
             purpose: String(stRow.purpose || "")
           });
+          if (!sync.ok) {
+            req.log.warn({ reservationId: String(stRow.id || id), skipped: String(sync.skipped || "") }, "sync studio reservation skipped on extend");
+          }
         } catch (e) {
           req.log.error({ err: e, reservationId: id }, "sync studio reservation to Google Calendar failed on extend");
         }
@@ -4646,7 +4658,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const stRow = st.data as Record<string, unknown>;
       if (String(stRow.status || "") === STUDIO_APPROVED_STATUS) {
         try {
-          await upsertApprovedGreenStudioToGoogleCalendar({
+          const sync = await upsertApprovedGreenStudioToGoogleCalendar({
             reservationId: String(stRow.id || id),
             studioId: String(stRow.studio_id || ""),
             startAt: String(stRow.start_at || ""),
@@ -4655,6 +4667,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             requesterEmail: String(stRow.requester_email || ""),
             purpose: String(stRow.purpose || "")
           });
+          if (!sync.ok) {
+            req.log.warn({ reservationId: String(stRow.id || id), skipped: String(sync.skipped || "") }, "sync studio reservation skipped on transfer");
+          }
         } catch (e) {
           req.log.error({ err: e, reservationId: id }, "sync studio reservation to Google Calendar failed on transfer");
         }

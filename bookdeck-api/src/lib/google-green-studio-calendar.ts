@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { existsSync, readFileSync } from "node:fs";
 import { env } from "../config/env.js";
 import { supabaseAdmin } from "./supabase.js";
 
@@ -20,14 +21,52 @@ const normalize = (v: unknown): string => String(v ?? "").trim();
 
 const parseServiceAccountCredentials = (): { client_email: string; private_key: string } | null => {
   const rawJson = normalize(env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  if (rawJson) {
+  const tryParseJson = (input: string): { client_email: string; private_key: string } | null => {
+    const txt = normalize(input);
+    if (!txt) return null;
     try {
-      const parsed = JSON.parse(rawJson) as Record<string, unknown>;
+      const parsed = JSON.parse(txt) as Record<string, unknown>;
       const clientEmail = normalize(parsed.client_email);
       const privateKey = normalize(parsed.private_key).replace(/\\n/g, "\n");
       if (clientEmail && privateKey) return { client_email: clientEmail, private_key: privateKey };
     } catch {
-      // fallback to split env vars
+      return null;
+    }
+    return null;
+  };
+  if (rawJson) {
+    // 1) Direct JSON
+    const direct = tryParseJson(rawJson);
+    if (direct) return direct;
+
+    // 2) Wrapped JSON string (single/double quoted)
+    const maybeWrapped =
+      (rawJson.startsWith("'") && rawJson.endsWith("'")) || (rawJson.startsWith("\"") && rawJson.endsWith("\""))
+        ? rawJson.slice(1, -1)
+        : "";
+    if (maybeWrapped) {
+      const unwrapped = tryParseJson(maybeWrapped);
+      if (unwrapped) return unwrapped;
+    }
+
+    // 3) Base64 encoded JSON
+    try {
+      const decoded = Buffer.from(rawJson, "base64").toString("utf8");
+      const b64 = tryParseJson(decoded);
+      if (b64) return b64;
+    } catch {
+      // ignore
+    }
+
+    // 4) Local file path (mostly for local/dev)
+    if (rawJson.endsWith(".json") && existsSync(rawJson)) {
+      try {
+        const fileText = readFileSync(rawJson, "utf8");
+        const byFile = tryParseJson(fileText);
+        if (byFile) return byFile;
+      } catch {
+        // fallback to split vars
+      }
     }
   }
   const clientEmail = normalize(env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
@@ -75,7 +114,7 @@ const isGreenStudioReservation = async (studioIdRaw: string): Promise<boolean> =
   const row = await supabaseAdmin
     .from("studios")
     .select("id,name,studio_id,code")
-    .eq("id", studioId)
+    .or(`id.eq.${studioId},studio_id.eq.${studioId},code.eq.${studioId}`)
     .limit(1)
     .maybeSingle();
   if (!row.error && row.data) {
