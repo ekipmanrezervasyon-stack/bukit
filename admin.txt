@@ -2078,7 +2078,6 @@
       var timeLabel = isPickup ? 'Teslim Saati' : 'İade Saati';
       var ownerLine = escAdm(item.userName || '—') + ' - ' + escAdm(item.studentId || '—');
       var firstItemName = (item.items || []).map(function(i) { return String(i && i.name || '').trim(); }).filter(Boolean)[0] || (tKind === 'studio' ? 'Stüdyo Anahtarı' : 'Ekipman');
-      var deliveryStatusChip = isPickup ? 'TESLİMAT BEKLENİYOR' : 'İADE BEKLENİYOR';
       var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-100">' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">Teslim Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(handFmt || '—') + '</span></div></div>' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">İade Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(retFmt || '—') + '</span></div></div>' +
@@ -2091,9 +2090,10 @@
           '<div class="text-lg font-medium text-gray-700 text-right">' + escAdm(timeLabel) + ': <span>' + escAdm(topTime) + '</span></div>' +
         '</div>' +
         '<div class="p-6 pt-2 space-y-6">' +
-          '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">' +
-            '<div><p class="text-sm font-medium text-gray-600">Rezervasyon Sahibi ve Kimlik no:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + ownerLine + '</p>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
-            '<div class="md:text-right"><p class="text-sm font-medium text-gray-600 md:inline-block md:mr-3">Teslim Durumu:</p><div class="inline-flex items-center px-4 py-1.5 rounded-full bg-yellow-100 text-yellow-700 text-sm font-bold shadow-sm">⏰ <span class="ml-1">' + escAdm(deliveryStatusChip) + '</span></div></div>' +
+          '<div>' +
+            '<p class="text-sm font-medium text-gray-600">Rezervasyon Sahibi ve Kimlik no:</p>' +
+            '<p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + ownerLine + '</p>' +
+            trafContact + studioKeyLine + studioPurposeLine +
           '</div>' +
           '<div><p class="text-sm font-medium text-gray-600">Ekipman Adı:</p><p class="text-lg font-semibold text-gray-900">' + escAdm(firstItemName) + '</p></div>' +
           trafSched +
