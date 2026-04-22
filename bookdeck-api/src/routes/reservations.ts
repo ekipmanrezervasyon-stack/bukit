@@ -4480,7 +4480,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         g.items.push({
           name: String(row.name || row.id || "Equipment"),
           id: String(row.equipmentCode || row.id || ""),
-          due: String(row.due || ""),
+          due: formatMailDateTimeTR(String(row.dueIso || row.due || "")),
           delayDays: Number(row.delayDays || 0)
         });
         g.maxDelayDays = Math.max(g.maxDelayDays, Number(row.delayDays || 0) || 1);
