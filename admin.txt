@@ -4720,12 +4720,31 @@
       if (!rows || !rows.length) { box.innerHTML = '<p class="text-gray-400">Gecikmiş kayıt yok.</p>'; return; }
       var html = '<div class="space-y-2">';
       rows.forEach(function(r) {
-        var rid = escAdm(r.id);
-        html += '<label class="flex items-center gap-3 bg-white p-4 rounded-2xl border border-gray-100"><input type="checkbox" class="fe-overdue-cb w-4 h-4" value="' + rid + '"><div class="flex-1"><p class="font-bold text-sm">' + escAdm(r.name) + ' <span class="font-mono text-[10px] text-gray-400">' + rid + '</span></p><p class="text-xs text-gray-600">' + escAdm(r.studentName || r.studentId || '') + '</p><p class="text-[10px] text-red-600">İade: ' + escAdm(r.due) + '</p></div></label>';
+        var selId = escAdm(r.reservation_id || r.id || '');
+        var eqCode = escAdm(r.equipmentCode || r.id || '');
+        var delayDays = Number(r.delayDays || 0);
+        html += '<div class="flex items-center gap-3 bg-white p-4 rounded-2xl border border-gray-100">' +
+          '<input type="checkbox" class="fe-overdue-cb w-4 h-4" value="' + selId + '">' +
+          '<div class="flex-1 min-w-0">' +
+            '<p class="font-bold text-sm [overflow-wrap:anywhere] break-words">' + escAdm(r.name) + ' <span class="font-mono text-[10px] text-gray-400">' + eqCode + '</span></p>' +
+            '<p class="text-xs text-gray-600">' + escAdm(r.studentName || r.studentId || '') + '</p>' +
+            '<p class="text-[11px] text-red-600 font-semibold">İade: ' + escAdm(r.due || '') + '</p>' +
+            '<p class="text-[11px] text-amber-700 font-black">Gecikme: ' + escAdm(String(delayDays)) + ' gün</p>' +
+          '</div>' +
+          '<button type="button" title="Bu kişiye gecikme hatırlatma maili gönder" onclick="sendSingleOverdueReminder(\'' + String(selId).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')" class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-xl bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200 transition">✉️</button>' +
+        '</div>';
       });
       html += '</div><button type="button" onclick="sendOverdueReminders()" class="mt-4 w-full bg-amber-600 text-white font-black py-3 rounded-xl text-xs">Seçilenlere hatırlatma e-postası</button>';
       box.innerHTML = html;
     }).getAdminOverdueEquipmentList(currentAuthToken);
+  }
+  function sendSingleOverdueReminder(id) {
+    var one = String(id || '').trim();
+    if (!one) { showToast('Kayıt bulunamadı.', 'error'); return; }
+    google.script.run.withSuccessHandler(function(r) {
+      if (r && r.success) showToast('Hatırlatma gönderildi.');
+      else showToast((r && r.error) || 'Hata', 'error');
+    }).withFailureHandler(function(err) { showToast(err.message || 'Hata', 'error'); }).adminSendOverdueReminderEmails([one], currentAuthToken);
   }
   function sendOverdueReminders() {
     var ids = Array.from(document.querySelectorAll('.fe-overdue-cb:checked')).map(function(c) { return c.value; });

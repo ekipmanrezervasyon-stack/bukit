@@ -1404,8 +1404,35 @@ const assertDepotSlotCapacity = async (params: {
   }
 };
 
+const formatIstanbulOverdueDateTime = (iso: string): string => {
+  const ms = new Date(String(iso || "")).getTime();
+  if (Number.isNaN(ms)) return String(iso || "");
+  try {
+    const parts = new Intl.DateTimeFormat("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(new Date(ms));
+    const map = new Map<string, string>();
+    for (const p of parts) map.set(String(p.type || ""), String(p.value || ""));
+    const dd = map.get("day") || "00";
+    const mm = map.get("month") || "00";
+    const yyyy = map.get("year") || "0000";
+    const hh = map.get("hour") || "00";
+    const mi = map.get("minute") || "00";
+    return `${dd}.${mm}.${yyyy} / ${hh}:${mi}`;
+  } catch {
+    return new Date(ms).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+  }
+};
+
 const listOverdueEquipmentRows = async (): Promise<Array<{
   id: string;
+  equipmentCode: string;
   reservation_id: string;
   name: string;
   studentName: string;
@@ -1414,8 +1441,12 @@ const listOverdueEquipmentRows = async (): Promise<Array<{
   userId: string;
   userEmail: string;
   due: string;
+  dueIso: string;
+  delayDays: number;
 }>> => {
   const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
   const activeForOverdue = Array.from(new Set(["approved", ...EQUIPMENT_ON_LOAN_RES_STATUSES]));
   const eqRes = await supabaseAdmin
     .from("equipment_reservations")
@@ -1427,29 +1458,43 @@ const listOverdueEquipmentRows = async (): Promise<Array<{
   const rows = (eqRes.data ?? []) as Record<string, unknown>[];
   const eqIds = Array.from(new Set(rows.map((r) => String(r.equipment_item_id || "")).filter(Boolean)));
   const items = eqIds.length
-    ? await supabaseAdmin.from("equipment_items").select("id,name").in("id", eqIds)
+    ? await supabaseAdmin.from("equipment_items").select("id,name,equipment_id").in("id", eqIds)
     : { data: [], error: null };
   if (items.error) throw new Error(items.error.message);
-  const nameById = new Map(((items.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || ""), String(r.name || r.id || "")]));
-  return rows.map((r) => {
+  const itemById = new Map(
+    ((items.data ?? []) as Record<string, unknown>[]).map((r) => [
+      String(r.id || ""),
+      { name: String(r.name || r.id || ""), code: String(r.equipment_id || r.id || "").trim().toUpperCase() }
+    ])
+  );
+  return rows
+    .map((r) => {
     const eqId = String(r.equipment_item_id || "");
+      const dueIso = String(r.end_at || "");
+      const dueMs = new Date(dueIso).getTime();
+      const delayDays = !Number.isNaN(dueMs) ? Math.max(1, Math.ceil((nowMs - dueMs) / dayMs)) : 0;
+      const item = itemById.get(eqId);
     return {
       id: eqId,
+      equipmentCode: String((item && item.code) || eqId || ""),
       reservation_id: String(r.id || ""),
-      name: nameById.get(eqId) || eqId,
+      name: String((item && item.name) || eqId || "Equipment"),
       studentName: String(r.requester_name || r.requester_email || ""),
       studentId: String(r.requester_profile_id || r.requester_email || ""),
       emailHint: String(r.requester_email || ""),
       userId: String(r.requester_profile_id || r.requester_email || ""),
       userEmail: String(r.requester_email || ""),
-      due: String(r.end_at || "")
+      due: formatIstanbulOverdueDateTime(dueIso),
+      dueIso,
+      delayDays
     };
-  });
+    })
+    .sort((a, b) => (Number(b.delayDays || 0) - Number(a.delayDays || 0)) || String(a.dueIso || "").localeCompare(String(b.dueIso || "")));
 };
 
 const sendOverdueReminderEmail = async (
   toEmail: string,
-  payload: { due: string; items: Array<{ name: string; id: string }> }
+  payload: { maxDelayDays: number; items: Array<{ name: string; id: string; due: string; delayDays: number }> }
 ): Promise<void> => {
   const apiKey = String(env.RESEND_API_KEY || "").trim();
   const from = String(env.OTP_EMAIL_FROM || "").trim();
@@ -1457,43 +1502,35 @@ const sendOverdueReminderEmail = async (
     throw new Error("Overdue reminder mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
   }
   const appName = String(env.OTP_APP_NAME || "BUKit").trim();
-  const dueRaw = String(payload.due || "");
-  const dueMs = new Date(dueRaw).getTime();
-  const dueLabel = Number.isNaN(dueMs)
-    ? dueRaw
-    : new Date(dueMs).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
   const subject = `[${appName}] Iade hatirlatmasi / Equipment return reminder`;
   const items = Array.isArray(payload.items) ? payload.items : [];
+  const maxDelayDays = Math.max(1, Number(payload.maxDelayDays || 1));
   const listHtml = items.length
     ? `<ul>${items
-        .map((x) => `<li><strong>${escapeHtml(String(x.name || "-"))}</strong> (${escapeHtml(String(x.id || "-"))})</li>`)
+        .map((x) => `<li><strong>${escapeHtml(String(x.name || "-"))}</strong> (${escapeHtml(String(x.id || "-"))}) · iade: ${escapeHtml(String(x.due || "-"))} · gecikme: ${escapeHtml(String(x.delayDays || 0))} gun</li>`)
         .join("")}</ul>`
     : `<p><strong>${escapeHtml("Equipment")}</strong></p>`;
   const listText = items.length
-    ? items.map((x) => `${String(x.name || "-")} (${String(x.id || "-")})`).join(", ")
+    ? items.map((x) => `${String(x.name || "-")} (${String(x.id || "-")}) - iade: ${String(x.due || "-")} - gecikme: ${String(x.delayDays || 0)} gun`).join("\n")
     : "Equipment";
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.45;color:#111827">
       <p><strong>TR</strong></p>
       <p>Merhaba,</p>
-      <p>Asagidaki ekipmanlarin iade suresi <strong>gecmistir</strong>:</p>
+      <p>İletişim Fakültesi'ne ait altta belirtilen ekipmanların depoya iade süresini <strong>${escapeHtml(String(maxDelayDays))}</strong> gün geciktirmiş durumdasınız.</p>
       ${listHtml}
-      <p>Son iade: ${escapeHtml(dueLabel)}</p>
-      <p>Lutfen en kisa surede ekipman ofisine iade ediniz.</p>
+      <p>Gecikmeli ekipman sebebiyle yeni ekipman alamama ve formda belirtilen yasal prosedürlerin uygulamaya konulması aşamasına geçilecektir. Bilginize.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
       <p><strong>EN</strong></p>
       <p>Hello,</p>
-      <p>This is a reminder that the following equipment is <strong>overdue</strong> for return:</p>
+      <p>You are currently <strong>${escapeHtml(String(maxDelayDays))}</strong> day(s) overdue in returning the Faculty of Communication equipment listed below.</p>
       ${listHtml}
-      <p>Due: ${escapeHtml(dueLabel)}</p>
-      <p>Please return it to the equipment office as soon as possible.</p>
+      <p>Due to overdue equipment, you will not be able to borrow new equipment and the legal procedures stated in the form will be put into effect.</p>
     </div>
   `;
   const text =
-    `TR: Iade suresi gecen ekipmanlar: ${listText}\n` +
-    `Son iade: ${dueLabel}\n\n` +
-    `EN: Overdue equipment: ${listText}\n` +
-    `Due: ${dueLabel}`;
+    `TR:\nİletişim Fakültesi'ne ait altta belirtilen ekipmanların depoya iade süresini ${maxDelayDays} gün geciktirmiş durumdasınız.\n${listText}\nGecikmeli ekipman sebebiyle yeni ekipman alamama ve formda belirtilen yasal prosedürlerin uygulamaya konulması aşamasına geçilecektir. Bilginize.\n\n` +
+    `EN:\nYou are currently ${maxDelayDays} day(s) overdue in returning the Faculty of Communication equipment listed below.\n${listText}\nDue to overdue equipment, you will not be able to borrow new equipment and the legal procedures stated in the form will be put into effect.`;
 
   const body: Record<string, unknown> = { from, to: [toEmail], subject, html, text };
   if (env.OTP_EMAIL_REPLY_TO) body.reply_to = env.OTP_EMAIL_REPLY_TO;
@@ -4415,12 +4452,21 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const list = await listOverdueEquipmentRows();
-      const byId = new Map(list.map((r) => [String(r.id || "").trim(), r]));
+      const byAnyId = new Map<string, (typeof list)[number]>();
+      for (const r of list) {
+        const keys = [
+          String(r.id || "").trim(),
+          String(r.equipmentCode || "").trim().toUpperCase(),
+          String(r.reservation_id || "").trim()
+        ].filter(Boolean);
+        for (const k of keys) byAnyId.set(k, r);
+      }
       let sent = 0;
       let skipped = 0;
-      const groups = new Map<string, { email: string; due: string; items: Array<{ name: string; id: string }> }>();
-      for (const id of ids) {
-        const row = byId.get(id);
+      const groups = new Map<string, { email: string; items: Array<{ name: string; id: string; due: string; delayDays: number }>; maxDelayDays: number }>();
+      for (const raw of ids) {
+        const key = String(raw || "").trim();
+        const row = byAnyId.get(key) || byAnyId.get(key.toUpperCase());
         if (!row) {
           skipped += 1;
           continue;
@@ -4430,14 +4476,19 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           skipped += 1;
           continue;
         }
-        const gk = `${email}|${String(row.due || "")}`;
-        const g = groups.get(gk) || { email, due: String(row.due || ""), items: [] };
-        g.items.push({ name: String(row.name || row.id || "Equipment"), id: String(row.id || "") });
-        groups.set(gk, g);
+        const g = groups.get(email) || { email, items: [], maxDelayDays: 1 };
+        g.items.push({
+          name: String(row.name || row.id || "Equipment"),
+          id: String(row.equipmentCode || row.id || ""),
+          due: String(row.due || ""),
+          delayDays: Number(row.delayDays || 0)
+        });
+        g.maxDelayDays = Math.max(g.maxDelayDays, Number(row.delayDays || 0) || 1);
+        groups.set(email, g);
       }
       for (const g of groups.values()) {
         try {
-          await sendOverdueReminderEmail(g.email, { due: g.due, items: g.items });
+          await sendOverdueReminderEmail(g.email, { maxDelayDays: g.maxDelayDays, items: g.items });
           sent += 1;
         } catch (e) {
           req.log.error({ err: e, email: g.email }, "send overdue reminder failed");
