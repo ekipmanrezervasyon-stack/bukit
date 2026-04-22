@@ -4237,15 +4237,12 @@
         d.setDate(start.getDate() + di);
         days.push({ iso: toIsoLocalDate_(d), day: d.getDate(), month: d.getMonth() + 1, dow: d.getDay() });
       }
-      var isGreenStudio = adminIsGreenStudio_(studioId, activeAdminStudioName);
-      var maxStartMins = (isGreenStudio ? 21 : 20) * 60;
+      var maxStartMins = 21 * 60;
       var slots = [];
       for (var mins = 9 * 60; mins <= maxStartMins; mins += 30) {
         slots.push({ mins: mins, label: String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0') });
       }
-      if (isGreenStudio) {
-        slots.push({ mins: 22 * 60, label: '22:00', boundary: true });
-      }
+      slots.push({ mins: 22 * 60, label: '22:00', boundary: true });
       var cells = {};
       var slotDetails = {};
       var cellAdminCaption = {};
@@ -4376,7 +4373,7 @@
       var cellAdminCaption = res.cell_admin_caption || {};
       adminStudioSlotDetailsCache = {};
       var wk = ['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'];
-      var th = '<tr><th class="p-1 w-10"></th>' + days.map(function(d){ return '<th class="p-1 text-[9px] font-bold text-gray-600 border-b border-gray-200 min-w-[40px]">' + String(d.day).padStart(2,'0') + '.' + String(d.month).padStart(2,'0') + '<br><span class="text-gray-400 font-semibold">' + wk[d.dow] + '</span></th>'; }).join('') + '</tr>';
+      var th = '<tr><th class="p-1 w-12"></th>' + days.map(function(d){ return '<th class="p-1 text-[9px] font-bold text-gray-600 border-b border-gray-200">' + String(d.day).padStart(2,'0') + '.' + String(d.month).padStart(2,'0') + '<br><span class="text-gray-400 font-semibold">' + wk[d.dow] + '</span></th>'; }).join('') + '</tr>';
       var rows = slots.map(function(s) {
         var line = days.map(function(d) {
           var k = d.iso + '|' + s.mins;
@@ -4404,12 +4401,13 @@
           }
           var cap = String(cellAdminCaption[k] || '').trim();
           var inner = (st === 'busy' && cap) ? ('<span class="block leading-tight text-[10px] md:text-[11px] font-bold text-rose-950/95 px-0.5 line-clamp-3 text-left [overflow-wrap:anywhere]">' + escAdm(cap) + '</span>') : '';
-          return '<td class="p-0.5 border-b border-gray-100"><button type="button"' + data + busyKey + ' class="admin-studio-slot w-full min-h-[2.2rem] md:min-h-[2.5rem] py-0.5 rounded-sm flex items-center justify-center ' + cls + '" title="' + escAttr(detailTitle) + '">' + inner + '</button></td>';
+          return '<td class="p-0.5 border-b border-gray-100"><button type="button"' + data + busyKey + ' class="admin-studio-slot w-full min-h-[1.8rem] md:min-h-[2rem] py-0.5 rounded-sm flex items-center justify-center ' + cls + '" title="' + escAttr(detailTitle) + '">' + inner + '</button></td>';
         }).join('');
         return '<tr><td class="pr-1 py-0.5 text-[8px] text-gray-500 font-mono">' + escAdm(s.label) + '</td>' + line + '</tr>';
       }).join('');
       var slotLabel = adminStudioSelectedSlotKey ? ('Seçili: ' + adminStudioSelectedSlotKey.replace('|', ' ')) : 'Seçili slot yok';
-      frame.innerHTML = '<div class="overflow-x-auto p-3 pb-6"><table class="w-full border-collapse text-center"><thead>' + th + '</thead><tbody>' + rows + '</tbody></table><p class="mt-2 mb-2 text-[10px] font-semibold text-gray-500">' + escAdm(slotLabel) + '</p></div>';
+      var colgroup = '<col style="width:52px;">' + days.map(function() { return '<col style="width:calc((100% - 52px)/7);">'; }).join('');
+      frame.innerHTML = '<div class="p-3 pb-6 overflow-hidden"><table class="w-full table-fixed border-collapse text-center"><colgroup>' + colgroup + '</colgroup><thead>' + th + '</thead><tbody>' + rows + '</tbody></table><p class="mt-2 mb-2 text-[10px] font-semibold text-gray-500">' + escAdm(slotLabel) + '</p></div>';
     }).catch(function(err) {
       adminStudioWeekGridInFlight = false;
       frame.innerHTML = '<div class="text-center text-red-500 py-10 text-xs">' + escAdm((err && err.message) || 'Hata') + '</div>';
