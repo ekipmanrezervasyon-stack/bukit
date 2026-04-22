@@ -135,6 +135,12 @@ const buildDescription = (p: StudioSyncPayload): string => {
   return parts.join("\n");
 };
 
+const buildEventTitle = (p: StudioSyncPayload): string => {
+  const purpose = normalize(p.purpose).replace(/\s*\[gcal:[^\]]+\]\s*$/i, "").trim();
+  if (purpose) return purpose;
+  return `GREEN STÜDYO · ${normalize(p.requesterName) || normalize(p.requesterEmail) || "Rezervasyon"}`;
+};
+
 const listEventsByReservation = async (calendarId: string, reservationId: string) => {
   const cal = getCalendarClient();
   if (!cal) return [];
@@ -164,7 +170,7 @@ export const upsertApprovedGreenStudioToGoogleCalendar = async (payload: StudioS
   if (!cal) return { ok: false, skipped: "missing_service_account" };
 
   const body = {
-    summary: `GREEN STÜDYO · ${normalize(payload.requesterName) || normalize(payload.requesterEmail) || "Rezervasyon"}`,
+    summary: buildEventTitle(payload),
     description: buildDescription(payload),
     start: { dateTime: startAt, timeZone: "Europe/Istanbul" },
     end: { dateTime: endAt, timeZone: "Europe/Istanbul" },
