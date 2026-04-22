@@ -1232,6 +1232,13 @@ const hasPublicHolidayInRange = (startAt: string, endAt: string): boolean => {
   return false;
 };
 
+const hasPublicHolidayAtEndpoints = (startAt: string, endAt: string): boolean => {
+  const s = new Date(String(startAt || ""));
+  const e = new Date(String(endAt || ""));
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return false;
+  return isTurkeyPublicHoliday(s) || isTurkeyPublicHoliday(e);
+};
+
 const resolveDepotSlotMaxBookings = async (): Promise<number> => {
   const now = Date.now();
   if (depotSlotConfigCache && now - depotSlotConfigCache.ts <= DEPOT_SLOT_CONFIG_CACHE_MS) {
@@ -3093,8 +3100,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const s = new Date(start_at).getTime();
     const e = new Date(end_at).getTime();
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
-    if (hasPublicHolidayInRange(start_at, end_at)) {
-      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    if (hasPublicHolidayAtEndpoints(start_at, end_at)) {
+      return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
     }
     try {
       await assertDepotSlotCapacity({ startAt: start_at, endAt: end_at });
@@ -5305,8 +5312,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     }
     const maxMs = 4 * 24 * 3600 * 1000;
     if (endMs - startMs > maxMs) return reply.code(400).send({ ok: false, error: "EXTEND_MAX_DAYS" });
-    if (hasPublicHolidayInRange(String(existing.data.start_at || ""), String(payload.new_end_at || ""))) {
-      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    if (hasPublicHolidayAtEndpoints(String(existing.data.start_at || ""), String(payload.new_end_at || ""))) {
+      return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
     }
     try {
       await assertDepotSlotCapacity({
@@ -5356,8 +5363,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
     const quickUsageScope = decodeEquipmentReservationNote(p.project_purpose || "").usageScope;
     const quickStoredNote = encodeEquipmentReservationNote(p.project_purpose || "Hızlı Çıkış", quickUsageScope);
-    if (hasPublicHolidayInRange(startAt, endAt)) {
-      return reply.code(409).send({ ok: false, error: "Reservations are closed on official public holidays." });
+    if (hasPublicHolidayAtEndpoints(startAt, endAt)) {
+      return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
     }
     try {
       await assertDepotSlotCapacity({ startAt, endAt });

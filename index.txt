@@ -3277,6 +3277,32 @@
       if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
       return (b - a) / 86400000;
     }
+    function equipmentClosedAndHolidayStatsInRange_(startIso, endIso) {
+      var s = new Date(String(startIso || ''));
+      var e = new Date(String(endIso || ''));
+      if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return { closedCount: 0, longestHolidayBlock: 0 };
+      var cur = new Date(s.getTime());
+      cur.setHours(0, 0, 0, 0);
+      var last = new Date(e.getTime() - 1);
+      last.setHours(0, 0, 0, 0);
+      var closedCount = 0;
+      var holidayRun = 0;
+      var longestHolidayBlock = 0;
+      while (cur <= last) {
+        var isHoliday = safeIsPublicHoliday(cur);
+        var wd = cur.getDay();
+        var isWeekend = (wd === 0 || wd === 6);
+        if (isHoliday || isWeekend) closedCount += 1;
+        if (isHoliday) {
+          holidayRun += 1;
+          if (holidayRun > longestHolidayBlock) longestHolidayBlock = holidayRun;
+        } else {
+          holidayRun = 0;
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      return { closedCount: closedCount, longestHolidayBlock: longestHolidayBlock };
+    }
     function equipmentHolidayDatesInRange_(startIso, endIso) {
       var s = new Date(String(startIso || ''));
       var e = new Date(String(endIso || ''));
@@ -3304,18 +3330,18 @@
       if (!sD || !sT || !eD || !eT) { el.classList.add('hidden'); return; }
       var blockedDates = equipmentHolidayDatesInRange_(sD + 'T' + sT, eD + 'T' + eT);
       if (blockedDates.length) {
-        txt.textContent = (currentLang==='tr'
-          ? ('Resmi tatil secimi var: ' + blockedDates.join(', ') + '. Bu aralikta rezervasyon olusturulamaz.')
-          : ('Official holiday selected: ' + blockedDates.join(', ') + '. Reservation cannot be created for this range.'));
-        el.classList.remove('hidden');
-        return;
+        // Tatil aralığına denk gelen rezervasyonlar artık desteklenir; sadece pickup/return günü tatil olamaz.
       }
       var span = bookingSpanDays(sD + 'T' + sT, eD + 'T' + eT);
       var maxD = bookingLimits.equipmentMaxDays != null ? bookingLimits.equipmentMaxDays : 2;
-      if (span > maxD + 1e-6) {
+      var stats = equipmentClosedAndHolidayStatsInRange_(sD + 'T' + sT, eD + 'T' + eT);
+      // Uzun resmi tatil bloğu (>1 gün) varsa 2 gün kuralı devre dışı.
+      if (stats.longestHolidayBlock > 1) { el.classList.add('hidden'); return; }
+      var effectiveMax = maxD + (stats.closedCount || 0);
+      if (span > effectiveMax + 1e-6) {
         txt.textContent = (currentLang==='tr'
-          ? ('Bu ekipman icin maksimum rezervasyon suresi: ' + maxD + ' gun.')
-          : ('Max reservation day for this equipment: ' + maxD + ' day(s).'));
+          ? ('Bu aralik icin izin verilen maksimum sure: ' + effectiveMax + ' gun (kapali/tatil gunleri otomatik eklendi).')
+          : ('Maximum allowed duration for this range: ' + effectiveMax + ' day(s) (closed/holiday days auto-added).'));
         el.classList.remove('hidden');
       } else el.classList.add('hidden');
     }
@@ -4336,11 +4362,6 @@
       var btn=document.getElementById('checkout-btn');var ot=btn?btn.innerText:'';if(btn){btn.innerHTML=prepH;btn.disabled=true;}
       var mbtn=document.getElementById('checkout-modal-reserve-btn');var mo='';if(mbtn){mo=mbtn.innerText;mbtn.innerHTML=prepH;mbtn.disabled=true;}
       checkOfficialHolidayClient(s, e, function(hc) {
-        if (hc.blocked) {
-          if(btn){btn.innerText=ot;btn.disabled=false;}if(mbtn){mbtn.innerText=mo||'Reserve selected';mbtn.disabled=false;}
-          showAlert(t('modalDeclined'), (currentLang==='tr' ? 'Resmi tatilde ekipman teslim/iade yapılamaz: ' : 'Equipment pickup/return is not allowed on official holidays: ') + (hc.dates || []).join(', '), true);
-          return;
-        }
         var queue = Promise.resolve([]);
         (ids || []).forEach(function(eqId) {
           queue = queue.then(function(results) {
