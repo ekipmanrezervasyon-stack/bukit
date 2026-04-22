@@ -3652,7 +3652,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     let q = supabaseAdmin
       .from("studio_reservations")
-      .select("id,studio_id")
+      .select("id,studio_id,start_at,end_at,status,requester_profile_id,requester_email,requester_name,access_level,approval_required,purpose")
       .eq("studio_id", studioId)
       .eq("requester_email", "studio.import@bilgi.edu.tr")
       .eq("requester_name", "Studio Maintenance")
@@ -3665,34 +3665,185 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (hit.error) return reply.code(500).send({ ok: false, error: hit.error.message });
     const rows = (hit.data ?? []) as Record<string, unknown>[];
     if (!rows.length) return { ok: true, success: true, unlocked: 0, ids: [] as string[] };
+    const unlockStartMs = new Date(startAt).getTime();
+    const unlockEndMs = new Date(endAt).getTime();
+    if (!Number.isFinite(unlockStartMs) || !Number.isFinite(unlockEndMs) || unlockEndMs <= unlockStartMs) {
+      return reply.code(400).send({ ok: false, error: "Invalid unlock range." });
+    }
+    const actorEmail = String(actor.email || "");
+    const processedIds: string[] = [];
+    for (const row of rows) {
+      const rowId = String(row.id || "").trim();
+      const rowStudioId = String(row.studio_id || "").trim();
+      const rowStartAt = String(row.start_at || "").trim();
+      const rowEndAt = String(row.end_at || "").trim();
+      const rowStartMs = new Date(rowStartAt).getTime();
+      const rowEndMs = new Date(rowEndAt).getTime();
+      if (!rowId || !rowStudioId || !Number.isFinite(rowStartMs) || !Number.isFinite(rowEndMs) || rowEndMs <= rowStartMs) continue;
+      if (!(rowStartMs < unlockEndMs && rowEndMs > unlockStartMs)) continue;
 
-    const ids = rows.map((r) => String(r.id || "")).filter(Boolean);
-    const upd = await supabaseAdmin
-      .from("studio_reservations")
-      .update({
-        status: STUDIO_CANCELLED_STATUS,
-        reviewed_by: String(actor.email || ""),
-        reviewed_at: new Date().toISOString()
-      })
-      .in("id", ids)
-      .select("id,studio_id");
-    if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
-    const updatedRows = (upd.data ?? []) as Record<string, unknown>[];
-    for (const row of updatedRows) {
       try {
         await deleteGreenStudioFromGoogleCalendar({
-          reservationId: String(row.id || ""),
-          studioId: String(row.studio_id || "")
+          reservationId: rowId,
+          studioId: rowStudioId
         });
       } catch (e) {
-        req.log.error({ err: e, reservationId: String(row.id || "") }, "remove studio maintenance lock from Google Calendar failed");
+        req.log.error({ err: e, reservationId: rowId }, "remove studio maintenance lock from Google Calendar failed before unlock split");
+      }
+
+      const unlockCoversLeft = unlockStartMs <= rowStartMs;
+      const unlockCoversRight = unlockEndMs >= rowEndMs;
+
+      // Full coverage: cancel whole lock row.
+      if (unlockCoversLeft && unlockCoversRight) {
+        const cancelRes = await supabaseAdmin
+          .from("studio_reservations")
+          .update({
+            status: STUDIO_CANCELLED_STATUS,
+            reviewed_by: actorEmail,
+            reviewed_at: new Date().toISOString()
+          })
+          .eq("id", rowId)
+          .select("id")
+          .maybeSingle();
+        if (cancelRes.error) return reply.code(500).send({ ok: false, error: cancelRes.error.message });
+        processedIds.push(rowId);
+        continue;
+      }
+
+      // Unlock cuts the middle: split into left(existing id) + right(new id).
+      if (!unlockCoversLeft && !unlockCoversRight) {
+        const leftEndIso = startAt;
+        const rightStartIso = endAt;
+
+        const leftUpd = await supabaseAdmin
+          .from("studio_reservations")
+          .update({
+            end_at: leftEndIso,
+            reviewed_by: actorEmail,
+            reviewed_at: new Date().toISOString()
+          })
+          .eq("id", rowId)
+          .select("*")
+          .single();
+        if (leftUpd.error) return reply.code(500).send({ ok: false, error: leftUpd.error.message });
+        processedIds.push(rowId);
+
+        const rightIns = await supabaseAdmin
+          .from("studio_reservations")
+          .insert({
+            studio_id: rowStudioId,
+            requester_profile_id: String(row.requester_profile_id || "").trim(),
+            requester_email: String(row.requester_email || ""),
+            requester_name: String(row.requester_name || ""),
+            access_level: String(row.access_level || "A"),
+            status: String(row.status || STUDIO_APPROVED_STATUS),
+            approval_required: Boolean(row.approval_required),
+            start_at: rightStartIso,
+            end_at: rowEndAt,
+            purpose: String(row.purpose || ""),
+            reviewed_by: actorEmail,
+            reviewed_at: new Date().toISOString()
+          })
+          .select("*")
+          .single();
+        if (rightIns.error) return reply.code(500).send({ ok: false, error: rightIns.error.message });
+        processedIds.push(String((rightIns.data as Record<string, unknown>).id || ""));
+
+        try {
+          await upsertApprovedGreenStudioToGoogleCalendar({
+            reservationId: String((leftUpd.data as Record<string, unknown>).id || rowId),
+            studioId: rowStudioId,
+            startAt: String((leftUpd.data as Record<string, unknown>).start_at || rowStartAt),
+            endAt: String((leftUpd.data as Record<string, unknown>).end_at || leftEndIso),
+            requesterName: String(row.requester_name || ""),
+            requesterEmail: String(row.requester_email || ""),
+            purpose: String(row.purpose || "")
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: rowId }, "sync left split studio lock to Google Calendar failed");
+        }
+        try {
+          const inserted = rightIns.data as Record<string, unknown>;
+          await upsertApprovedGreenStudioToGoogleCalendar({
+            reservationId: String(inserted.id || ""),
+            studioId: rowStudioId,
+            startAt: String(inserted.start_at || rightStartIso),
+            endAt: String(inserted.end_at || rowEndAt),
+            requesterName: String(inserted.requester_name || row.requester_name || ""),
+            requesterEmail: String(inserted.requester_email || row.requester_email || ""),
+            purpose: String(inserted.purpose || row.purpose || "")
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: rowId }, "sync right split studio lock to Google Calendar failed");
+        }
+        continue;
+      }
+
+      // Unlock touches left edge only: shift start forward.
+      if (unlockCoversLeft && !unlockCoversRight) {
+        const upd = await supabaseAdmin
+          .from("studio_reservations")
+          .update({
+            start_at: endAt,
+            reviewed_by: actorEmail,
+            reviewed_at: new Date().toISOString()
+          })
+          .eq("id", rowId)
+          .select("*")
+          .single();
+        if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
+        processedIds.push(rowId);
+        try {
+          const updated = upd.data as Record<string, unknown>;
+          await upsertApprovedGreenStudioToGoogleCalendar({
+            reservationId: String(updated.id || rowId),
+            studioId: rowStudioId,
+            startAt: String(updated.start_at || endAt),
+            endAt: String(updated.end_at || rowEndAt),
+            requesterName: String(updated.requester_name || row.requester_name || ""),
+            requesterEmail: String(updated.requester_email || row.requester_email || ""),
+            purpose: String(updated.purpose || row.purpose || "")
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: rowId }, "sync shifted-start studio lock to Google Calendar failed");
+        }
+        continue;
+      }
+
+      // Unlock touches right edge only: pull end back.
+      const upd = await supabaseAdmin
+        .from("studio_reservations")
+        .update({
+          end_at: startAt,
+          reviewed_by: actorEmail,
+          reviewed_at: new Date().toISOString()
+        })
+        .eq("id", rowId)
+        .select("*")
+        .single();
+      if (upd.error) return reply.code(500).send({ ok: false, error: upd.error.message });
+      processedIds.push(rowId);
+      try {
+        const updated = upd.data as Record<string, unknown>;
+        await upsertApprovedGreenStudioToGoogleCalendar({
+          reservationId: String(updated.id || rowId),
+          studioId: rowStudioId,
+          startAt: String(updated.start_at || rowStartAt),
+          endAt: String(updated.end_at || startAt),
+          requesterName: String(updated.requester_name || row.requester_name || ""),
+          requesterEmail: String(updated.requester_email || row.requester_email || ""),
+          purpose: String(updated.purpose || row.purpose || "")
+        });
+      } catch (e) {
+        req.log.error({ err: e, reservationId: rowId }, "sync shifted-end studio lock to Google Calendar failed");
       }
     }
     return {
       ok: true,
       success: true,
-      unlocked: updatedRows.length,
-      ids: updatedRows.map((r) => String(r.id || "")).filter(Boolean)
+      unlocked: processedIds.length,
+      ids: processedIds
     };
   });
 
