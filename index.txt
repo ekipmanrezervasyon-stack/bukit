@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, viewport-fit=cover">
   <meta name="recaptcha-site-key" content="">
+  <meta name="description" content="BUKit - Istanbul Bilgi University Faculty of Communication equipment and studio booking platform.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://bilgibooking.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="BUKit | BİLGİ">
+  <meta property="og:description" content="Equipment and studio booking for Istanbul Bilgi University Faculty of Communication.">
+  <meta property="og:url" content="https://bilgibooking.com/">
+  <meta name="google-site-verification" content="">
   <title>BUKit | BİLGİ</title>
   <link rel="preconnect" href="https://cdn.tailwindcss.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
