@@ -1398,6 +1398,8 @@
         msgEmptyCart: 'Add equipment to your cart first.',
         msgNoneSelectedToRemove: 'Choose items to remove from the cart.',
         msgReservationPlaced: 'Reservation placed!',
+        msgAddToExistingReservationTitle: 'Add to existing reservation',
+        msgAddToExistingReservationBody: 'You already have an active equipment reservation in this exact time window. Continue and add selected items to that reservation window?',
         msgNothingSelected: 'Select at least one item to reserve.',
         msgKvkkRequired: 'Please confirm that you have read and accepted the KVKK notice and Terms & Conditions.',
         confirmReservationResponsibility: 'Aldığınız ekipmanların tüm fonksiyonlarını doğru ve güvenli kullanmaktan kullanıcı sorumludur. Ekipman deposu, teslim sırasında ürün eğitimi veya teknik bilgilendirme sağlamaz.',
@@ -1516,6 +1518,8 @@
         msgEmptyCart: 'Once sepete ekipman ekleyin.',
         msgNoneSelectedToRemove: 'Septten cikarmak icin urun secin.',
         msgReservationPlaced: 'Rezervasyon olusturuldu!',
+        msgAddToExistingReservationTitle: 'Mevcut rezervasyona ekle',
+        msgAddToExistingReservationBody: 'Bu saat aralığında aktif ekipman rezervasyonunuz zaten var. Seçtiğiniz ürünleri bu rezervasyon penceresine eklemek için devam etmek ister misiniz?',
         msgNothingSelected: 'Rezervasyon icin en az bir urun secin.',
         msgKvkkRequired: 'KVKK metnini ve Sartlar-Kosullari okudugunuzu, kabul ettiginizi onaylayin.',
         confirmReservationResponsibility: 'Aldığınız ekipmanların tüm fonksiyonlarını doğru ve güvenli kullanmaktan kullanıcı sorumludur. Ekipman deposu, teslim sırasında ürün eğitimi veya teknik bilgilendirme sağlamaz.',
@@ -4362,6 +4366,29 @@
         cb({ blocked: false, error: (err && err.message) || '' });
       }).checkOfficialHolidayBridge(startIso, endIso, currentTestToken);
     }
+    function hasExistingEquipmentWindowReservation_(rows, startIso, endIso) {
+      var s = String(startIso || '').trim();
+      var e = String(endIso || '').trim();
+      if (!s || !e) return false;
+      var sMs = new Date(s).getTime();
+      var eMs = new Date(e).getTime();
+      return (rows || []).some(function(b) {
+        var tp = String((b && b.type) || '').toLowerCase();
+        if (tp !== 'equipment') return false;
+        var st = normalizeBookingStatus_(b && b.status);
+        var active = (st === 'pending' || st === 'approved' || st === 'approved by admin' || st === 'in use' || st === 'checked out' || st === 'picked up');
+        if (!active) return false;
+        var bs = String((b && b.start) || '').trim();
+        var be = String((b && b.end) || '').trim();
+        if (!bs || !be) return false;
+        var bsMs = new Date(bs).getTime();
+        var beMs = new Date(be).getTime();
+        if (!isNaN(sMs) && !isNaN(eMs) && !isNaN(bsMs) && !isNaN(beMs)) {
+          return bsMs === sMs && beMs === eMs;
+        }
+        return bs.slice(0, 16) === s.slice(0, 16) && be.slice(0, 16) === e.slice(0, 16);
+      });
+    }
     function doEquipmentCheckout(ids){
       validateEquipmentBookingRange();
       var warn=document.getElementById('equipment-range-warning');
@@ -4374,6 +4401,7 @@
       var usageScope=getSelectedEquipmentUsageScope();
       if(!usageScope){scrollToEquipmentPurposeField();highlightEquipmentUsageScopeField();showAlert(t('modalMissingData'),t('msgEquipmentUsageScopeRequired'),true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
+      var runCheckout = function() {
       var prepH = checkoutPreparingButtonHtml();
       var btn=document.getElementById('checkout-btn');var ot=btn?btn.innerText:'';if(btn){btn.innerHTML=prepH;btn.disabled=true;}
       var mbtn=document.getElementById('checkout-modal-reserve-btn');var mo='';if(mbtn){mo=mbtn.innerText;mbtn.innerHTML=prepH;mbtn.disabled=true;}
@@ -4440,6 +4468,22 @@
           }
           showAlert(t('modalError'), msg2, true);
         });
+      });
+      };
+      apiRequest('/me/bookings', { method: 'GET' }).then(function(payload){
+        var rows = (payload && payload.data) ? payload.data : [];
+        if (hasExistingEquipmentWindowReservation_(rows, s, e)) {
+          openConfirmUiModal(
+            t('msgAddToExistingReservationTitle'),
+            t('msgAddToExistingReservationBody'),
+            function(){ runCheckout(); },
+            'warning'
+          );
+          return;
+        }
+        runCheckout();
+      }).catch(function(){
+        runCheckout();
       });
     }
     window.submitCheckoutFromModal=function(){

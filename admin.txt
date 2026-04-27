@@ -3199,8 +3199,7 @@
       String(r.email || '').trim().toLowerCase(),
       String(r.userName || '').trim().toLowerCase(),
       String(r.handoverLabel || '').trim(),
-      String(r.returnLabel || '').trim(),
-      String(r.purpose || '').trim().toLowerCase()
+      String(r.returnLabel || '').trim()
     ].join('|');
   }
 
@@ -3532,8 +3531,7 @@
           String(row.email || '').trim().toLowerCase(),
           String(row.userName || '').trim().toLowerCase(),
           String(row.handoverLabel || '').trim(),
-          String(row.returnLabel || '').trim(),
-          String(row.purpose || '').trim().toLowerCase()
+          String(row.returnLabel || '').trim()
         ].join('|');
       if (!map[key]) {
         var seed = Object.assign({}, row);
