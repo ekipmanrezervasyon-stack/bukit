@@ -719,6 +719,29 @@ const buildIstanbulNineAmTargetIso = (endAtIso: string): string => {
   return target;
 };
 
+const buildIstanbulTodayAtIso = (hour: number, minute = 0): string => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    const map = new Map<string, string>();
+    for (const p of parts) map.set(String(p.type || ""), String(p.value || ""));
+    const yyyy = map.get("year") || "";
+    const mm = map.get("month") || "";
+    const dd = map.get("day") || "";
+    if (!yyyy || !mm || !dd) throw new Error("missing Istanbul date parts");
+    const hh = String(Math.max(0, Math.min(23, Number(hour) || 0))).padStart(2, "0");
+    const mi = String(Math.max(0, Math.min(59, Number(minute) || 0))).padStart(2, "0");
+    // Europe/Istanbul is fixed UTC+03:00.
+    return new Date(`${yyyy}-${mm}-${dd}T${hh}:${mi}:00+03:00`).toISOString();
+  } catch {
+    return new Date(new Date().setHours(hour, minute, 0, 0)).toISOString();
+  }
+};
+
 const buildReturnReminderLogKey = (reservationId: string, mode: "day_09" | "minus_4h", targetIso: string): string => {
   const rid = String(reservationId || "").trim() || "unknown";
   const targetToken = String(targetIso || "").replace(/[^0-9]/g, "").slice(0, 12) || "unknown";
@@ -5489,7 +5512,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const p = parsed.data;
     const startAt = new Date().toISOString();
-    const endAt = p.return_dt || new Date(new Date().setHours(17, 0, 0, 0)).toISOString();
+    const endAt = p.return_dt || buildIstanbulTodayAtIso(17, 0);
     const quickUsageScope = decodeEquipmentReservationNote(p.project_purpose || "").usageScope;
     const quickStoredNote = encodeEquipmentReservationNote(p.project_purpose || "Hızlı Çıkış", quickUsageScope);
     if (hasPublicHolidayAtEndpoints(startAt, endAt)) {

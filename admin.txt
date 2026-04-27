@@ -1793,8 +1793,54 @@
       if (f && f.contentWindow) {
         f.contentWindow.focus();
         f.contentWindow.print();
+        return;
       }
-    } catch (e0) { showToast('Yazdırma penceresi açılamadı.', 'error'); }
+      var src = f && f.getAttribute ? String(f.getAttribute('src') || '') : '';
+      if (src) {
+        openPdfPrintWindow_(src);
+        return;
+      }
+      showToast('Yazdırılacak PDF bulunamadı.', 'error');
+    } catch (e0) {
+      try {
+        var fb = f && f.getAttribute ? String(f.getAttribute('src') || '') : '';
+        if (fb) { openPdfPrintWindow_(fb); return; }
+      } catch (_e1) {}
+      showToast('Yazdırma penceresi açılamadı.', 'error');
+    }
+  }
+
+  function openPdfPrintWindow_(url) {
+    var src = String(url || '').trim();
+    if (!src) { showToast('PDF bağlantısı yok.', 'error'); return; }
+    var w = null;
+    try { w = window.open('', '_blank'); } catch (_eOpen) { w = null; }
+    if (!w) {
+      showToast('Tarayıcı açılır pencereyi engelledi. Lütfen popup izni verin.', 'error');
+      return;
+    }
+    try {
+      var esc = src.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+      w.document.open();
+      w.document.write(
+        '<!doctype html><html><head><meta charset="utf-8"><title>PDF Print</title></head>' +
+        '<body style="margin:0">' +
+        '<iframe id="pdfp" src="' + esc + '" style="position:fixed;inset:0;border:0;width:100%;height:100%"></iframe>' +
+        '<script>' +
+          '(function(){' +
+            'var f=document.getElementById("pdfp");' +
+            'var run=function(){try{window.focus();window.print();}catch(e){}};' +
+            'if(f){f.addEventListener("load",function(){setTimeout(run,250);});}' +
+            'setTimeout(run,900);' +
+          '})();' +
+        '<\/script>' +
+        '</body></html>'
+      );
+      w.document.close();
+    } catch (_eWrite) {
+      try { w.close(); } catch (_eClose) {}
+      showToast('PDF yazdırma penceresi hazırlanamadı.', 'error');
+    }
   }
 
   function openAdminStudentPdfFromBtn(el) {
@@ -3052,8 +3098,21 @@
       if (f && f.contentWindow) {
         f.contentWindow.focus();
         f.contentWindow.print();
+        return;
       }
-    } catch (e0) { showToast('Yazdırma penceresi açılamadı; PDF üzerinden deneyin.', 'error'); }
+      var src = f && f.getAttribute ? String(f.getAttribute('src') || '') : '';
+      if (src) {
+        openPdfPrintWindow_(src);
+        return;
+      }
+      showToast('Yazdırılacak PDF bulunamadı.', 'error');
+    } catch (e0) {
+      try {
+        var fb = f && f.getAttribute ? String(f.getAttribute('src') || '') : '';
+        if (fb) { openPdfPrintWindow_(fb); return; }
+      } catch (_e1) {}
+      showToast('Yazdırma penceresi açılamadı; PDF üzerinden deneyin.', 'error');
+    }
   }
 
   function finishQcInlineReset() {
@@ -4048,7 +4107,7 @@
     try {
       var d = new Date(iso);
       if (isNaN(d.getTime())) return String(iso || '—');
-      return d.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
+      return d.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Istanbul', hour12: false });
     } catch (e) {
       return String(iso || '—');
     }
@@ -4646,7 +4705,7 @@
         visible++;
         var badgeClass = statusMap[stRaw] || 'bg-gray-100 text-gray-600';
         var stShow = statusLabelTr[stRaw] || stRaw || '-';
-        var fmtDt = function(dt) { try { return dt ? new Date(dt).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'; } catch(e) { return dt || '-'; } };
+        var fmtDt = function(dt) { try { return dt ? new Date(dt).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul', hour12: false }) : '-'; } catch(e) { return dt || '-'; } };
         tbody.innerHTML += '<tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-5 py-3 text-[10px] font-mono text-gray-400">' + (r.eqCode || '-') + '</td><td class="px-5 py-3 text-[11px] font-bold text-gray-800">' + (r.eqName || '-') + '</td><td class="px-5 py-3 text-[11px] text-gray-600">' + (r.userName || '-') + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.startDt) + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.endDt) + '</td><td class="px-5 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-black ' + badgeClass + '">' + stShow + '</span></td></tr>';
       });
       if (!visible) tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Filtreye uygun kayıt bulunamadı.</td></tr>';
