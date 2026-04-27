@@ -13,6 +13,29 @@ const OtpCodeSchema = z.string().regex(/^\d{6}$/);
 const OTP_REQUESTS_ENABLED_KEY = "otp_requests_enabled";
 const OTP_REQUESTS_DISABLED_MESSAGE_KEY = "otp_requests_disabled_message";
 const DEFAULT_OTP_DISABLED_MESSAGE = "Yeni girişler geçici olarak durduruldu. Lütfen daha sonra tekrar deneyin.";
+const STUDENT_DEPT_BY_CODE: Record<string, { abbr: string }> = {
+  "31": { abbr: "MED" },
+  "32": { abbr: "ADV" },
+  "33": { abbr: "PUB" },
+  "34": { abbr: "FTV" },
+  "35": { abbr: "VCD" },
+  "36": { abbr: "MAP" },
+  "37": { abbr: "TVRP" },
+  "39": { abbr: "ART" },
+  "60": { abbr: "PA" },
+  "156": { abbr: "GAME" },
+  "305": { abbr: "CDM" }
+};
+
+const deriveStudentDepartmentFromNumber = (studentNoRaw: unknown): { code: string; abbr: string } | null => {
+  const sid = String(studentNoRaw ?? "").replace(/\D/g, "");
+  if (!sid) return null;
+  const code3 = sid.length >= 6 ? sid.substring(3, 6) : "";
+  const code2 = sid.length >= 5 ? sid.substring(3, 5) : "";
+  const rec = STUDENT_DEPT_BY_CODE[code3] || STUDENT_DEPT_BY_CODE[code2];
+  if (!rec) return null;
+  return { code: code3 && STUDENT_DEPT_BY_CODE[code3] ? code3 : code2, abbr: rec.abbr };
+};
 
 const parseBoolLike = (raw: unknown, fallback = true): boolean => {
   if (typeof raw === "boolean") return raw;
@@ -232,13 +255,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         token: z.string().min(20),
         full_name: z.string().min(2).max(120),
         student_number: z.string().min(4).max(32),
-        department_code: z.string().min(1).max(20),
-        department_name: z.string().min(1).max(120)
+        department_code: z.string().min(1).max(20).optional().default(""),
+        department_name: z.string().min(1).max(120).optional().default("")
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ ok: false, error: "Invalid payload." });
     const p = verifySessionToken(parsed.data.token);
     if (!p) return reply.code(401).send({ ok: false, error: "Invalid session token." });
+    const derivedDept = deriveStudentDepartmentFromNumber(parsed.data.student_number);
+    const fallbackDepartmentCode = String(parsed.data.department_code || "").trim().toUpperCase();
+    const fallbackDepartmentName = String(parsed.data.department_name || "").trim();
+    const departmentCode = String(derivedDept?.abbr || fallbackDepartmentCode || "GEN").trim().toUpperCase();
+    const departmentName = String(derivedDept?.abbr || fallbackDepartmentName || departmentCode || "General").trim();
 
     const { data, error } = await supabaseAdmin
       .from("profiles")
@@ -247,8 +275,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         user_type: "student",
         full_name: parsed.data.full_name,
         student_number: parsed.data.student_number,
-        department_code: parsed.data.department_code,
-        department_name: parsed.data.department_name,
+        department_code: departmentCode,
+        department_name: departmentName,
         onboarding_completed: true,
         updated_at: new Date().toISOString()
       })
