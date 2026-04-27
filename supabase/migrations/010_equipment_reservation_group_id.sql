@@ -11,7 +11,7 @@ with seeded as (
       nullif(r.reservation_group_id, ''),
       first_value(r.id) over (
         partition by
-          coalesce(nullif(r.requester_profile_id, ''), lower(coalesce(r.requester_email, '')), r.id),
+          coalesce(nullif(r.requester_profile_id::text, ''), lower(coalesce(r.requester_email, '')), r.id),
           r.start_at,
           r.end_at
         order by r.created_at nulls last, r.id
