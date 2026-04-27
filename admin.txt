@@ -3381,7 +3381,7 @@
       var phoneLine = res.phone ? '<p class="text-xs text-gray-600 mt-1">📞 ' + escAdm(res.phone) + '</p>' : '';
       var purposeBlock = res.purpose ? '<p class="text-[11px] text-gray-600 mt-2 whitespace-pre-wrap"><span class="font-black text-gray-500 uppercase tracking-wide mr-1">Açıklama:</span>' + escAdm(res.purpose) + '</p>' : '';
       var studioLinkBlock = (isStudio && String(res.projectLink || '').trim())
-        ? ('<p class="text-[11px] mt-1"><span class="font-black text-gray-500 uppercase tracking-wide mr-1">Link:</span><a class="text-blue-700 underline break-all" href="' + escAttr(String(res.projectLink || '').trim()) + '" target="_blank" rel="noopener noreferrer">' + escAdm(String(res.projectLink || '').trim()) + '</a></p>')
+        ? ('<p class="text-[11px] mt-1"><span class="font-black text-gray-500 uppercase tracking-wide mr-1">PDF:</span><a class="text-blue-700 underline break-all" href="' + escAttr(String(res.projectLink || '').trim()) + '" target="_blank" rel="noopener noreferrer">Drive PDF Aç</a></p>')
         : '';
       var pdfU = String(res.studentPdfUrl || '').trim();
       var pdfBtn = (pdfU.indexOf('http') === 0) ? '<button type="button" data-pdf-url="' + escAttr(pdfU) + '" onclick="openAdminStudentPdfFromBtn(this)" class="bg-blue-50 text-blue-700 font-bold py-4 px-4 rounded-xl text-xs border border-blue-200 hover:bg-blue-100 whitespace-nowrap">📄 Öğrenci PDF</button>' : '';

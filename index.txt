@@ -525,7 +525,7 @@
         <div><label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">End</label><div class="flex gap-1"><input type="text" id="studio-end-date" class="w-1/2 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="Date" readonly><select id="studio-end-time" class="w-1/2 bg-white border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl appearance-none font-semibold"><option value="" disabled selected>Time</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option></select></div></div>
         <div><label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">Talep türü</label><select id="studio-request-type" class="w-full bg-white border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl font-semibold"><option value="" disabled selected>Seçin</option><option value="Bireysel Öğrenci Projesi">Bireysel Öğrenci Projesi</option><option value="Grup Ders Projesi">Grup Ders Projesi</option><option value="Akademik Ders">Akademik Ders</option><option value="Kulüp Etkinlik">Kulüp Etkinlik</option><option value="Tiyatro Gösterisi">Tiyatro Gösterisi</option><option value="İdari Birim Talebi">İdari Birim Talebi</option><option value="Dış Kiralama">Dış Kiralama</option></select></div>
         <div><label for="studio-purpose" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1"><span id="i18n-studio-project-name-label">PROJECT EXPLANATION</span> <span class="text-red-500">*</span></label><p id="i18n-studio-project-name-hint" class="text-[9px] text-gray-400 mb-1">Required — max 500 characters.</p><div class="flex items-center gap-2"><input type="text" id="studio-purpose" maxlength="500" autocomplete="off" class="flex-1 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl font-semibold" placeholder="Briefly explain your studio use"><span id="studio-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/500</span></div></div>
-        <div><label id="studio-pdf-label" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1 text-bilgi-red">Project Link (Required)</label><input type="url" id="studio-pdf-url" class="w-full bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="https://drive.google.com/file/d/.../view"></div>
+        <div><label id="i18n-studio-pdf-label" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1 text-bilgi-red">PROJECT PDF (Required)</label><input type="file" id="studio-pdf-file" accept="application/pdf" class="w-full bg-gray-50 border border-gray-200 text-[14px] md:text-sm p-2 rounded-xl"><p id="i18n-studio-pdf-hint" class="text-[9px] text-gray-400 mt-1">Only PDF, max 10 MB. File is uploaded to Google Drive automatically.</p></div>
       </div>
       <div id="studio-range-warning" class="hidden mt-3 p-3 md:p-4 rounded-xl border border-rose-200/90 bg-gradient-to-br from-rose-50 to-white text-rose-950 shadow-sm">
         <p class="text-[11px] md:text-sm font-medium leading-relaxed" id="studio-range-warning-text"></p>
@@ -1414,10 +1414,13 @@
         studioProjectNameLabel: 'PROJECT EXPLANATION',
         studioProjectNameHint: 'Required — max 500 characters.',
         studioProjectNamePlaceholder: 'Briefly explain your studio use.',
+        studioProjectPdfLabel: 'PROJECT PDF (Required)',
+        studioProjectPdfHint: 'Only PDF, max 10 MB. File is uploaded to Google Drive automatically.',
         msgStudioProjectNameRequired: 'Enter a project explanation.',
         msgStudioProjectNameMax: 'Project explanation can be maximum 500 characters.',
-        msgStudioLinkRequired: 'Project link is required for studio reservations.',
-        msgStudioLinkInvalid: 'Please enter a valid link (https://...).'
+        msgStudioPdfRequired: 'Project PDF is required for studio reservations.',
+        msgStudioPdfInvalid: 'Please upload a valid PDF file.',
+        msgStudioPdfTooLarge: 'PDF size must be 10 MB or less.'
       },
       tr: {
         loginSubtitle: 'E-posta adresinize gönderilen tek kullanımlık şifre ile giriş yapın',
@@ -1529,10 +1532,13 @@
         studioProjectNameLabel: 'PROJE AÇIKLAMASI',
         studioProjectNameHint: 'Zorunlu — en fazla 500 karakter.',
         studioProjectNamePlaceholder: 'Stüdyo kullanım amacınızı kısaca yazın.',
+        studioProjectPdfLabel: 'PROJE PDF (Zorunlu)',
+        studioProjectPdfHint: 'Sadece PDF, en fazla 10 MB. Dosya otomatik olarak Google Drive\'a yüklenir.',
         msgStudioProjectNameRequired: 'Proje açıklaması zorunludur.',
         msgStudioProjectNameMax: 'Proje açıklaması en fazla 500 karakter olabilir.',
-        msgStudioLinkRequired: 'Stüdyo rezervasyonu için proje linki zorunludur.',
-        msgStudioLinkInvalid: 'Lütfen geçerli bir link girin (https://...).'
+        msgStudioPdfRequired: 'Stüdyo rezervasyonu için proje PDF dosyası zorunludur.',
+        msgStudioPdfInvalid: 'Lütfen geçerli bir PDF dosyası yükleyin.',
+        msgStudioPdfTooLarge: 'PDF boyutu en fazla 10 MB olabilir.'
       }
     };
 
@@ -1583,6 +1589,8 @@
       setTxt('i18n-studio-title', t('studioTitle'));
       setTxt('i18n-studio-project-name-label', t('studioProjectNameLabel'));
       setTxt('i18n-studio-project-name-hint', t('studioProjectNameHint'));
+      setTxt('i18n-studio-pdf-label', t('studioProjectPdfLabel'));
+      setTxt('i18n-studio-pdf-hint', t('studioProjectPdfHint'));
       setTxt('i18n-equipment-purpose-label', t('equipmentPurposeLabel'));
       setTxt('i18n-equipment-purpose-hint', t('equipmentPurposeHint'));
       setTxt('i18n-equipment-usage-scope-label', t('equipmentUsageScopeLabel'));
@@ -1606,10 +1614,6 @@
       if (eqSearch) eqSearch.placeholder = currentLang === 'tr' ? "Ekipman ara veya 'uygun'" : "Search gear or 'available'...";
       var eqPurpose = document.getElementById('equipment-purpose');
       if (eqPurpose) eqPurpose.placeholder = t('equipmentPurposePlaceholder');
-      var pdfUrlEl = document.getElementById('studio-pdf-url');
-      if (pdfUrlEl && !pdfUrlEl.placeholder) {
-        pdfUrlEl.placeholder = 'https://drive.google.com/file/d/.../view';
-      }
       document.querySelectorAll('.nav-btn-mobile[data-target]').forEach(function(btn) {
         var sp = btn.querySelector('span');
         if (!sp) return;
@@ -3358,7 +3362,7 @@
       } else el.classList.add('hidden');
     }
     function updateStudioPdfLock() {
-      var input = document.getElementById('studio-pdf-url');
+      var input = document.getElementById('studio-pdf-file');
       var locked = studioCalendarChecking || studioCalendarBusy;
       if (input) {
         input.disabled = !!locked;
@@ -4508,11 +4512,9 @@
       else view.appendChild(panel);
     }
     function updateStudioPdfRequirementUi() {
-      var label = document.getElementById('studio-pdf-label');
+      var label = document.getElementById('i18n-studio-pdf-label');
       if (!label) return;
-      var sid = String(activeStudioKey || activeStudioId || '').trim().toUpperCase();
-      var optional = (sid === 'PODCAST' || sid === 'DUBBING');
-      label.textContent = optional ? 'Project PDF Drive Link (Optional)' : 'Project PDF Drive Link (Required)';
+      label.textContent = t('studioProjectPdfLabel');
     }
 
     function updateStudioTimeWindowUi() {
@@ -4760,6 +4762,17 @@
       });
     }
 
+    function readStudioPdfAsDataUrl_(file) {
+      return new Promise(function(resolve, reject) {
+        try {
+          var reader = new FileReader();
+          reader.onload = function() { resolve(String(reader.result || '')); };
+          reader.onerror = function() { reject(new Error('PDF read failed.')); };
+          reader.readAsDataURL(file);
+        } catch (e) { reject(e); }
+      });
+    }
+
     window.submitStudioReservation=function(){
       var tokStudio = currentTestToken || localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || '';
       if (!tokStudio) {
@@ -4784,21 +4797,18 @@
       var p=String(document.getElementById('studio-purpose').value||'').trim();
       if(!p){showAlert(t('modalMissingData'),t('msgStudioProjectNameRequired'),true);return;}
       if(p.length>500){showAlert(t('modalError'),t('msgStudioProjectNameMax'),true);return;}
-      var pdfUrlInput=document.getElementById('studio-pdf-url');
-      var pdfUrl=String((pdfUrlInput&&pdfUrlInput.value)||'').trim();
+      var pdfFileInput=document.getElementById('studio-pdf-file');
+      var pdfFile=(pdfFileInput && pdfFileInput.files && pdfFileInput.files[0]) ? pdfFileInput.files[0] : null;
       var kp='';var pd=document.getElementById('green-weekend-pickup');
       if(!pd.classList.contains('hidden')){var kD=document.getElementById('studio-key-date').value,kT=document.getElementById('studio-key-time').value;if(!kD||!kT){showAlert(t('modalError'),"Select Friday pickup.",true);return;}kp=kD+"T"+kT;}
       if(!sD||!sT||!eD||!eT){showAlert(t('modalError'),"Complete all time slots.",true);return;}
       var reqTypeEl=document.getElementById('studio-request-type');
       var reqType=reqTypeEl?String(reqTypeEl.value||'').trim():'';
       if(!reqType){showAlert(t('modalError'),currentLang==='tr'?'Talep türü seçin.':'Select a request type.',true);return;}
-      if(!pdfUrl){showAlert(t('modalError'),t('msgStudioLinkRequired'),true);return;}
-      var linkIsValid = false;
-      try {
-        var parsedLink = new URL(pdfUrl);
-        linkIsValid = !!parsedLink && /^https?:$/i.test(String(parsedLink.protocol || ''));
-      } catch(_eUrl) { linkIsValid = false; }
-      if(!linkIsValid){showAlert(t('modalError'),t('msgStudioLinkInvalid'),true);return;}
+      if(!pdfFile){showAlert(t('modalError'),t('msgStudioPdfRequired'),true);return;}
+      var pdfType=String(pdfFile.type||'').toLowerCase();
+      if(pdfType && pdfType!=='application/pdf'){showAlert(t('modalError'),t('msgStudioPdfInvalid'),true);return;}
+      if(Number(pdfFile.size||0) > 10 * 1024 * 1024){showAlert(t('modalError'),t('msgStudioPdfTooLarge'),true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
       var btn=document.getElementById('studio-checkout-btn');var ot=btn.innerText;btn.innerText=(currentLang==='tr'?'Bekleyin...':'Wait...');btn.disabled=true;
       checkOfficialHolidayClient(s, e, function(hc) {
@@ -4807,7 +4817,7 @@
           showAlert(t('modalDeclined'), (currentLang==='tr' ? 'Resmi tatilde stüdyo teslim/iade yapılamaz: ' : 'Studio handover/return is not allowed on official holidays: ') + (hc.dates || []).join(', '), true);
           return;
         }
-      var finishStudioCreate=function(linkVal){
+      var finishStudioCreate=function(pdfDataUrl){
         apiRequest('/studio-reservations', {
           method: 'POST',
           body: {
@@ -4815,7 +4825,7 @@
             start_at: s,
             end_at: e,
             purpose: p,
-            project_link: linkVal
+            project_pdf_data_url: pdfDataUrl
           }
         }).then(function() {
           btn.innerText=ot;btn.disabled=false;
@@ -4829,14 +4839,20 @@
           var rts=document.getElementById('studio-request-type');if(rts)rts.selectedIndex=0;
           document.getElementById('studio-key-date').value='';
           document.getElementById('studio-key-time').value='';
-          if(pdfUrlInput)pdfUrlInput.value='';
+          if(pdfFileInput)pdfFileInput.value='';
           checkGreenWeekend();
         }).catch(function(err){
           btn.innerText=ot;btn.disabled=false;
           showAlert(t('modalError'),(err && err.message) || t('msgGenericFailed'),true);
         });
       };
-      finishStudioCreate(pdfUrl);
+      readStudioPdfAsDataUrl_(pdfFile).then(function(dataUrl){
+        if(!String(dataUrl||'').trim()){throw new Error(t('msgStudioPdfInvalid'));}
+        finishStudioCreate(String(dataUrl||''));
+      }).catch(function(err){
+        btn.innerText=ot;btn.disabled=false;
+        showAlert(t('modalError'),(err && err.message) || t('msgStudioPdfInvalid'),true);
+      });
       });
     };
 

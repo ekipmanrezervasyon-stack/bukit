@@ -17,7 +17,8 @@ const studioCreateSchema = z.object({
   start_at: isoDateSchema,
   end_at: isoDateSchema,
   purpose: z.string().min(3).max(500),
-  project_link: z.string().url().max(1000),
+  project_link: z.string().max(1000).optional().default(""),
+  project_pdf_data_url: z.string().max(20_000_000).optional().default(""),
   requester_email: z.string().email().max(190).optional()
 });
 
@@ -2346,6 +2347,39 @@ const uploadCheckoutPdfArchiveToDrive = async (payload: {
   return uploaded ? String(uploaded.url || "").trim() || null : null;
 };
 
+const buildStudioProjectPdfFilename = (payload: {
+  studentName: string;
+  studentNumber: string;
+  studioName: string;
+  startAt: string;
+}): string => {
+  const studentName = normalizePdfFileToken(payload.studentName || "-");
+  const studentNumber = normalizePdfFileToken(payload.studentNumber || "-");
+  const studioName = normalizePdfFileToken(payload.studioName || "Studio");
+  const dateToken = normalizePdfFileToken(formatPdfFilenameDateToken(payload.startAt));
+  return `${studentName}_${studentNumber}_${studioName}_${dateToken}.pdf`;
+};
+
+const uploadStudioProjectPdfToDrive = async (payload: {
+  studentName: string;
+  studentNumber: string;
+  studioName: string;
+  startAt: string;
+  pdfDataUrl: string;
+}): Promise<string | null> => {
+  const parsed = parsePdfDataUrl(payload.pdfDataUrl);
+  if (!parsed) return null;
+  const fileName = buildStudioProjectPdfFilename(payload);
+  const folderId = String(env.GOOGLE_STUDIO_PROJECT_PDF_FOLDER_ID || env.GOOGLE_PDF_FOLDER_ID || "").trim();
+  const uploaded = await uploadPdfToDrive({
+    fileName,
+    mimeType: parsed.mimeType,
+    base64: parsed.base64,
+    folderId
+  });
+  return uploaded ? String(uploaded.url || "").trim() || null : null;
+};
+
 const sendCheckoutPdfAttachmentEmail = async (
   toEmail: string,
   payload: {
@@ -3172,10 +3206,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ ok: false, error: msg });
     }
 
-    const { studio_id, start_at, end_at, purpose, project_link } = parsed.data;
+    const { studio_id, start_at, end_at, purpose, project_link, project_pdf_data_url } = parsed.data;
     const studioPurpose = String(purpose || "").trim();
-    const studioProjectLink = String(project_link || "").trim();
-    const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink);
+    let studioProjectLink = String(project_link || "").trim();
+    const studioProjectPdfDataUrl = String(project_pdf_data_url || "").trim();
     const startAt = normalizeIsoDateTimeInput(start_at);
     const endAt = normalizeIsoDateTimeInput(end_at);
     if (!startAt || !endAt) return reply.code(400).send({ ok: false, error: "Invalid datetime." });
@@ -3196,6 +3230,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!studio) return reply.code(404).send({ ok: false, error: "Studio not found." });
     if (!canAccessStudioByPolicy(profile, studio as Record<string, unknown>)) {
       return reply.code(403).send({ ok: false, error: "Studio is not available for your account." });
+    }
+    if (!studioProjectPdfDataUrl && !isAdminRole(profile.role)) {
+      return reply.code(400).send({ ok: false, error: "Project PDF is required for studio reservations." });
     }
 
     const overlap = await supabaseAdmin
@@ -3233,6 +3270,30 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!targetProfileId || !targetEmail || !targetEmail.includes("@")) {
       return reply.code(400).send({ ok: false, error: "Valid requester profile/email is required." });
     }
+    if (studioProjectPdfDataUrl) {
+      try {
+        const studentNumber = await resolveProfileNumberLabel(targetProfileId, targetEmail);
+        const uploadedProjectPdfUrl = await uploadStudioProjectPdfToDrive({
+          studentName: targetName || targetEmail,
+          studentNumber,
+          studioName: String((studio as Record<string, unknown>).name || studio_id),
+          startAt,
+          pdfDataUrl: studioProjectPdfDataUrl
+        });
+        if (!uploadedProjectPdfUrl) {
+          return reply.code(400).send({ ok: false, error: "Invalid studio project PDF payload." });
+        }
+        studioProjectLink = uploadedProjectPdfUrl;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        req.log.error({ err: e, studioId: studio_id, requesterEmail: targetEmail }, "upload studio project pdf to drive failed");
+        return reply.code(500).send({ ok: false, error: `PROJECT_PDF_UPLOAD_FAILED: ${msg}` });
+      }
+    }
+    if (!studioProjectLink) {
+      return reply.code(400).send({ ok: false, error: "Project PDF link is required." });
+    }
+    const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink);
 
     const payload = {
       studio_id,

@@ -29,6 +29,7 @@ const EnvSchema = z.object({
   GOOGLE_EQUIPMENT_FORM_DOC_ID: z.string().optional().default(""),
   GOOGLE_STUDIO_FORM_DOC_ID: z.string().optional().default(""),
   GOOGLE_PDF_FOLDER_ID: z.string().optional().default(""),
+  GOOGLE_STUDIO_PROJECT_PDF_FOLDER_ID: z.string().optional().default(""),
   GOOGLE_GREEN_STUDIO_CALENDAR_ID: z.string().optional().default(""),
   GOOGLE_GREEN_STUDIO_ID: z.string().optional().default("")
 });
