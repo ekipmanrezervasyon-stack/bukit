@@ -6,12 +6,12 @@ alter table if exists public.equipment_reservations
 
 with seeded as (
   select
-    r.id,
+    r.id::text as id,
     coalesce(
       nullif(r.reservation_group_id, ''),
-      first_value(r.id) over (
+      first_value(r.id::text) over (
         partition by
-          coalesce(nullif(r.requester_profile_id::text, ''), lower(coalesce(r.requester_email, '')), r.id),
+          coalesce(nullif(r.requester_profile_id::text, ''), lower(coalesce(r.requester_email, '')), r.id::text),
           r.start_at,
           r.end_at
         order by r.created_at nulls last, r.id
@@ -26,7 +26,7 @@ where t.id = seeded.id
   and coalesce(t.reservation_group_id, '') = '';
 
 update public.equipment_reservations
-set reservation_group_id = id
+set reservation_group_id = id::text
 where coalesce(reservation_group_id, '') = '';
 
 alter table public.equipment_reservations
