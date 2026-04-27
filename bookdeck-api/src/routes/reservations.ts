@@ -420,6 +420,39 @@ const insertEquipmentReservationAsCheckedOut = async (
   };
 };
 
+const resolveEquipmentReservationGroupId = async (payload: {
+  requesterProfileId?: string | null;
+  requesterEmail?: string | null;
+  startAt: string;
+  endAt: string;
+}): Promise<string> => {
+  const requesterProfileId = String(payload.requesterProfileId || "").trim();
+  const requesterEmail = String(payload.requesterEmail || "").trim().toLowerCase();
+  const startAt = String(payload.startAt || "").trim();
+  const endAt = String(payload.endAt || "").trim();
+  if (!startAt || !endAt) return randomUUID();
+  if (!requesterProfileId && !requesterEmail) return randomUUID();
+  const ownerFilter = requesterProfileId && requesterEmail
+    ? `requester_profile_id.eq.${requesterProfileId},requester_email.eq.${requesterEmail}`
+    : requesterProfileId
+      ? `requester_profile_id.eq.${requesterProfileId}`
+      : `requester_email.eq.${requesterEmail}`;
+  const existing = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,reservation_group_id")
+    .or(ownerFilter)
+    .eq("start_at", startAt)
+    .eq("end_at", endAt)
+    .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  const row = (existing.data ?? null) as Record<string, unknown> | null;
+  const groupId = String((row && (row.reservation_group_id || row.id)) || "").trim();
+  return groupId || randomUUID();
+};
+
 const hasPrivilegedStudioAccess = (role: string): boolean =>
   role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
 
@@ -2994,7 +3027,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const [eqRes, stRes] = await Promise.all([
       supabaseAdmin
         .from("equipment_reservations")
-        .select("id,equipment_item_id,start_at,end_at,status")
+        .select("id,reservation_group_id,equipment_item_id,start_at,end_at,status")
         .or(ownerFilter)
         .order("start_at", { ascending: false }),
       supabaseAdmin
@@ -3036,6 +3069,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const rows = [
       ...eqRows.map((r) => ({
         id: String(r.id || ""),
+        reservationGroupId: String((r as Record<string, unknown>).reservation_group_id || r.id || ""),
         type: "Equipment",
         item: (eqMetaById.get(String(r.equipment_item_id || "")) || { name: String(r.equipment_item_id || "") }).name,
         eqId: String(r.equipment_item_id || ""),
@@ -3544,6 +3578,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       approval_required: !isAdminRole(profile.role),
       start_at,
       end_at,
+      reservation_group_id: await resolveEquipmentReservationGroupId({
+        requesterProfileId: String(profile.id || "").trim(),
+        requesterEmail: String(profile.email || "").trim().toLowerCase(),
+        startAt: start_at,
+        endAt: end_at
+      }),
       note: encodeEquipmentReservationNote(note, usage_scope)
     };
 
@@ -4239,7 +4279,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const eqLookup = await supabaseAdmin
       .from("equipment_reservations")
-      .select("id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,requester_profile_id,required_level,note")
+      .select("id,reservation_group_id,equipment_item_id,status,start_at,end_at,requester_name,requester_email,requester_profile_id,required_level,note")
       .eq("id", id)
       .maybeSingle();
     if (eqLookup.error) return reply.code(500).send({ ok: false, error: eqLookup.error.message });
@@ -4260,6 +4300,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const reservationNoteStored = encodeEquipmentReservationNote(reservationNote, reservationUsageScope);
       const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
       const requesterName = String(eqRes.requester_name || "");
+      const reservationGroupId = String(eqRes.reservation_group_id || eqRes.id || "").trim() || randomUUID();
       const affectedReservationIds = new Set<string>([String(eqRes.id || id)]);
 
       const itemMetaRes = await supabaseAdmin
@@ -4382,6 +4423,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
               requester_profile_id: requesterProfileId,
               requester_email: requesterEmail,
               requester_name: requesterName,
+              reservation_group_id: reservationGroupId,
               required_level: requiredLevel,
               approval_required: false,
               start_at: reservationStartAt,
@@ -5701,6 +5743,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(409).send({ ok: false, error: msg });
     }
     const name = String(p.display_name || "").trim() || String(p.email.split("@")[0] || p.email);
+    const quickReservationGroupId = randomUUID();
     const results: string[] = [];
     const eqIdsForPdf: string[] = [];
     for (const rawId of p.cart_ids) {
@@ -5723,6 +5766,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         requester_profile_id: null,
         requester_email: p.email.toLowerCase(),
         requester_name: name,
+        reservation_group_id: quickReservationGroupId,
         required_level: 1,
         approval_required: false,
         start_at: startAt,
