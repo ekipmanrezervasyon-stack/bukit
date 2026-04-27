@@ -668,6 +668,63 @@ const isMissingColumnError = (err: unknown): boolean => {
   return msg.includes("Could not find the") && msg.includes("column");
 };
 
+const extractMissingColumnName = (err: unknown): string => {
+  const msg =
+    typeof err === "string"
+      ? err
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message?: string }).message || "")
+        : "";
+  const m = msg.match(/Could not find the '([^']+)' column/i);
+  return m ? String(m[1] || "").trim() : "";
+};
+
+const safeUpdateReservationPdfRefs = async (
+  table: "equipment_reservations" | "studio_reservations",
+  reservationIds: string[],
+  refs: { pdfUrl?: string | null; archiveUrl?: string | null }
+): Promise<void> => {
+  const ids = Array.from(new Set((reservationIds || []).map((x) => String(x || "").trim()).filter(Boolean)));
+  if (!ids.length) return;
+  const pdfUrl = String(refs.pdfUrl || "").trim();
+  const archiveUrl = String(refs.archiveUrl || "").trim();
+
+  let patch: Record<string, string> = {};
+  if (table === "equipment_reservations") {
+    if (pdfUrl) {
+      patch.pdf_url = pdfUrl;
+      patch.checkout_pdf_url = pdfUrl;
+    }
+    if (archiveUrl) {
+      patch.archive_url = archiveUrl;
+      patch.pdf_archive_url = archiveUrl;
+    }
+  } else {
+    if (pdfUrl) {
+      patch.pdf_url = pdfUrl;
+      patch.studio_usage_form_url = pdfUrl;
+      patch.checkout_pdf_url = pdfUrl;
+    }
+    if (archiveUrl) {
+      patch.archive_url = archiveUrl;
+      patch.pdf_archive_url = archiveUrl;
+    }
+  }
+  if (!Object.keys(patch).length) return;
+
+  for (const rid of ids) {
+    let localPatch: Record<string, string> = { ...patch };
+    while (Object.keys(localPatch).length) {
+      const upd = await supabaseAdmin.from(table).update(localPatch).eq("id", rid).select("id").maybeSingle();
+      if (!upd.error) break;
+      if (!isMissingColumnError(upd.error)) throw new Error(upd.error.message);
+      const miss = extractMissingColumnName(upd.error);
+      if (!miss || !Object.prototype.hasOwnProperty.call(localPatch, miss)) break;
+      delete localPatch[miss];
+    }
+  }
+};
+
 const parseIsoDate = (v: string): string => {
   const t = new Date(String(v || "")).getTime();
   if (Number.isNaN(t)) return "";
@@ -4142,6 +4199,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const reservationNoteStored = encodeEquipmentReservationNote(reservationNote, reservationUsageScope);
       const requesterEmail = String(eqRes.requester_email || "").toLowerCase();
       const requesterName = String(eqRes.requester_name || "");
+      const affectedReservationIds = new Set<string>([String(eqRes.id || id)]);
 
       const itemMetaRes = await supabaseAdmin
         .from("equipment_items")
@@ -4272,9 +4330,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
               reviewed_at: nowIso
             });
             if (createdExtra.error) return reply.code(500).send({ ok: false, error: createdExtra.error.message });
+            const createdExtraId = String((createdExtra.data as Record<string, unknown> | null)?.id || "").trim();
+            if (createdExtraId) affectedReservationIds.add(createdExtraId);
           } else {
             const existingId = String((existingExtra.data?.[0] as Record<string, unknown> | undefined)?.id || "").trim();
             if (existingId) {
+              affectedReservationIds.add(existingId);
               const updExisting = await updateEquipmentReservationToCheckedOut(existingId, {
                 reviewed_by: String(actor.email || ""),
                 reviewed_at: nowIso
@@ -4286,6 +4347,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (pdfUrl) {
+        try {
+          await safeUpdateReservationPdfRefs("equipment_reservations", Array.from(affectedReservationIds), {
+            pdfUrl,
+            archiveUrl: archiveDriveUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: String(eqRes.id || id) }, "persist equipment checkout pdf refs failed");
+        }
         const requesterNumber = await resolveProfileNumberLabel(String(requesterProfileId || ""), requesterEmail);
         if (requesterEmail && requesterEmail.includes("@")) {
           try {
@@ -4425,6 +4494,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
             });
           } catch (e) {
             req.log.error({ err: e, reservationId: String(stRow.id || id), requesterEmail }, "send studio checkout pdf mail failed");
+          }
+        }
+        if (pdfUrl) {
+          try {
+            await safeUpdateReservationPdfRefs("studio_reservations", [String(stRow.id || id)], {
+              pdfUrl,
+              archiveUrl: archiveDriveUrl
+            });
+          } catch (e) {
+            req.log.error({ err: e, reservationId: String(stRow.id || id) }, "persist studio checkout pdf refs failed");
           }
         }
         return {
@@ -5683,6 +5762,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           });
         } catch (e) {
           req.log.error({ err: e, reservationId: results[0] || "quick", securityEmail: SECURITY_OFFICE_EMAIL }, "send quick security equipment checkout pdf copy failed");
+        }
+      }
+      if (pdfUrl) {
+        try {
+          await safeUpdateReservationPdfRefs("equipment_reservations", results, {
+            pdfUrl,
+            archiveUrl: archiveDriveUrl
+          });
+        } catch (e) {
+          req.log.error({ err: e, reservationId: results[0] || "quick" }, "persist quick checkout pdf refs failed");
         }
       }
     }

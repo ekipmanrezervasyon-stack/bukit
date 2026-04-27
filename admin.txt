@@ -400,6 +400,7 @@
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Teslim</th>
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">İade</th>
                   <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider">Durum</th>
+                  <th class="px-5 py-4 text-[10px] font-black text-gray-400 uppercase tracking-wider text-right">PDF</th>
                 </tr>
               </thead>
               <tbody id="history-table-body"></tbody>
@@ -1444,21 +1445,34 @@
       getAdminReservationHistory: function() {
         return Promise.all([
           adminApiRequest('/equipment-reservations', { method: 'GET' }),
-          adminApiRequest('/equipment-items', { method: 'GET' })
+          adminApiRequest('/equipment-items', { method: 'GET' }),
+          adminApiRequest('/studio-reservations', { method: 'GET' }),
+          adminApiRequest('/studios', { method: 'GET' })
         ]).then(function(arr) {
           var eqRes = arr[0] || {};
           var invRes = arr[1] || {};
+          var stRes = arr[2] || {};
+          var stInvRes = arr[3] || {};
           var rows = Array.isArray(eqRes.data) ? eqRes.data : [];
+          var stRows = Array.isArray(stRes.data) ? stRes.data : [];
           var inv = Array.isArray(invRes.data) ? invRes.data : [];
+          var stInv = Array.isArray(stInvRes.data) ? stInvRes.data : [];
           var nameById = {};
           var codeById = {};
+          var studioNameById = {};
           inv.forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
             if (!iid) return;
             nameById[iid] = String((it && it.name) || iid);
             codeById[iid] = String((it && (it.equipment_id || it.code)) || '').trim().toUpperCase();
           });
-          return rows.map(function(r) {
+          stInv.forEach(function(st) {
+            var sid = String((st && st.id) || '').trim();
+            if (!sid) return;
+            studioNameById[sid] = String((st && (st.name || st.studio_name || st.code)) || sid);
+          });
+
+          var outEq = rows.map(function(r) {
             var eqId = String((r && r.equipment_item_id) || '').trim();
             return {
               resId: String((r && r.id) || ''),
@@ -1467,9 +1481,27 @@
               userName: String((r && (r.requester_name || r.requester_email)) || '—'),
               startDt: String((r && r.start_at) || ''),
               endDt: String((r && r.end_at) || ''),
-              status: String((r && r.status) || '')
+              status: String((r && r.status) || ''),
+              kind: 'equipment',
+              pdfUrl: String((r && (r.pdf_url || r.archive_url || r.checkout_pdf_url || r.pdf_archive_url)) || '').trim()
             };
-          }).sort(function(a, b) {
+          });
+          var outSt = stRows.map(function(r) {
+            var sid = String((r && r.studio_id) || '').trim();
+            var sName = studioNameById[sid] || sid || 'Stüdyo';
+            return {
+              resId: String((r && r.id) || ''),
+              eqCode: (sid ? ('🔑 ' + sid) : '🔑 STUDIO'),
+              eqName: sName + ' · Anahtar',
+              userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+              startDt: String((r && r.start_at) || ''),
+              endDt: String((r && r.end_at) || ''),
+              status: String((r && r.status) || ''),
+              kind: 'studio',
+              pdfUrl: String((r && (r.studio_usage_form_url || r.pdf_url || r.archive_url || r.checkout_pdf_url || r.pdf_archive_url)) || '').trim()
+            };
+          });
+          return outEq.concat(outSt).sort(function(a, b) {
             return new Date(String(b.startDt || '')).getTime() - new Date(String(a.startDt || '')).getTime();
           });
         }).catch(function() {
@@ -4705,12 +4737,12 @@
     var userFilter = userFilterEl ? String(userFilterEl.value || '').trim().toLowerCase() : '';
     var eqFilter = eqFilterEl ? String(eqFilterEl.value || '').trim().toLowerCase() : '';
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400 animate-pulse">Yükleniyor...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-gray-400 animate-pulse">Yükleniyor...</td></tr>';
     google.script.run.withSuccessHandler(function(data) {
-      if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Kayıt bulunamadı.</td></tr>'; return; }
+      if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-gray-400">Kayıt bulunamadı.</td></tr>'; return; }
       tbody.innerHTML = '';
-      var statusMap = { 'Pending': 'bg-yellow-100 text-yellow-700', 'Approved': 'bg-green-100 text-green-700', 'Rejected': 'bg-red-100 text-red-700', 'Rejected (Removed)': 'bg-red-100 text-red-700', 'Cancelled': 'bg-gray-100 text-gray-500', 'Picked Up': 'bg-blue-100 text-blue-700', 'Returned': 'bg-emerald-100 text-emerald-700' };
-      var statusLabelTr = { 'Pending': 'Onay Bekliyor', 'Approved': 'Onaylandı', 'Picked Up': 'Teslim Alındı', 'Returned': 'İade Geldi' };
+      var statusMap = { 'Pending': 'bg-yellow-100 text-yellow-700', 'pending': 'bg-yellow-100 text-yellow-700', 'approved': 'bg-green-100 text-green-700', 'Approved': 'bg-green-100 text-green-700', 'approved_by_admin': 'bg-green-100 text-green-700', 'Rejected': 'bg-red-100 text-red-700', 'Rejected (Removed)': 'bg-red-100 text-red-700', 'rejected': 'bg-red-100 text-red-700', 'rejected_by_admin': 'bg-red-100 text-red-700', 'Cancelled': 'bg-gray-100 text-gray-500', 'cancelled': 'bg-gray-100 text-gray-500', 'cancelled_by_user': 'bg-gray-100 text-gray-500', 'Picked Up': 'bg-blue-100 text-blue-700', 'picked_up': 'bg-blue-100 text-blue-700', 'key_picked': 'bg-blue-100 text-blue-700', 'IN_USE': 'bg-blue-100 text-blue-700', 'in_use': 'bg-blue-100 text-blue-700', 'Returned': 'bg-emerald-100 text-emerald-700', 'returned': 'bg-emerald-100 text-emerald-700', 'key_returned': 'bg-emerald-100 text-emerald-700' };
+      var statusLabelTr = { 'Pending': 'Onay Bekliyor', 'pending': 'Onay Bekliyor', 'Approved': 'Onaylandı', 'approved': 'Onaylandı', 'approved_by_admin': 'Onaylandı', 'Picked Up': 'Teslim Alındı', 'picked_up': 'Teslim Alındı', 'key_picked': 'Anahtar Teslim', 'IN_USE': 'Teslim Alındı', 'in_use': 'Teslim Alındı', 'Returned': 'İade Geldi', 'returned': 'İade Geldi', 'key_returned': 'Anahtar İade', 'rejected': 'Reddedildi', 'rejected_by_admin': 'Reddedildi', 'cancelled': 'İptal', 'cancelled_by_user': 'İptal' };
       var visible = 0;
       data.forEach(function(r) {
         var stRaw = String(r.status || '').trim();
@@ -4724,11 +4756,15 @@
         var badgeClass = statusMap[stRaw] || 'bg-gray-100 text-gray-600';
         var stShow = statusLabelTr[stRaw] || stRaw || '-';
         var fmtDt = function(dt) { try { return dt ? new Date(dt).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul', hour12: false }) : '-'; } catch(e) { return dt || '-'; } };
-        tbody.innerHTML += '<tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-5 py-3 text-[10px] font-mono text-gray-400">' + (r.eqCode || '-') + '</td><td class="px-5 py-3 text-[11px] font-bold text-gray-800">' + (r.eqName || '-') + '</td><td class="px-5 py-3 text-[11px] text-gray-600">' + (r.userName || '-') + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.startDt) + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.endDt) + '</td><td class="px-5 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-black ' + badgeClass + '">' + stShow + '</span></td></tr>';
+        var pdfU = String(r.pdfUrl || '').trim();
+        var pdfBtn = (pdfU.indexOf('http') === 0 || pdfU.indexOf('data:application/pdf') === 0 || pdfU.indexOf('data:') === 0)
+          ? ('<button type="button" data-pdf-url="' + escAttr(pdfU) + '" onclick="openAdminStudentPdfFromBtn(this)" class="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black hover:bg-blue-100">PDF GÖR</button>')
+          : '<span class="text-[10px] text-gray-300">—</span>';
+        tbody.innerHTML += '<tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-5 py-3 text-[10px] font-mono text-gray-400">' + (r.eqCode || '-') + '</td><td class="px-5 py-3 text-[11px] font-bold text-gray-800">' + (r.eqName || '-') + '</td><td class="px-5 py-3 text-[11px] text-gray-600">' + (r.userName || '-') + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.startDt) + '</td><td class="px-5 py-3 text-[10px] text-gray-500">' + fmtDt(r.endDt) + '</td><td class="px-5 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-black ' + badgeClass + '">' + stShow + '</span></td><td class="px-5 py-3 text-right">' + pdfBtn + '</td></tr>';
       });
-      if (!visible) tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Filtreye uygun kayıt bulunamadı.</td></tr>';
+      if (!visible) tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-gray-400">Filtreye uygun kayıt bulunamadı.</td></tr>';
     }).withFailureHandler(function(err) {
-      tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-red-500">Hata: ' + (err.message || '') + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-red-500">Hata: ' + (err.message || '') + '</td></tr>';
     }).getAdminReservationHistory(currentAuthToken);
   }
 
