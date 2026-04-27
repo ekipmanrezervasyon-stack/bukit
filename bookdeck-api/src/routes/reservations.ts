@@ -3358,36 +3358,36 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           : profileId
             ? `requester_profile_id.eq.${profileId}`
             : `requester_email.eq.${requesterEmail}`;
-        const loansRes = await supabaseAdmin
+        const activeCategoryRes = await supabaseAdmin
           .from("equipment_reservations")
           .select("equipment_item_id")
           .or(ownerFilter)
-          .in("status", EQUIPMENT_ON_LOAN_RES_STATUSES);
-        if (loansRes.error) return reply.code(500).send({ ok: false, error: loansRes.error.message });
+          .in("status", EQUIPMENT_ACTIVE_RES_STATUSES);
+        if (activeCategoryRes.error) return reply.code(500).send({ ok: false, error: activeCategoryRes.error.message });
 
-        const loanItemIds = Array.from(
+        const activeCategoryItemIds = Array.from(
           new Set(
-            (loansRes.data ?? [])
+            (activeCategoryRes.data ?? [])
               .map((r) => String((r as Record<string, unknown>).equipment_item_id || "").trim())
               .filter(Boolean)
           )
         );
-        if (loanItemIds.length) {
-          const loanItemsRes = await supabaseAdmin
+        if (activeCategoryItemIds.length) {
+          const activeCategoryItemsRes = await supabaseAdmin
             .from("equipment_items")
             .select("id,name,category,type,type_desc,equipment_id")
-            .in("id", loanItemIds);
-          if (loanItemsRes.error) return reply.code(500).send({ ok: false, error: loanItemsRes.error.message });
-          let sameCategoryOnLoan = 0;
-          for (const li of (loanItemsRes.data ?? []) as Record<string, unknown>[]) {
-            if (resolveEquipmentCategoryBucket(li) === targetCategory) sameCategoryOnLoan += 1;
+            .in("id", activeCategoryItemIds);
+          if (activeCategoryItemsRes.error) return reply.code(500).send({ ok: false, error: activeCategoryItemsRes.error.message });
+          let sameCategoryActiveCount = 0;
+          for (const li of (activeCategoryItemsRes.data ?? []) as Record<string, unknown>[]) {
+            if (resolveEquipmentCategoryBucket(li) === targetCategory) sameCategoryActiveCount += 1;
           }
-          if (sameCategoryOnLoan >= maxInCategory) {
+          if (sameCategoryActiveCount >= maxInCategory) {
             return reply.code(409).send({
               ok: false,
               error:
-                `Bu kategoride limit dolu (${targetCategory}: ${sameCategoryOnLoan}/${maxInCategory}). ` +
-                "Üzerinizdeki ekipmanı iade etmeden bu kategoriden yeni rezervasyon açamazsınız."
+                `Bu kategoride aktif limit dolu (${targetCategory}: ${sameCategoryActiveCount}/${maxInCategory}). ` +
+                "Bekleyen/onaylı veya üzerinizde ekipman varken bu kategoriden yeni rezervasyon açamazsınız."
             });
           }
         }
