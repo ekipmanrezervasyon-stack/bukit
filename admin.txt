@@ -2155,7 +2155,8 @@
         ? '<button type="button" onclick="submitPartialCheckout(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-blue-600 text-white text-base font-semibold shadow-sm hover:bg-blue-700 transition-colors duration-150">📄 PDF Form</button>'
         : '<button type="button" onclick="submitPartialCheckin(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-blue-600 text-white text-base font-semibold shadow-sm hover:bg-blue-700 transition-colors duration-150">📥 İade Al</button>';
       var footerActionBtns = '<button type="button" onclick="adminTrafficTransferAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-gray-500 text-white text-base font-semibold shadow-sm hover:bg-gray-600 transition-colors duration-150">⇄ Devret</button>' +
-        '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-green-600 text-white text-base font-semibold shadow-sm hover:bg-green-700 transition-colors duration-150">↻ Uzat</button>';
+        '<button type="button" onclick="adminTrafficExtendAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-green-600 text-white text-base font-semibold shadow-sm hover:bg-green-700 transition-colors duration-150">↻ Uzat</button>' +
+        '<button type="button" onclick="adminTrafficCancelAct(\'' + ridJs + '\')" class="inline-flex items-center px-6 py-2.5 rounded-md bg-red-600 text-white text-base font-semibold shadow-sm hover:bg-red-700 transition-colors duration-150">✕ İptal</button>';
       var addUi = '';
       if (isPickup) {
         addUi = '<div class="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-2.5">' +
