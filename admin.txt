@@ -4708,17 +4708,26 @@
     var t1 = document.getElementById('fe-start-time');
     var d2 = document.getElementById('fe-end-date');
     var t2 = document.getElementById('fe-end-time');
+    var periodEl = document.getElementById('fe-period');
     var warn = document.getElementById('fe-holiday-warning');
     var btn = document.getElementById('fe-submit-btn');
     if (!warn || !btn || !d1 || !t1 || !d2 || !t2) return false;
+    var period = periodEl ? String(periodEl.value || 'once') : 'once';
     var sd = d1.value && t1.value ? (d1.value + 'T' + t1.value) : '';
     var ed = d2.value && t2.value ? (d2.value + 'T' + t2.value) : '';
     var blocked = forwardHolidayDatesInRange_(sd, ed);
     if (blocked.length) {
-      warn.textContent = 'Resmi tatil secimi var: ' + blocked.join(', ') + '. Bu aralikta rezervasyon yapilamaz.';
+      warn.textContent = (period === 'once')
+        ? ('Resmi tatil secimi var: ' + blocked.join(', ') + '. Bu aralikta rezervasyon yapilamaz.')
+        : ('Resmi tatil secimi var: ' + blocked.join(', ') + '. Tekrarlı rezervasyonda bu slotlar otomatik atlanır.');
       warn.classList.remove('hidden');
-      btn.disabled = true;
-      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      if (period === 'once') {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+      } else {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
       return true;
     }
     warn.classList.add('hidden');
@@ -4788,29 +4797,104 @@
     var endPeriod = document.getElementById('fe-end-period-date') ? document.getElementById('fe-end-period-date').value : '';
     var period = document.getElementById('fe-period').value;
     var purpose = document.getElementById('fe-purpose').value.trim();
+    var hasHolidayInCurrentWindow = updateForwardHolidayWarning_();
     if (!userKey || !forwardCart.length || !sd || !ed) { showToast('E-posta/öğrenci no, sepet ve teslim/iade zamanları gerekli.', 'error'); return; }
     if (period !== 'once' && !endPeriod) { showToast('Tekrarlı rezervasyonda tekrar bitiş tarihi zorunlu.', 'error'); return; }
     if (new Date(ed).getTime() <= new Date(sd).getTime()) { showToast('İade, teslimden sonra olmalı.', 'error'); return; }
-    if (period !== 'once') { showToast('Yeni API sürümünde tekrar eden ekipman rezervasyonu şimdilik kapalı.', 'error'); return; }
-    showToast('Oluşturuluyor…', 'info');
-    Promise.allSettled((forwardCart || []).map(function(itemId) {
+    if (period === 'once' && hasHolidayInCurrentWindow) { showToast('Resmi tatillerde rezervasyon kapalıdır.', 'error'); return; }
+    var toLocalInputDt_ = function(dt) {
+      var d = dt instanceof Date ? dt : new Date(String(dt || ''));
+      if (isNaN(d.getTime())) return '';
+      var y = d.getFullYear();
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      var hh = String(d.getHours()).padStart(2, '0');
+      var mm = String(d.getMinutes()).padStart(2, '0');
+      return y + '-' + m + '-' + day + 'T' + hh + ':' + mm;
+    };
+    var buildRecurringForwardSlots_ = function(startIso, endIso, periodType, endPeriodDate) {
+      var out = [];
+      var s0 = new Date(String(startIso || ''));
+      var e0 = new Date(String(endIso || ''));
+      if (isNaN(s0.getTime()) || isNaN(e0.getTime()) || e0 <= s0) return out;
+      var durationMs = e0.getTime() - s0.getTime();
+      var curS = new Date(s0.getTime());
+      var maxIterations = 800;
+      var untilMs = periodType === 'once'
+        ? curS.getTime()
+        : new Date(String(endPeriodDate || '') + 'T23:59:59').getTime();
+      if (periodType !== 'once' && isNaN(untilMs)) return out;
+      for (var i = 0; i < maxIterations; i++) {
+        if (curS.getTime() > untilMs) break;
+        var curE = new Date(curS.getTime() + durationMs);
+        out.push({ start_at: toLocalInputDt_(curS), end_at: toLocalInputDt_(curE) });
+        if (periodType === 'once') break;
+        if (periodType === 'daily') {
+          curS.setDate(curS.getDate() + 1);
+        } else if (periodType === 'weekly') {
+          curS.setDate(curS.getDate() + 7);
+        } else if (periodType === 'monthly') {
+          var next = new Date(curS.getTime());
+          next.setMonth(next.getMonth() + 1);
+          curS = next;
+        } else {
+          break;
+        }
+      }
+      return out;
+    };
+    var slots = buildRecurringForwardSlots_(sd, ed, period, endPeriod);
+    if (!slots.length) { showToast('Tekrar slotları oluşturulamadı.', 'error'); return; }
+    var validSlots = slots.filter(function(sl) {
+      return forwardHolidayDatesInRange_(String(sl.start_at || ''), String(sl.end_at || '')).length === 0;
+    });
+    if (!validSlots.length) { showToast('Seçilen tekrar aralığındaki tüm slotlar resmi tatile denk geliyor.', 'error'); return; }
+    var skippedHolidays = slots.length - validSlots.length;
+    var jobList = [];
+    validSlots.forEach(function(sl) {
+      (forwardCart || []).forEach(function(itemId) {
+        jobList.push({ itemId: String(itemId || ''), slot: sl });
+      });
+    });
+    if (!jobList.length) { showToast('Rezervasyon için uygun kalem bulunamadı.', 'error'); return; }
+
+    showToast('Oluşturuluyor… (' + jobList.length + ' işlem)', 'info');
+    Promise.allSettled(jobList.map(function(job) {
       return adminApiRequest('/equipment-reservations', {
         method: 'POST',
         body: {
-          equipment_item_id: String(itemId || ''),
-          start_at: sd,
-          end_at: ed,
-          note: purpose || 'Admin ileri tarihli rezervasyon'
+          equipment_item_id: job.itemId,
+          start_at: String(job.slot.start_at || ''),
+          end_at: String(job.slot.end_at || ''),
+          note: purpose || 'Admin ileri tarihli rezervasyon',
+          usage_scope: 'on_campus'
         }
       });
     })).then(function(results) {
       var okCount = results.filter(function(r) { return r.status === 'fulfilled'; }).length;
+      var failCount = results.length - okCount;
       var fail = results.find(function(r) { return r.status === 'rejected'; });
-      if (okCount > 0) showToast('Tamam: ' + okCount + ' rezervasyon oluşturuldu.');
-      if (fail && fail.status === 'rejected') {
-        showToast((fail.reason && fail.reason.message) || 'Bazı kalemler oluşturulamadı.', 'error');
-      } else {
+      if (okCount > 0 && failCount === 0) {
+        var msgOk = 'Tamam: ' + okCount + ' rezervasyon oluşturuldu.';
+        if (skippedHolidays > 0) msgOk += ' (' + skippedHolidays + ' slot resmi tatil nedeniyle atlandı)';
+        showToast(msgOk, 'success');
         loadForwardEquipPage();
+        return;
+      }
+      if (okCount > 0 && failCount > 0) {
+        var msgPartial = 'Kısmi tamamlandı: ' + okCount + ' başarılı, ' + failCount + ' başarısız.';
+        if (skippedHolidays > 0) msgPartial += ' (' + skippedHolidays + ' slot resmi tatil nedeniyle atlandı)';
+        showToast(msgPartial, 'info');
+        loadForwardEquipPage();
+        if (fail && fail.status === 'rejected') showToast((fail.reason && fail.reason.message) || 'Bazı kalemler oluşturulamadı.', 'error');
+        return;
+      }
+      if (fail && fail.status === 'rejected') {
+        var msgFail = (fail.reason && fail.reason.message) || 'Rezervasyon oluşturulamadı.';
+        if (skippedHolidays > 0) msgFail += ' (' + skippedHolidays + ' slot resmi tatil nedeniyle atlandı)';
+        showToast(msgFail, 'error');
+      } else {
+        showToast('Rezervasyon oluşturulamadı.', 'error');
       }
     }).catch(function(e) { showToast((e && e.message) || 'Hata', 'error'); });
   }
