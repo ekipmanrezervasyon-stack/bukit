@@ -524,8 +524,8 @@
         <div><label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">Start</label><div class="flex gap-1"><input type="text" id="studio-start-date" class="w-1/2 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="Date" readonly><select id="studio-start-time" class="w-1/2 bg-white border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl appearance-none font-semibold"><option value="" disabled selected>Time</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option></select></div></div>
         <div><label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">End</label><div class="flex gap-1"><input type="text" id="studio-end-date" class="w-1/2 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="Date" readonly><select id="studio-end-time" class="w-1/2 bg-white border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl appearance-none font-semibold"><option value="" disabled selected>Time</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option></select></div></div>
         <div><label class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1">Talep türü</label><select id="studio-request-type" class="w-full bg-white border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl font-semibold"><option value="" disabled selected>Seçin</option><option value="Bireysel Öğrenci Projesi">Bireysel Öğrenci Projesi</option><option value="Grup Ders Projesi">Grup Ders Projesi</option><option value="Akademik Ders">Akademik Ders</option><option value="Kulüp Etkinlik">Kulüp Etkinlik</option><option value="Tiyatro Gösterisi">Tiyatro Gösterisi</option><option value="İdari Birim Talebi">İdari Birim Talebi</option><option value="Dış Kiralama">Dış Kiralama</option></select></div>
-        <div><label for="studio-purpose" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1"><span id="i18n-studio-project-name-label">PROJECT NAME</span> <span class="text-red-500">*</span></label><p id="i18n-studio-project-name-hint" class="text-[9px] text-gray-400 mb-1">Max 20 characters — short project code.</p><div class="flex items-center gap-2"><input type="text" id="studio-purpose" maxlength="20" autocomplete="off" class="flex-1 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl font-mono font-bold" placeholder="e.g. SHOOT01"><span id="studio-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/20</span></div></div>
-        <div><label id="studio-pdf-label" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1 text-bilgi-red">Project PDF Drive Link (Required)</label><input type="url" id="studio-pdf-url" class="w-full bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="https://drive.google.com/file/d/.../view"></div>
+        <div><label for="studio-purpose" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1"><span id="i18n-studio-project-name-label">PROJECT EXPLANATION</span> <span class="text-red-500">*</span></label><p id="i18n-studio-project-name-hint" class="text-[9px] text-gray-400 mb-1">Required — max 500 characters.</p><div class="flex items-center gap-2"><input type="text" id="studio-purpose" maxlength="500" autocomplete="off" class="flex-1 bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl font-semibold" placeholder="Briefly explain your studio use"><span id="studio-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/500</span></div></div>
+        <div><label id="studio-pdf-label" class="block text-[10px] md:text-xs font-bold text-gray-400 uppercase mb-1 text-bilgi-red">Project Link (Required)</label><input type="url" id="studio-pdf-url" class="w-full bg-gray-50 border border-gray-200 text-[16px] md:text-sm p-2 rounded-xl" placeholder="https://drive.google.com/file/d/.../view"></div>
       </div>
       <div id="studio-range-warning" class="hidden mt-3 p-3 md:p-4 rounded-xl border border-rose-200/90 bg-gradient-to-br from-rose-50 to-white text-rose-950 shadow-sm">
         <p class="text-[11px] md:text-sm font-medium leading-relaxed" id="studio-range-warning-text"></p>
@@ -1411,11 +1411,13 @@
         kvkkReadLabel: 'I have read and accept KVKK and Terms & Conditions.',
         lateReturnPolicyTitle: 'Late returns & account suspension',
         lateReturnPolicyBody: 'Your return is judged only by the date and time on your booking (there is no separate “closing time” rule on top of that). Up to 30 minutes after your booked return time: yellow warning. More than 30 minutes late: if another user is scheduled to pick up the same equipment within about 32 minutes after you return, your account is suspended for 15 days right away, and the next person is told to contact the equipment desk. If you are more than 30 minutes late and no such pickup is scheduled, you get a yellow warning the first time and a 15-day suspension if it happens again. If you already had a 15-day suspension for late return and it happens again, you may get a semester-long suspension. Damaged equipment or missing parts can lead to stronger penalties.',
-        studioProjectNameLabel: 'PROJECT NAME',
-        studioProjectNameHint: 'Max 10 characters — short project code.',
-        studioProjectNamePlaceholder: 'e.g. SHOOT01',
-        msgStudioProjectNameRequired: 'Enter a project name (max 20 characters).',
-        msgStudioProjectNameMax: 'Project name: maximum 10 characters.'
+        studioProjectNameLabel: 'PROJECT EXPLANATION',
+        studioProjectNameHint: 'Required — max 500 characters.',
+        studioProjectNamePlaceholder: 'Briefly explain your studio use.',
+        msgStudioProjectNameRequired: 'Enter a project explanation.',
+        msgStudioProjectNameMax: 'Project explanation can be maximum 500 characters.',
+        msgStudioLinkRequired: 'Project link is required for studio reservations.',
+        msgStudioLinkInvalid: 'Please enter a valid link (https://...).'
       },
       tr: {
         loginSubtitle: 'E-posta adresinize gönderilen tek kullanımlık şifre ile giriş yapın',
@@ -1524,11 +1526,13 @@
         kvkkReadLabel: 'KVKK ve Sartlar-Kosullari okudum, kabul ediyorum.',
         lateReturnPolicyTitle: 'Geç iade ve hesap askısı',
         lateReturnPolicyBody: 'İadeniz yalnızca rezervasyonunuzdaki iade tarihi ve saatine göre değerlendirilir (bunun üzerine ayrı bir “kapanış saati” kuralı yoktur). Rezervasyon iade saatine göre en çok 30 dakika gecikme: sarı uyarı. 30 dakikadan fazla gecikme: Sizin iadenizden sonra yaklaşık 32 dakika içinde aynı ekipmanı başka bir kullanıcının teslim alması planlanıyorsa hesabınız doğrudan 15 gün askıya alınır; sıradaki kullanıcıya ekipman masasına başvurması iletilir. 30 dakikadan fazla gecikir ve böyle bir teslim alma yoksa ilk sefer sarı uyarı, aynı durum tekrarlanırsa 15 gün askı uygulanır. Geç iade nedeniyle daha önce 15 gün askı aldıysanız ve durum yinelenirse dönemlik askı uygulanabilir. Hasarlı ekipman veya eksik parça daha ağır yaptırıma yol açabilir.',
-        studioProjectNameLabel: 'PROJE ADI',
-        studioProjectNameHint: 'En fazla 10 karakter — kısa proje kodu.',
-        studioProjectNamePlaceholder: 'ör. CEKIM01',
-        msgStudioProjectNameRequired: 'Proje adı girin (en fazla 10 karakter).',
-        msgStudioProjectNameMax: 'Proje adı en fazla 10 karakter olabilir.'
+        studioProjectNameLabel: 'PROJE AÇIKLAMASI',
+        studioProjectNameHint: 'Zorunlu — en fazla 500 karakter.',
+        studioProjectNamePlaceholder: 'Stüdyo kullanım amacınızı kısaca yazın.',
+        msgStudioProjectNameRequired: 'Proje açıklaması zorunludur.',
+        msgStudioProjectNameMax: 'Proje açıklaması en fazla 500 karakter olabilir.',
+        msgStudioLinkRequired: 'Stüdyo rezervasyonu için proje linki zorunludur.',
+        msgStudioLinkInvalid: 'Lütfen geçerli bir link girin (https://...).'
       }
     };
 
@@ -1679,7 +1683,7 @@
       var inp = document.getElementById('studio-purpose');
       var c = document.getElementById('studio-purpose-count');
       if (!inp || !c) return;
-      c.textContent = String(inp.value || '').length + '/10';
+      c.textContent = String(inp.value || '').length + '/500';
     }
 
     document.addEventListener('DOMContentLoaded', function(){
@@ -4779,7 +4783,7 @@
       var eD=document.getElementById('studio-end-date').value,eT=document.getElementById('studio-end-time').value;
       var p=String(document.getElementById('studio-purpose').value||'').trim();
       if(!p){showAlert(t('modalMissingData'),t('msgStudioProjectNameRequired'),true);return;}
-      if(p.length>10){showAlert(t('modalError'),t('msgStudioProjectNameMax'),true);return;}
+      if(p.length>500){showAlert(t('modalError'),t('msgStudioProjectNameMax'),true);return;}
       var pdfUrlInput=document.getElementById('studio-pdf-url');
       var pdfUrl=String((pdfUrlInput&&pdfUrlInput.value)||'').trim();
       var kp='';var pd=document.getElementById('green-weekend-pickup');
@@ -4788,9 +4792,13 @@
       var reqTypeEl=document.getElementById('studio-request-type');
       var reqType=reqTypeEl?String(reqTypeEl.value||'').trim():'';
       if(!reqType){showAlert(t('modalError'),currentLang==='tr'?'Talep türü seçin.':'Select a request type.',true);return;}
-      var studioIdNorm = String(activeStudioKey || activeStudioId || '').trim().toUpperCase();
-      var isPdfOptionalStudio = (studioIdNorm === 'PODCAST' || studioIdNorm === 'DUBBING');
-      if(!isPdfOptionalStudio && !pdfUrl){showAlert(t('modalError'),"PDF Drive link required.",true);return;}
+      if(!pdfUrl){showAlert(t('modalError'),t('msgStudioLinkRequired'),true);return;}
+      var linkIsValid = false;
+      try {
+        var parsedLink = new URL(pdfUrl);
+        linkIsValid = !!parsedLink && /^https?:$/i.test(String(parsedLink.protocol || ''));
+      } catch(_eUrl) { linkIsValid = false; }
+      if(!linkIsValid){showAlert(t('modalError'),t('msgStudioLinkInvalid'),true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
       var btn=document.getElementById('studio-checkout-btn');var ot=btn.innerText;btn.innerText=(currentLang==='tr'?'Bekleyin...':'Wait...');btn.disabled=true;
       checkOfficialHolidayClient(s, e, function(hc) {
@@ -4806,7 +4814,8 @@
             studio_id: activeStudioId,
             start_at: s,
             end_at: e,
-            purpose: p.slice(0, 10)
+            purpose: p,
+            project_link: linkVal
           }
         }).then(function() {
           btn.innerText=ot;btn.disabled=false;

@@ -277,8 +277,12 @@
               </div>
  
               <div>
-                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">PROJECT NAME <span class="text-gray-500 font-semibold normal-case">(max 20)</span></label>
-                <div class="flex items-center gap-2"><input type="text" id="sr-purpose" maxlength="20" autocomplete="off" class="flex-1 p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-mono font-bold outline-none focus:border-[#e30613] transition" placeholder="ör. DERS01"><span id="sr-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/20</span></div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">PROJECT EXPLANATION <span class="text-gray-500 font-semibold normal-case">(max 500)</span></label>
+                <div class="flex items-center gap-2"><input type="text" id="sr-purpose" maxlength="500" autocomplete="off" class="flex-1 p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-semibold outline-none focus:border-[#e30613] transition" placeholder="Kısa açıklama yazın"><span id="sr-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/500</span></div>
+              </div>
+              <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">PROJECT LINK <span class="text-red-500 font-semibold normal-case">(zorunlu)</span></label>
+                <input type="url" id="sr-project-link" class="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-semibold outline-none focus:border-[#e30613] transition" placeholder="https://drive.google.com/...">
               </div>
             </div>
             <div id="sr-end-period-wrap" class="hidden mt-4">
@@ -2317,7 +2321,7 @@
     var srPurpose = document.getElementById('sr-purpose');
     var srPurposeCount = document.getElementById('sr-purpose-count');
     function syncSrPurposeCount() {
-      if (srPurpose && srPurposeCount) srPurposeCount.textContent = String(srPurpose.value || '').length + '/10';
+      if (srPurpose && srPurposeCount) srPurposeCount.textContent = String(srPurpose.value || '').length + '/500';
     }
     if (srPurpose) {
       srPurpose.addEventListener('input', syncSrPurposeCount);
@@ -3285,7 +3289,7 @@
     var data = pendingRowsCache;
     if (q) {
       data = pendingRowsCache.filter(function(res) {
-        var blob = (res.userName || '') + ' ' + (res.email || '') + ' ' + (res.phone || '') + ' ' + (res.id || '') + ' ' + (res.handoverLabel || '') + ' ' + (res.returnLabel || '') + ' ' + (res.purpose || '');
+        var blob = (res.userName || '') + ' ' + (res.email || '') + ' ' + (res.phone || '') + ' ' + (res.id || '') + ' ' + (res.handoverLabel || '') + ' ' + (res.returnLabel || '') + ' ' + (res.purpose || '') + ' ' + (res.projectLink || '');
         (res.items || []).forEach(function(it) { blob += ' ' + (it.name || '') + ' ' + (it.eqId || '') + ' ' + (it.eqType || ''); });
         return blob.toLowerCase().indexOf(q) >= 0;
       });
@@ -3345,7 +3349,10 @@
         schedBlock = '<div class="mt-2 pt-2 border-t border-gray-100/80 text-[10px] text-gray-700 space-y-1"><p><span class="font-black text-gray-500 uppercase tracking-wide">Teslim</span> · ' + escAdm(handoverFmt) + '</p><p><span class="font-black text-gray-500 uppercase tracking-wide">İade</span> · ' + escAdm(returnFmt) + '</p></div>';
       }
       var phoneLine = res.phone ? '<p class="text-xs text-gray-600 mt-1">📞 ' + escAdm(res.phone) + '</p>' : '';
-      var purposeBlock = res.purpose ? '<p class="text-[11px] text-gray-600 mt-2 whitespace-pre-wrap">' + escAdm(res.purpose) + '</p>' : '';
+      var purposeBlock = res.purpose ? '<p class="text-[11px] text-gray-600 mt-2 whitespace-pre-wrap"><span class="font-black text-gray-500 uppercase tracking-wide mr-1">Açıklama:</span>' + escAdm(res.purpose) + '</p>' : '';
+      var studioLinkBlock = (isStudio && String(res.projectLink || '').trim())
+        ? ('<p class="text-[11px] mt-1"><span class="font-black text-gray-500 uppercase tracking-wide mr-1">Link:</span><a class="text-blue-700 underline break-all" href="' + escAttr(String(res.projectLink || '').trim()) + '" target="_blank" rel="noopener noreferrer">' + escAdm(String(res.projectLink || '').trim()) + '</a></p>')
+        : '';
       var pdfU = String(res.studentPdfUrl || '').trim();
       var pdfBtn = (pdfU.indexOf('http') === 0) ? '<button type="button" data-pdf-url="' + escAttr(pdfU) + '" onclick="openAdminStudentPdfFromBtn(this)" class="bg-blue-50 text-blue-700 font-bold py-4 px-4 rounded-xl text-xs border border-blue-200 hover:bg-blue-100 whitespace-nowrap">📄 Öğrenci PDF</button>' : '';
       var actionsRow = '<div class="flex flex-col sm:flex-row gap-3 flex-wrap">' +
@@ -3353,7 +3360,7 @@
         (!isStudio ? '<button onclick="pendingAddItemPrompt(\'' + ridClick + '\')" class="bg-gray-900 text-white font-bold py-4 px-4 rounded-xl text-xs">➕ KALEM EKLE</button>' : '') +
         (pdfBtn || '') +
         '<button onclick="rejectReservation(\'' + ridClick + '\')" class="bg-red-50 text-red-600 font-bold py-4 px-6 rounded-xl text-xs border border-red-200">❌ REDDET</button></div>';
-      container.innerHTML += '<div class="' + outerClass + '">' + studioHdr + '<div class="flex justify-between items-start mb-4 border-b border-gray-100/80 pb-4"><div><h3 class="font-black text-gray-900 text-lg">' + escAdm(res.userName) + '</h3><p class="text-xs text-gray-400">' + escAdm(res.email) + '</p>' + phoneLine + schedBlock + purposeBlock + '</div>' + badgeHtml + '</div><div class="space-y-2 mb-6">' + itemsHtml + '</div>' + actionsRow + '</div>';
+      container.innerHTML += '<div class="' + outerClass + '">' + studioHdr + '<div class="flex justify-between items-start mb-4 border-b border-gray-100/80 pb-4"><div><h3 class="font-black text-gray-900 text-lg">' + escAdm(res.userName) + '</h3><p class="text-xs text-gray-400">' + escAdm(res.email) + '</p>' + phoneLine + schedBlock + purposeBlock + studioLinkBlock + '</div>' + badgeHtml + '</div><div class="space-y-2 mb-6">' + itemsHtml + '</div>' + actionsRow + '</div>';
     });
   }
 
@@ -4569,9 +4576,11 @@
     document.getElementById('sr-end').value = '11:00';
     document.getElementById('sr-end-period-date').value = '';
     document.getElementById('sr-purpose').value = '';
+    var srProjectLinkEl = document.getElementById('sr-project-link');
+    if (srProjectLinkEl) srProjectLinkEl.value = '';
     try {
       var _spc = document.getElementById('sr-purpose-count');
-      if (_spc) _spc.textContent = '0/10';
+      if (_spc) _spc.textContent = '0/500';
     } catch (_eSpc) {}
     document.getElementById('sr-with-equip').checked = false;
     document.getElementById('sr-equip-wrap').classList.add('hidden');
@@ -4591,10 +4600,19 @@
     var startTime = document.getElementById('sr-start').value;
     var endTime = document.getElementById('sr-end').value;
     var endPeriodDate = document.getElementById('sr-end-period-date').value;
-    var purpose = String(document.getElementById('sr-purpose').value || '').trim().substring(0, 20);
+    var purpose = String(document.getElementById('sr-purpose').value || '').trim().substring(0, 500);
+    var projectLink = String((document.getElementById('sr-project-link') || {}).value || '').trim();
     var withEquip = !!(document.getElementById('sr-with-equip') && document.getElementById('sr-with-equip').checked);
     if (!email) { showToast('E-posta adresi zorunludur.', 'error'); return; }
     if (!date) { showToast('Tarih seçiniz.', 'error'); return; }
+    if (!purpose) { showToast('Proje açıklaması zorunludur.', 'error'); return; }
+    if (!projectLink) { showToast('Proje linki zorunludur.', 'error'); return; }
+    var isValidLink = false;
+    try {
+      var u = new URL(projectLink);
+      isValidLink = /^https?:$/i.test(String(u.protocol || ''));
+    } catch (_eUrl) { isValidLink = false; }
+    if (!isValidLink) { showToast('Geçerli bir link girin (https://...).', 'error'); return; }
     var startDt = date + 'T' + startTime;
     var endDt = date + 'T' + endTime;
     if (new Date(endDt).getTime() <= new Date(startDt).getTime()) { showToast('Bitiş saati başlangıçtan sonra olmalı.', 'error'); return; }
@@ -4648,7 +4666,7 @@
     var seq = Promise.resolve();
     validSlots.forEach(function(sl) {
       seq = seq.then(function() {
-        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose, requester_email: email };
+        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose, project_link: projectLink, requester_email: email };
         return adminApiRequest('/studio-reservations', { method: 'POST', body: payload })
           .then(function() { created += 1; })
           .catch(function(err) {

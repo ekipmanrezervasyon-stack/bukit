@@ -16,7 +16,8 @@ const studioCreateSchema = z.object({
   studio_id: z.string().min(1),
   start_at: isoDateSchema,
   end_at: isoDateSchema,
-  purpose: z.string().max(120).optional().default(""),
+  purpose: z.string().min(3).max(500),
+  project_link: z.string().url().max(1000),
   requester_email: z.string().email().max(190).optional()
 });
 
@@ -45,6 +46,7 @@ type EquipmentUsageScope = typeof EQUIPMENT_USAGE_SCOPE_ON_CAMPUS | typeof EQUIP
 type EquipmentLifecycleEvent = "created" | "approved" | "rejected";
 type EquipmentGroupMailItem = { name: string; code: string };
 const EQUIPMENT_NOTE_USAGE_MARKER_REGEX = /\[USAGE_SCOPE:(ON_CAMPUS|OFF_CAMPUS)\]\s*$/i;
+const STUDIO_PROJECT_LINK_MARKER_REGEX = /\[PROJECT_LINK:([^\]]+)\]\s*$/i;
 const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
   new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
@@ -268,6 +270,24 @@ const encodeEquipmentReservationNote = (rawNote: unknown, rawScope: unknown): st
   const maxBaseLen = Math.max(0, EQUIPMENT_RESERVATION_NOTE_DB_MAX - marker.length - glue.length);
   const clipped = cleanBase.slice(0, maxBaseLen).replace(/\s+$/g, "");
   return `${clipped}${clipped ? "\n\n" : ""}${marker}`;
+};
+
+const decodeStudioReservationPurpose = (raw: unknown): { purpose: string; projectLink: string } => {
+  const full = String(raw || "").trim();
+  if (!full) return { purpose: "", projectLink: "" };
+  const m = full.match(STUDIO_PROJECT_LINK_MARKER_REGEX);
+  if (!m) return { purpose: full, projectLink: "" };
+  const projectLink = String(m[1] || "").trim();
+  const markerStart = typeof m.index === "number" ? m.index : full.length;
+  const purpose = full.slice(0, markerStart).replace(/\s+$/g, "");
+  return { purpose, projectLink };
+};
+
+const encodeStudioReservationPurpose = (rawPurpose: unknown, rawProjectLink: unknown): string => {
+  const cleanPurpose = decodeStudioReservationPurpose(rawPurpose).purpose;
+  const cleanLink = String(rawProjectLink || "").trim();
+  if (!cleanLink) return cleanPurpose;
+  return `${cleanPurpose}${cleanPurpose ? "\n\n" : ""}[PROJECT_LINK:${cleanLink}]`;
 };
 
 const isMissingProfilesColumnError = (err: unknown, column: string): boolean => {
@@ -3059,19 +3079,23 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           }
         ]
       })),
-      ...studios.map((r) => ({
-        id: String(r.id),
-        kind: "studio",
-        studio_id: String(r.studio_id || ""),
-        studio_name: String(r.studio_id || ""),
-        userName: String(r.requester_name || r.requester_email || ""),
-        email: String(r.requester_email || ""),
-        phone: "",
-        handoverLabel: String(r.start_at || ""),
-        returnLabel: String(r.end_at || ""),
-        purpose: String(r.purpose || ""),
-        items: []
-      }))
+      ...studios.map((r) => {
+        const studioMeta = decodeStudioReservationPurpose(r.purpose);
+        return {
+          id: String(r.id),
+          kind: "studio",
+          studio_id: String(r.studio_id || ""),
+          studio_name: String(r.studio_id || ""),
+          userName: String(r.requester_name || r.requester_email || ""),
+          email: String(r.requester_email || ""),
+          phone: "",
+          handoverLabel: String(r.start_at || ""),
+          returnLabel: String(r.end_at || ""),
+          purpose: studioMeta.purpose,
+          projectLink: studioMeta.projectLink,
+          items: []
+        };
+      })
     ];
     return { ok: true, equipment, studios, list, duplicateEqWarnings: [] };
   });
@@ -3091,7 +3115,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ ok: false, error: msg });
     }
 
-    const { studio_id, start_at, end_at, purpose } = parsed.data;
+    const { studio_id, start_at, end_at, purpose, project_link } = parsed.data;
+    const studioPurpose = String(purpose || "").trim();
+    const studioProjectLink = String(project_link || "").trim();
+    const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink);
     const startAt = normalizeIsoDateTimeInput(start_at);
     const endAt = normalizeIsoDateTimeInput(end_at);
     if (!startAt || !endAt) return reply.code(400).send({ ok: false, error: "Invalid datetime." });
@@ -3160,7 +3187,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       approval_required: !isAdminRole(profile.role),
       start_at: startAt,
       end_at: endAt,
-      purpose
+      purpose: encodedStudioPurpose
     };
 
     const { data, error } = await supabaseAdmin.from("studio_reservations").insert(payload).select("*").single();
@@ -3175,7 +3202,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           endAt: String(createdStudio.end_at || ""),
           requesterName: String(createdStudio.requester_name || ""),
           requesterEmail: String(createdStudio.requester_email || ""),
-          purpose: String(createdStudio.purpose || "")
+          purpose: decodeStudioReservationPurpose(createdStudio.purpose).purpose
         });
         if (!sync.ok) {
           req.log.warn({ reservationId: String(createdStudio.id || ""), skipped: String(sync.skipped || "") }, "sync approved studio reservation skipped");
@@ -3195,13 +3222,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           itemLabel: String((studio as Record<string, unknown>).name || studio_id),
           startAt: String(createdStudio.start_at || startAt),
           endAt: String(createdStudio.end_at || endAt),
-          adminNote: String(purpose || "").trim()
+          adminNote: studioPurpose
         });
       } catch (e) {
         req.log.error({ err: e, reservationId: String(createdStudio.id || ""), requesterEmail: studioRequesterEmail }, "send studio reservation created mail failed");
       }
     }
-    return { ok: true, data };
+    return {
+      ok: true,
+      data: {
+        ...createdStudio,
+        purpose: studioPurpose,
+        project_link: studioProjectLink
+      }
+    };
   });
 
   app.post("/equipment-reservations", { preHandler: requireAuth }, async (req, reply) => {
@@ -3569,12 +3603,14 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(409).send({ ok: false, error: "Studio is not available in selected range." });
     }
 
+    const existingPurposeMeta = decodeStudioReservationPurpose(exRow.purpose);
+    const nextPurpose = String(purpose || "").trim() || existingPurposeMeta.purpose;
     const upd = await supabaseAdmin
       .from("studio_reservations")
       .update({
         start_at: startDt,
         end_at: endDt,
-        purpose: String(purpose || "").trim()
+        purpose: encodeStudioReservationPurpose(nextPurpose, existingPurposeMeta.projectLink)
       })
       .eq("id", id)
       .select("*")
@@ -3591,7 +3627,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           endAt: String(updated.end_at || endDt),
           requesterName: String(updated.requester_name || ""),
           requesterEmail: String(updated.requester_email || ""),
-          purpose: String(updated.purpose || purpose || "")
+          purpose: decodeStudioReservationPurpose(updated.purpose || purpose || "").purpose
         });
         if (!sync.ok) {
           req.log.warn({ reservationId: String(updated.id || id), skipped: String(sync.skipped || "") }, "sync studio reservation skipped on admin update");

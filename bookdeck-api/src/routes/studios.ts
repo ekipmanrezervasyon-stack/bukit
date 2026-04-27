@@ -135,6 +135,18 @@ const canAccessStudioByPolicy = (
   return requiredBand === "B" && key === specialStudio && isSpecialAccessActive(String(profile.special_access_until || ""));
 };
 
+const STUDIO_PROJECT_LINK_MARKER_REGEX = /\[PROJECT_LINK:([^\]]+)\]\s*$/i;
+const decodeStudioPurpose = (raw: unknown): { purpose: string; projectLink: string } => {
+  const full = String(raw || "").trim();
+  if (!full) return { purpose: "", projectLink: "" };
+  const m = full.match(STUDIO_PROJECT_LINK_MARKER_REGEX);
+  if (!m) return { purpose: full, projectLink: "" };
+  const projectLink = String(m[1] || "").trim();
+  const markerStart = typeof m.index === "number" ? m.index : full.length;
+  const purpose = full.slice(0, markerStart).replace(/\s+$/g, "");
+  return { purpose, projectLink };
+};
+
 export const studioRoutes: FastifyPluginAsync = async (app) => {
   app.get("/studios", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req);
@@ -177,6 +189,14 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     }
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
-    return { ok: true, data: data ?? [] };
+    const out = ((data ?? []) as Record<string, unknown>[]).map((row) => {
+      const decoded = decodeStudioPurpose(row.purpose);
+      return {
+        ...row,
+        purpose: decoded.purpose,
+        project_link: decoded.projectLink
+      };
+    });
+    return { ok: true, data: out };
   });
 };
