@@ -2148,7 +2148,10 @@
         return '<div class="rounded-lg border border-gray-100 bg-gray-50/50 p-2">' +
           '<label class="flex items-center gap-3 text-xs bg-white p-2 rounded-lg border border-gray-100 ' + (isCheckable ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50') + '">' +
           '<input type="checkbox" ' + (isCheckable ? 'checked' : 'disabled') + ' class="w-4 h-4 text-blue-600 rounded" data-traffic-res="' + resAttr + '" value="' + vid + '">' +
-          '<div class="flex-1 font-medium text-gray-800">' + escAdm(rowName) + (rowCode ? (' <span class="text-[9px] text-gray-400 ml-1">(' + escAdm(rowCode) + ')</span>') : '') + '</div>' +
+          '<div class="flex-1 text-gray-800">' +
+            '<div class="font-bold text-[15px] leading-tight">' + escAdm(rowName) + '</div>' +
+            (rowCode ? ('<div class="font-bold text-[15px] leading-tight text-gray-700 mt-0.5">' + escAdm(rowCode) + '</div>') : '') +
+          '</div>' +
           '<div class="text-[9px] font-bold">' + statusBadge + '</div></label>' + coBlock + returnBlock + '</div>';
       }).join('');
       var footerMainBtn = isPickup
@@ -2197,8 +2200,8 @@
         if (tKind === 'studio') return isPickup ? 'Anahtar Teslim Kartı' : 'Anahtar İade Kartı';
         return isPickup ? 'Ekipman Teslim Kartı' : 'Ekipman İade Kartı';
       })();
-      var ownerLine = escAdm(item.userName || '—') + ' - ' + escAdm(item.studentId || '—');
-      var firstItemName = (item.items || []).map(function(i) { return String(i && i.name || '').trim(); }).filter(Boolean)[0] || (tKind === 'studio' ? 'Stüdyo Anahtarı' : 'Ekipman');
+      var ownerLine = escAdm(item.userName || '—') + ' - Student ID: ' + escAdm(item.studentId || '—');
+      var projectText = String(item.purpose || '').trim() || '—';
       var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-100">' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">Teslim Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(handFmt || '—') + '</span></div></div>' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">İade Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(retFmt || '—') + '</span></div></div>' +
@@ -2217,7 +2220,7 @@
           '</summary>' +
           '<div class="px-6 pb-6 pt-0 space-y-6">' +
             '<div>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
-            '<div><p class="text-sm font-medium text-gray-600">Ekipman Adı:</p><p class="text-lg font-semibold text-gray-900">' + escAdm(firstItemName) + '</p></div>' +
+            '<div><p class="text-sm font-medium text-gray-600">Proje Açıklaması:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(projectText) + '</p></div>' +
             trafSched +
             '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
             '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
