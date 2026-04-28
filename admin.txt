@@ -807,6 +807,26 @@
     return false;
   }
 
+  function parseStudioPurposeMeta_(raw) {
+    var full = String(raw || '').trim();
+    var out = { purpose: full, usageType: '', projectLink: '' };
+    if (!full) return out;
+    var mProject = full.match(/\[PROJECT_LINK:([^\]]+)\]\s*$/i);
+    if (mProject) {
+      out.projectLink = String(mProject[1] || '').trim();
+      var iP = (typeof mProject.index === 'number') ? mProject.index : full.length;
+      full = full.slice(0, iP).replace(/\s+$/g, '');
+    }
+    var mUsage = full.match(/\[USAGE_TYPE:([^\]]+)\]\s*$/i);
+    if (mUsage) {
+      out.usageType = String(mUsage[1] || '').trim();
+      var iU = (typeof mUsage.index === 'number') ? mUsage.index : full.length;
+      full = full.slice(0, iU).replace(/\s+$/g, '');
+    }
+    out.purpose = full;
+    return out;
+  }
+
   function escAdm(s) {
     if (s == null || s === undefined) return '';
     var t = String(s);
@@ -2172,6 +2192,7 @@
       if (item.phone) trafContact += '<p class="text-xs text-gray-600 [overflow-wrap:anywhere] break-words">📞 ' + escAdm(item.phone) + '</p>';
       var studioKeyLine = '';
       var studioPurposeLine = '';
+      var studioMeta = parseStudioPurposeMeta_(item.purpose || '');
       if (tKind === 'studio') {
         var stItem = (item.items && item.items.length) ? item.items[0] : null;
         var stCanonical = normalizeStudioCanonical_([
@@ -2190,8 +2211,8 @@
         if (!stKeyId || isUuidLike_(stKeyId)) stKeyId = studioKeyCodeFromCanonical_(stCanonical) || 'STUDIO KEY';
         var stFlow = isPickup ? 'Anahtar Teslimi' : 'Anahtar İadesi';
         studioKeyLine = '<p class="text-[10px] font-black text-indigo-700 mt-1.5">🎬 ' + escAdm(stName) + (stKeyId ? ' · 🔑 ' + escAdm(stKeyId) : '') + ' · ' + stFlow + '</p>';
-        if (String(item.purpose || '').trim()) {
-          studioPurposeLine = '<p class="text-[10px] font-bold text-gray-700 mt-1 [overflow-wrap:anywhere] break-words">📝 Proje: ' + escAdm(String(item.purpose || '').trim()) + '</p>';
+        if (String(studioMeta.purpose || '').trim()) {
+          studioPurposeLine = '<p class="text-[10px] font-bold text-gray-700 mt-1 [overflow-wrap:anywhere] break-words">📝 Proje: ' + escAdm(String(studioMeta.purpose || '').trim()) + '</p>';
         }
       }
       var handFmt = formatAdminCardDtTr_(item.handoverLabel || '');
@@ -2201,7 +2222,9 @@
         return isPickup ? 'Ekipman Teslim Kartı' : 'Ekipman İade Kartı';
       })();
       var ownerLine = escAdm(item.userName || '—') + ' - Student ID: ' + escAdm(item.studentId || '—');
-      var projectText = String(item.purpose || '').trim() || '—';
+      var usageTypeText = (tKind === 'studio')
+        ? (String(studioMeta.usageType || '').trim() || '—')
+        : '—';
       var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-100">' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">Teslim Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(handFmt || '—') + '</span></div></div>' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">İade Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(retFmt || '—') + '</span></div></div>' +
@@ -2220,7 +2243,7 @@
           '</summary>' +
           '<div class="px-6 pb-6 pt-0 space-y-6">' +
             '<div>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
-            '<div><p class="text-sm font-medium text-gray-600">Proje Açıklaması:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(projectText) + '</p></div>' +
+            '<div><p class="text-sm font-medium text-gray-600">Usage Type:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(usageTypeText) + '</p></div>' +
             trafSched +
             '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
             '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
