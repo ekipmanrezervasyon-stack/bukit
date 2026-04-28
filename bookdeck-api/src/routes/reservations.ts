@@ -54,6 +54,7 @@ const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
   new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
 );
+const EQUIPMENT_RETURNED_STATUS_CANDIDATES = Array.from(new Set(["returned", "RETURNED", "completed", "COMPLETED"]));
 const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = [
@@ -435,6 +436,38 @@ const insertEquipmentReservationAsCheckedOut = async (
     data: null,
     status: EQUIPMENT_CHECKED_OUT_STATUS,
     error: lastErr || { message: "No supported checked-out status value matched equipment_reservations_status_check." }
+  };
+};
+
+const updateEquipmentReservationToReturned = async (
+  reservationId: string,
+  patch: Record<string, unknown>
+): Promise<{ data: Record<string, unknown> | null; status: string; error: { message: string } | null }> => {
+  let lastErr: { message: string } | null = null;
+  for (const candidate of EQUIPMENT_RETURNED_STATUS_CANDIDATES) {
+    const upd = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({ ...patch, status: candidate })
+      .eq("id", reservationId)
+      .select("id,equipment_item_id,status")
+      .single();
+    if (!upd.error) {
+      return {
+        data: (upd.data as Record<string, unknown> | null) || null,
+        status: String((upd.data as Record<string, unknown> | null)?.status || candidate),
+        error: null
+      };
+    }
+    if (isEquipmentReservationStatusConstraintError(upd.error)) {
+      lastErr = { message: upd.error.message };
+      continue;
+    }
+    return { data: null, status: candidate, error: { message: upd.error.message } };
+  }
+  return {
+    data: null,
+    status: "returned",
+    error: lastErr || { message: "No supported returned status value matched equipment_reservations_status_check." }
   };
 };
 
@@ -4668,16 +4701,10 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(400).send({ ok: false, error: `Checkin is only allowed for on-loan items. Current status: ${currentStatus || "unknown"}` });
       }
 
-      const eq = await supabaseAdmin
-        .from("equipment_reservations")
-        .update({
-          status: "returned",
-          reviewed_by: actor.email,
-          reviewed_at: nowIso
-        })
-        .eq("id", id)
-        .select("id,equipment_item_id,status")
-        .single();
+      const eq = await updateEquipmentReservationToReturned(id, {
+        reviewed_by: actor.email,
+        reviewed_at: nowIso
+      });
       if (eq.error) return reply.code(500).send({ ok: false, error: eq.error.message });
 
       const eqId = String((eq.data as Record<string, unknown>).equipment_item_id || "").trim();
@@ -4716,7 +4743,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         req.log.error({ err: e, reservationId: id }, "late return penalty application failed");
       }
 
-      return { ok: true, success: true, id, status: "returned", penalty, notify };
+      return { ok: true, success: true, id, status: String(eq.status || "returned"), penalty, notify };
     }
 
     let st = await supabaseAdmin
