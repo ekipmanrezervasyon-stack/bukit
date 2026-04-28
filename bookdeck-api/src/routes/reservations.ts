@@ -17,6 +17,7 @@ const studioCreateSchema = z.object({
   start_at: isoDateSchema,
   end_at: isoDateSchema,
   purpose: z.string().min(3).max(500),
+  usage_type: z.string().max(120).optional().default(""),
   project_link: z.string().max(1000).optional().default(""),
   project_pdf_data_url: z.string().max(20_000_000).optional().default(""),
   requester_email: z.string().email().max(190).optional()
@@ -48,6 +49,7 @@ type EquipmentLifecycleEvent = "created" | "approved" | "rejected";
 type EquipmentGroupMailItem = { name: string; code: string };
 const EQUIPMENT_NOTE_USAGE_MARKER_REGEX = /\[USAGE_SCOPE:(ON_CAMPUS|OFF_CAMPUS)\]\s*$/i;
 const STUDIO_PROJECT_LINK_MARKER_REGEX = /\[PROJECT_LINK:([^\]]+)\]\s*$/i;
+const STUDIO_USAGE_TYPE_MARKER_REGEX = /\[USAGE_TYPE:([^\]]+)\]\s*$/i;
 const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
   new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
@@ -273,22 +275,38 @@ const encodeEquipmentReservationNote = (rawNote: unknown, rawScope: unknown): st
   return `${clipped}${clipped ? "\n\n" : ""}${marker}`;
 };
 
-const decodeStudioReservationPurpose = (raw: unknown): { purpose: string; projectLink: string } => {
-  const full = String(raw || "").trim();
-  if (!full) return { purpose: "", projectLink: "" };
-  const m = full.match(STUDIO_PROJECT_LINK_MARKER_REGEX);
-  if (!m) return { purpose: full, projectLink: "" };
-  const projectLink = String(m[1] || "").trim();
-  const markerStart = typeof m.index === "number" ? m.index : full.length;
-  const purpose = full.slice(0, markerStart).replace(/\s+$/g, "");
-  return { purpose, projectLink };
+const decodeStudioReservationPurpose = (raw: unknown): { purpose: string; projectLink: string; usageType: string } => {
+  let full = String(raw || "").trim();
+  if (!full) return { purpose: "", projectLink: "", usageType: "" };
+
+  let projectLink = "";
+  const mProject = full.match(STUDIO_PROJECT_LINK_MARKER_REGEX);
+  if (mProject) {
+    projectLink = String(mProject[1] || "").trim();
+    const markerStart = typeof mProject.index === "number" ? mProject.index : full.length;
+    full = full.slice(0, markerStart).replace(/\s+$/g, "");
+  }
+
+  let usageType = "";
+  const mUsage = full.match(STUDIO_USAGE_TYPE_MARKER_REGEX);
+  if (mUsage) {
+    usageType = String(mUsage[1] || "").trim();
+    const markerStart = typeof mUsage.index === "number" ? mUsage.index : full.length;
+    full = full.slice(0, markerStart).replace(/\s+$/g, "");
+  }
+
+  return { purpose: full, projectLink, usageType };
 };
 
-const encodeStudioReservationPurpose = (rawPurpose: unknown, rawProjectLink: unknown): string => {
+const encodeStudioReservationPurpose = (rawPurpose: unknown, rawProjectLink: unknown, rawUsageType?: unknown): string => {
   const cleanPurpose = decodeStudioReservationPurpose(rawPurpose).purpose;
   const cleanLink = String(rawProjectLink || "").trim();
-  if (!cleanLink) return cleanPurpose;
-  return `${cleanPurpose}${cleanPurpose ? "\n\n" : ""}[PROJECT_LINK:${cleanLink}]`;
+  const cleanUsageType = String(rawUsageType || "").trim();
+  const parts: string[] = [];
+  if (cleanPurpose) parts.push(cleanPurpose);
+  if (cleanUsageType) parts.push(`[USAGE_TYPE:${cleanUsageType}]`);
+  if (cleanLink) parts.push(`[PROJECT_LINK:${cleanLink}]`);
+  return parts.join("\n\n").trim();
 };
 
 const isMissingProfilesColumnError = (err: unknown, column: string): boolean => {
@@ -3240,8 +3258,9 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ ok: false, error: msg });
     }
 
-    const { studio_id, start_at, end_at, purpose, project_link, project_pdf_data_url } = parsed.data;
+    const { studio_id, start_at, end_at, purpose, usage_type, project_link, project_pdf_data_url } = parsed.data;
     const studioPurpose = String(purpose || "").trim();
+    const studioUsageType = String(usage_type || "").trim();
     let studioProjectLink = String(project_link || "").trim();
     const studioProjectPdfDataUrl = String(project_pdf_data_url || "").trim();
     const startAt = normalizeIsoDateTimeInput(start_at);
@@ -3327,7 +3346,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!studioProjectLink) {
       return reply.code(400).send({ ok: false, error: "Project PDF link is required." });
     }
-    const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink);
+    const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink, studioUsageType);
 
     const payload = {
       studio_id,
@@ -3768,7 +3787,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .update({
         start_at: startDt,
         end_at: endDt,
-        purpose: encodeStudioReservationPurpose(nextPurpose, existingPurposeMeta.projectLink)
+        purpose: encodeStudioReservationPurpose(nextPurpose, existingPurposeMeta.projectLink, existingPurposeMeta.usageType)
       })
       .eq("id", id)
       .select("*")
@@ -4511,6 +4530,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         }
       }
       try {
+        const studioMeta = decodeStudioReservationPurpose(stRow.purpose);
         const pdfUrl = await generateCheckoutPdf({
           kind: "studio",
           reservationId: String(stRow.id || id),
@@ -4519,7 +4539,8 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           startAt: String(stRow.start_at || ""),
           endAt: String(stRow.end_at || ""),
           studioName: String(studioName || studioId || "Studio"),
-          projectName: String(stRow.purpose || ""),
+          projectName: String(studioMeta.purpose || ""),
+          usageType: String(studioMeta.usageType || ""),
           handoverNote: studioHandoverNote
         });
         let archiveDriveUrl: string | null = null;

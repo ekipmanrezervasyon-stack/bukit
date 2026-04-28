@@ -25,6 +25,7 @@ type StudioCheckoutContext = {
   endAt: string;
   studioName: string;
   projectName?: string;
+  usageType?: string;
   handoverNote: string;
 };
 
@@ -194,6 +195,7 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
 
   const bookingNameId = `${clip(ctx.studentName, 26)} / ${clip(ctx.reservationId, 20)}`;
   const usageLine = `${clip(formatDdMmYyyyDashHm(ctx.startAt), 22)} / ${clip(formatDdMmYyyyDashHm(ctx.endAt), 22)}`;
+  const usageTypeLine = clip(ctx.usageType || "TEK SEFERLIK / ONE TIME", 56);
 
   // Top table rows (reference file has the grid slightly higher).
   // Move all values ~48px up to land exactly inside their labeled rows.
@@ -201,7 +203,10 @@ const generateStudioFromTemplate = async (ctx: StudioCheckoutContext): Promise<s
   draw(clip(ctx.studioName || "-", 56), 229, 669, 9); // Studio
   draw(clip(ctx.projectName || "-", 56), 229, 645, 9); // Project
   draw(clip(ctx.handoverNote || "-", 56).toUpperCase(), 229, 621, 9); // Condition
-  draw("TEK SEFERLIK / ONE TIME", 229, 597, 9); // Repeat
+  // Override "Repeat" label in template and replace with "Usage Type".
+  page.drawRectangle({ x: 66, y: 596, width: 128, height: 13, color: rgb(1, 1, 1) });
+  draw("Usage Type:", 66, 597, 9);
+  draw(usageTypeLine, 229, 597, 9);
   draw(clip(usageLine, 56), 229, 573, 9); // Usage
 
   // Key picked up timestamp: print time of PDF generation (GMT+3 display format DD.MM / HH:MM).
