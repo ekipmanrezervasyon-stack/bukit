@@ -54,7 +54,7 @@ const EQUIPMENT_RESERVATION_NOTE_DB_MAX = 500;
 const EQUIPMENT_CHECKED_OUT_STATUS_CANDIDATES = Array.from(
   new Set([EQUIPMENT_CHECKED_OUT_STATUS, "in_use", "checked_out", "picked_up", "key_out"])
 );
-const EQUIPMENT_RETURNED_STATUS_CANDIDATES = Array.from(new Set(["returned", "RETURNED", "completed", "COMPLETED"]));
+const EQUIPMENT_RETURNED_STATUS_CANDIDATES = Array.from(new Set(["cancelled", "CANCELLED", "completed", "COMPLETED", "returned", "RETURNED"]));
 const EQUIPMENT_ACTIVE_RES_STATUSES = ["pending", "approved", "IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 const EQUIPMENT_CLOSED_RES_STATUSES = ["cancelled", "rejected", "returned", "completed"];
 const ACTIVE_TICKET_STATUSES = [
