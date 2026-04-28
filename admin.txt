@@ -281,6 +281,19 @@
                 <div class="flex items-center gap-2"><input type="text" id="sr-purpose" maxlength="500" autocomplete="off" class="flex-1 p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-semibold outline-none focus:border-[#e30613] transition" placeholder="Kısa açıklama yazın"><span id="sr-purpose-count" class="text-[10px] font-bold text-gray-400 tabular-nums shrink-0">0/500</span></div>
               </div>
               <div>
+                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">USAGE TYPE <span class="text-red-500 font-semibold normal-case">(zorunlu)</span></label>
+                <select id="sr-usage-type" class="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-semibold outline-none focus:border-[#e30613] transition">
+                  <option value="" selected disabled>Seçin</option>
+                  <option value="Bireysel Öğrenci Projesi">Bireysel Öğrenci Projesi</option>
+                  <option value="Grup Ders Projesi">Grup Ders Projesi</option>
+                  <option value="Akademik Ders">Akademik Ders</option>
+                  <option value="Kulüp Etkinlik">Kulüp Etkinlik</option>
+                  <option value="Tiyatro Gösterisi">Tiyatro Gösterisi</option>
+                  <option value="İdari Birim Talebi">İdari Birim Talebi</option>
+                  <option value="Dış Kiralama">Dış Kiralama</option>
+                </select>
+              </div>
+              <div>
                 <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">PROJECT LINK <span class="text-red-500 font-semibold normal-case">(zorunlu)</span></label>
                 <input type="url" id="sr-project-link" class="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-semibold outline-none focus:border-[#e30613] transition" placeholder="https://drive.google.com/...">
               </div>
@@ -4631,6 +4644,8 @@
     document.getElementById('sr-end').value = '11:00';
     document.getElementById('sr-end-period-date').value = '';
     document.getElementById('sr-purpose').value = '';
+    var srUsageTypeEl = document.getElementById('sr-usage-type');
+    if (srUsageTypeEl) srUsageTypeEl.value = '';
     var srProjectLinkEl = document.getElementById('sr-project-link');
     if (srProjectLinkEl) srProjectLinkEl.value = '';
     try {
@@ -4656,11 +4671,13 @@
     var endTime = document.getElementById('sr-end').value;
     var endPeriodDate = document.getElementById('sr-end-period-date').value;
     var purpose = String(document.getElementById('sr-purpose').value || '').trim().substring(0, 500);
+    var usageType = String((document.getElementById('sr-usage-type') || {}).value || '').trim();
     var projectLink = String((document.getElementById('sr-project-link') || {}).value || '').trim();
     var withEquip = !!(document.getElementById('sr-with-equip') && document.getElementById('sr-with-equip').checked);
     if (!email) { showToast('E-posta adresi zorunludur.', 'error'); return; }
     if (!date) { showToast('Tarih seçiniz.', 'error'); return; }
     if (!purpose) { showToast('Proje açıklaması zorunludur.', 'error'); return; }
+    if (!usageType) { showToast('Usage Type seçimi zorunludur.', 'error'); return; }
     if (!projectLink) { showToast('Proje linki zorunludur.', 'error'); return; }
     var isValidLink = false;
     try {
@@ -4721,7 +4738,7 @@
     var seq = Promise.resolve();
     validSlots.forEach(function(sl) {
       seq = seq.then(function() {
-        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose, project_link: projectLink, requester_email: email };
+        var payload = { studio_id: activeAdminStudioId, start_at: sl.start_at, end_at: sl.end_at, purpose: purpose, usage_type: usageType, project_link: projectLink, requester_email: email };
         return adminApiRequest('/studio-reservations', { method: 'POST', body: payload })
           .then(function() { created += 1; })
           .catch(function(err) {

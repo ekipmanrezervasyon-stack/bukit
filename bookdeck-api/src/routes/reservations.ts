@@ -17,7 +17,7 @@ const studioCreateSchema = z.object({
   start_at: isoDateSchema,
   end_at: isoDateSchema,
   purpose: z.string().min(3).max(500),
-  usage_type: z.string().max(120).optional().default(""),
+  usage_type: z.string().min(1).max(120),
   project_link: z.string().max(1000).optional().default(""),
   project_pdf_data_url: z.string().max(20_000_000).optional().default(""),
   requester_email: z.string().email().max(190).optional()
