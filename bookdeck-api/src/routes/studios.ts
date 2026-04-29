@@ -5,6 +5,46 @@ import { getAuthProfile, requireAuth } from "../modules/auth/guards.js";
 const hasPrivilegedStudioAccess = (role: string): boolean =>
   role === "super_admin" || role === "technician" || role === "iiw_instructor" || role === "iiw_admin";
 
+const profileDisplayStudentId = (profile: Record<string, unknown> | undefined): string => {
+  if (!profile) return "";
+  return String(profile.student_number || profile.staff_auto_id || profile.id || "").trim();
+};
+
+const enrichRowsWithRequesterStudentIds = async (rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> => {
+  const profileIds = Array.from(new Set(rows.map((r) => String(r.requester_profile_id || "").trim()).filter(Boolean)));
+  const emails = Array.from(new Set(rows.map((r) => String(r.requester_email || "").trim().toLowerCase()).filter(Boolean)));
+  const byId = new Map<string, Record<string, unknown>>();
+  const byEmail = new Map<string, Record<string, unknown>>();
+  if (profileIds.length) {
+    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("id", profileIds);
+    if (!q.error) {
+      for (const p of (q.data ?? []) as Record<string, unknown>[]) {
+        byId.set(String(p.id || ""), p);
+        const email = String(p.email || "").trim().toLowerCase();
+        if (email) byEmail.set(email, p);
+      }
+    }
+  }
+  const missingEmails = emails.filter((email) => !byEmail.has(email));
+  if (missingEmails.length) {
+    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("email", missingEmails);
+    if (!q.error) {
+      for (const p of (q.data ?? []) as Record<string, unknown>[]) {
+        byId.set(String(p.id || ""), p);
+        const email = String(p.email || "").trim().toLowerCase();
+        if (email) byEmail.set(email, p);
+      }
+    }
+  }
+  return rows.map((row) => {
+    const profile =
+      byId.get(String(row.requester_profile_id || "").trim()) ||
+      byEmail.get(String(row.requester_email || "").trim().toLowerCase());
+    const studentId = profileDisplayStudentId(profile);
+    return studentId ? { ...row, student_number: studentId, student_id: studentId } : row;
+  });
+};
+
 const DEPT_MATRIX: Record<string, { abbr: string; baseLevel: number; isApplied: boolean }> = {
   "31": { abbr: "MED", baseLevel: 3, isApplied: true },
   "32": { abbr: "ADV", baseLevel: 2, isApplied: false },
@@ -189,7 +229,8 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     }
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
-    const out = ((data ?? []) as Record<string, unknown>[]).map((row) => {
+    const enriched = await enrichRowsWithRequesterStudentIds((data ?? []) as Record<string, unknown>[]);
+    const out = enriched.map((row) => {
       const decoded = decodeStudioPurpose(row.purpose);
       return {
         ...row,

@@ -1203,6 +1203,7 @@
           studioId: isStudioKeyRow ? studioCanonical : '',
           studioName: isStudioKeyRow ? studioName : '',
           userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+          studentId: String((r && (r.student_number || r.student_id || r.staff_auto_id || r.staff_number || r.requester_profile_id)) || '').trim(),
           email: String((r && r.requester_email) || ''),
           phone: '',
           handoverLabel: String((r && r.start_at) || ''),
@@ -1253,6 +1254,7 @@
           studioId: studioCanonical || sId,
           studioName: sName,
           userName: String((r && (r.requester_name || r.requester_email)) || '—'),
+          studentId: String((r && (r.student_number || r.student_id || r.staff_auto_id || r.staff_number || r.requester_profile_id)) || '').trim(),
           email: String((r && r.requester_email) || ''),
           phone: '',
           handoverLabel: String((r && r.start_at) || ''),
@@ -1280,6 +1282,7 @@
         all = all.filter(function(x) {
           var blob = [
             x.userName,
+            x.studentId,
             x.email,
             x.phone,
             x.id,
