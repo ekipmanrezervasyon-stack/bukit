@@ -4850,20 +4850,25 @@
       filterForwardEquip();
     });
   }
-  function forwardHolidayDatesInRange_(startIso, endIso) {
+  function forwardHolidayDatesAtEndpoints_(startIso, endIso) {
     var s = new Date(String(startIso || ''));
     var e = new Date(String(endIso || ''));
     if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return [];
-    var cur = new Date(s.getTime());
-    cur.setHours(0, 0, 0, 0);
-    var last = new Date(e.getTime() - 1);
-    last.setHours(0, 0, 0, 0);
     var out = [];
-    while (cur <= last) {
-      if (isPublicHoliday(cur)) out.push(String(cur.getDate()).padStart(2, '0') + '.' + String(cur.getMonth() + 1).padStart(2, '0') + '.' + cur.getFullYear());
-      cur.setDate(cur.getDate() + 1);
-    }
+    var seen = {};
+    [s, e].forEach(function(dt) {
+      var cur = new Date(dt.getTime());
+      cur.setHours(0, 0, 0, 0);
+      if (!isPublicHoliday(cur)) return;
+      var label = String(cur.getDate()).padStart(2, '0') + '.' + String(cur.getMonth() + 1).padStart(2, '0') + '.' + cur.getFullYear();
+      if (seen[label]) return;
+      seen[label] = true;
+      out.push(label);
+    });
     return out;
+  }
+  function forwardHolidayDatesInRange_(startIso, endIso) {
+    return forwardHolidayDatesAtEndpoints_(startIso, endIso);
   }
   function updateForwardHolidayWarning_() {
     var d1 = document.getElementById('fe-start-date');
@@ -4880,8 +4885,8 @@
     var blocked = forwardHolidayDatesInRange_(sd, ed);
     if (blocked.length) {
       warn.textContent = (period === 'once')
-        ? ('Resmi tatil secimi var: ' + blocked.join(', ') + '. Bu aralikta rezervasyon yapilamaz.')
-        : ('Resmi tatil secimi var: ' + blocked.join(', ') + '. Tekrarlı rezervasyonda bu slotlar otomatik atlanır.');
+        ? ('Teslim/iade tarihi resmi tatile denk geliyor: ' + blocked.join(', ') + '. Bu tarihte rezervasyon yapilamaz.')
+        : ('Teslim/iade tarihi resmi tatile denk geliyor: ' + blocked.join(', ') + '. Tekrarlı rezervasyonda bu slotlar otomatik atlanır.');
       warn.classList.remove('hidden');
       if (period === 'once') {
         btn.disabled = true;
@@ -5008,7 +5013,7 @@
     var slots = buildRecurringForwardSlots_(sd, ed, period, endPeriod);
     if (!slots.length) { showToast('Tekrar slotları oluşturulamadı.', 'error'); return; }
     var validSlots = slots.filter(function(sl) {
-      return forwardHolidayDatesInRange_(String(sl.start_at || ''), String(sl.end_at || '')).length === 0;
+      return forwardHolidayDatesAtEndpoints_(String(sl.start_at || ''), String(sl.end_at || '')).length === 0;
     });
     if (!validSlots.length) { showToast('Seçilen tekrar aralığındaki tüm slotlar resmi tatile denk geliyor.', 'error'); return; }
     var skippedHolidays = slots.length - validSlots.length;
