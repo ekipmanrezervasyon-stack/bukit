@@ -2675,19 +2675,20 @@
     endEl.value = '11:00';
   }
 
-  /** Stüdyo ile aynı: yalnızca tam saatler (09:00–21:00). */
+  /** İleri tarihli ekipman: 30 dakikalık slotlar (09:00–21:00). */
   function fillForwardEquipTimeDropdowns() {
     var startEl = document.getElementById('fe-start-time');
     var endEl = document.getElementById('fe-end-time');
     if (!startEl || !endEl) return;
     startEl.innerHTML = '';
     endEl.innerHTML = '';
-    for (var i = 9; i <= 20; i++) {
-      var h = (i < 10 ? '0' + i : String(i));
-      startEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
-      endEl.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
+    for (var mins = 9 * 60; mins <= 21 * 60; mins += 30) {
+      var hNum = Math.floor(mins / 60);
+      var mNum = mins % 60;
+      var label = (hNum < 10 ? '0' + hNum : String(hNum)) + ':' + (mNum < 10 ? '0' + mNum : String(mNum));
+      startEl.innerHTML += '<option value="' + label + '">' + label + '</option>';
+      endEl.innerHTML += '<option value="' + label + '">' + label + '</option>';
     }
-    endEl.innerHTML += '<option value="21:00">21:00</option>';
     startEl.value = '09:00';
     endEl.value = '11:00';
   }
