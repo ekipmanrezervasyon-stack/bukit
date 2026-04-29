@@ -2632,14 +2632,26 @@
       });
   });
 
-  function fillTimeDropdowns() {
-    var qTime = document.getElementById('qc-return-time');
-    if (!qTime) return;
-    for (var i = 9; i <= 22; i++) {
-      var h = (i < 10 ? '0' + i : String(i));
-      qTime.innerHTML += '<option value="' + h + ':00">' + h + ':00</option>';
-      qTime.innerHTML += '<option value="' + h + ':30">' + h + ':30</option>';
+  function equipmentDepotTimeOptions_() {
+    var out = [];
+    for (var mins = 9 * 60; mins <= 16 * 60 + 30; mins += 30) {
+      if (mins >= 12 * 60 && mins < 13 * 60) continue;
+      var hNum = Math.floor(mins / 60);
+      var mNum = mins % 60;
+      out.push((hNum < 10 ? '0' + hNum : String(hNum)) + ':' + (mNum < 10 ? '0' + mNum : String(mNum)));
     }
+    return out;
+  }
+
+  function fillSelectWithEquipmentDepotTimes_(el) {
+    if (!el) return;
+    el.innerHTML = equipmentDepotTimeOptions_().map(function(label) {
+      return '<option value="' + label + '">' + label + '</option>';
+    }).join('');
+  }
+
+  function fillTimeDropdowns() {
+    fillSelectWithEquipmentDepotTimes_(document.getElementById('qc-return-time'));
   }
 
   function adminIsGreenStudio_(studioId, studioName) {
@@ -2675,20 +2687,13 @@
     endEl.value = '11:00';
   }
 
-  /** İleri tarihli ekipman: 30 dakikalık slotlar (09:00–21:00). */
+  /** İleri tarihli ekipman: 30 dakikalık depo slotları (09:00–16:30, öğle hariç). */
   function fillForwardEquipTimeDropdowns() {
     var startEl = document.getElementById('fe-start-time');
     var endEl = document.getElementById('fe-end-time');
     if (!startEl || !endEl) return;
-    startEl.innerHTML = '';
-    endEl.innerHTML = '';
-    for (var mins = 9 * 60; mins <= 21 * 60; mins += 30) {
-      var hNum = Math.floor(mins / 60);
-      var mNum = mins % 60;
-      var label = (hNum < 10 ? '0' + hNum : String(hNum)) + ':' + (mNum < 10 ? '0' + mNum : String(mNum));
-      startEl.innerHTML += '<option value="' + label + '">' + label + '</option>';
-      endEl.innerHTML += '<option value="' + label + '">' + label + '</option>';
-    }
+    fillSelectWithEquipmentDepotTimes_(startEl);
+    fillSelectWithEquipmentDepotTimes_(endEl);
     startEl.value = '09:00';
     endEl.value = '11:00';
   }
