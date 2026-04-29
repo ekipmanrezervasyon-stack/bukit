@@ -1207,7 +1207,7 @@
           phone: '',
           handoverLabel: String((r && r.start_at) || ''),
           returnLabel: String((r && r.end_at) || ''),
-          purpose: String((r && (r.note || r.purpose)) || ''),
+          purpose: String((r && (r.note || r.purpose)) || '').replace(/\[BUKIT_CHECKOUT_PDF\]([\s\S]*?)\[\/BUKIT_CHECKOUT_PDF\]/g, '').trim(),
           status: String((r && r.status) || ''),
           items: [item]
         };
@@ -1502,6 +1502,10 @@
             if (!sid) return;
             studioNameById[sid] = String((st && (st.name || st.studio_name || st.code)) || sid);
           });
+          function extractCheckoutPdfFromNote(note) {
+            var m = String(note || '').match(/\[BUKIT_CHECKOUT_PDF\]([\s\S]*?)\[\/BUKIT_CHECKOUT_PDF\]/);
+            return m ? String(m[1] || '').trim() : '';
+          }
 
           var outEq = rows.map(function(r) {
             var eqId = String((r && r.equipment_item_id) || '').trim();
@@ -1514,7 +1518,7 @@
               endDt: String((r && r.end_at) || ''),
               status: String((r && r.status) || ''),
               kind: 'equipment',
-              pdfUrl: String((r && (r.pdf_url || r.archive_url || r.checkout_pdf_url || r.pdf_archive_url)) || '').trim()
+              pdfUrl: String((r && (r.archive_url || r.pdf_archive_url || r.checkout_pdf_url || r.pdf_url || extractCheckoutPdfFromNote(r.note))) || '').trim()
             };
           });
           var outSt = stRows.map(function(r) {
@@ -1529,7 +1533,7 @@
               endDt: String((r && r.end_at) || ''),
               status: String((r && r.status) || ''),
               kind: 'studio',
-              pdfUrl: String((r && (r.studio_usage_form_url || r.pdf_url || r.archive_url || r.checkout_pdf_url || r.pdf_archive_url)) || '').trim()
+              pdfUrl: String((r && (r.archive_url || r.pdf_archive_url || r.studio_usage_form_url || r.checkout_pdf_url || r.pdf_url || extractCheckoutPdfFromNote(r.studio_handover_note))) || '').trim()
             };
           });
           return outEq.concat(outSt).sort(function(a, b) {

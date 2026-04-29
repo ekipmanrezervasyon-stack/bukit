@@ -254,8 +254,11 @@ const normalizeEquipmentUsageScope = (raw: unknown): EquipmentUsageScope => {
   return s === EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS ? EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS : EQUIPMENT_USAGE_SCOPE_ON_CAMPUS;
 };
 
+const CHECKOUT_PDF_NOTE_RE = /\[BUKIT_CHECKOUT_PDF\]([\s\S]*?)\[\/BUKIT_CHECKOUT_PDF\]/;
+const stripCheckoutPdfNote = (raw: unknown): string => String(raw || "").replace(CHECKOUT_PDF_NOTE_RE, "").trim();
+
 const decodeEquipmentReservationNote = (raw: unknown): { note: string; usageScope: EquipmentUsageScope } => {
-  const full = String(raw || "");
+  const full = stripCheckoutPdfNote(raw);
   const m = full.match(EQUIPMENT_NOTE_USAGE_MARKER_REGEX);
   if (!m) {
     return { note: full.trim(), usageScope: EQUIPMENT_USAGE_SCOPE_ON_CAMPUS };
@@ -751,7 +754,7 @@ const isMissingColumnError = (err: unknown): boolean => {
       : err && typeof err === "object" && "message" in err
         ? String((err as { message?: string }).message || "")
         : "";
-  return msg.includes("Could not find the") && msg.includes("column");
+  return (msg.includes("Could not find the") && msg.includes("column")) || /column\s+[^ ]+\s+does not exist/i.test(msg);
 };
 
 const extractMissingColumnName = (err: unknown): string => {
@@ -762,7 +765,33 @@ const extractMissingColumnName = (err: unknown): string => {
         ? String((err as { message?: string }).message || "")
         : "";
   const m = msg.match(/Could not find the '([^']+)' column/i);
-  return m ? String(m[1] || "").trim() : "";
+  if (m) return String(m[1] || "").trim();
+  const pg = msg.match(/column\s+(?:"?[\w.]+?"?\.)?"?([\w]+)"?\s+does not exist/i);
+  return pg ? String(pg[1] || "").trim() : "";
+};
+
+const makeCheckoutPdfNote = (note: string, pdfUrl: string): string => {
+  const cleanNote = stripCheckoutPdfNote(note);
+  const marker = `[BUKIT_CHECKOUT_PDF]${pdfUrl}[/BUKIT_CHECKOUT_PDF]`;
+  return cleanNote ? `${cleanNote}\n${marker}` : marker;
+};
+
+const safeUpdateReservationPdfNoteFallback = async (
+  table: "equipment_reservations" | "studio_reservations",
+  reservationId: string,
+  pdfUrl: string
+): Promise<void> => {
+  const noteColumn = table === "equipment_reservations" ? "note" : "studio_handover_note";
+  const current = await supabaseAdmin.from(table).select(`id,${noteColumn}`).eq("id", reservationId).maybeSingle();
+  if (current.error) throw new Error(current.error.message);
+  const existing = String(((current.data || {}) as Record<string, unknown>)[noteColumn] || "");
+  const upd = await supabaseAdmin
+    .from(table)
+    .update({ [noteColumn]: makeCheckoutPdfNote(existing, pdfUrl) })
+    .eq("id", reservationId)
+    .select("id")
+    .maybeSingle();
+  if (upd.error) throw new Error(upd.error.message);
 };
 
 const safeUpdateReservationPdfRefs = async (
@@ -774,22 +803,23 @@ const safeUpdateReservationPdfRefs = async (
   if (!ids.length) return;
   const pdfUrl = String(refs.pdfUrl || "").trim();
   const archiveUrl = String(refs.archiveUrl || "").trim();
+  const displayPdfUrl = archiveUrl || pdfUrl;
 
   let patch: Record<string, string> = {};
   if (table === "equipment_reservations") {
-    if (pdfUrl) {
-      patch.pdf_url = pdfUrl;
-      patch.checkout_pdf_url = pdfUrl;
+    if (displayPdfUrl) {
+      patch.pdf_url = displayPdfUrl;
+      patch.checkout_pdf_url = displayPdfUrl;
     }
     if (archiveUrl) {
       patch.archive_url = archiveUrl;
       patch.pdf_archive_url = archiveUrl;
     }
   } else {
-    if (pdfUrl) {
-      patch.pdf_url = pdfUrl;
-      patch.studio_usage_form_url = pdfUrl;
-      patch.checkout_pdf_url = pdfUrl;
+    if (displayPdfUrl) {
+      patch.pdf_url = displayPdfUrl;
+      patch.studio_usage_form_url = displayPdfUrl;
+      patch.checkout_pdf_url = displayPdfUrl;
     }
     if (archiveUrl) {
       patch.archive_url = archiveUrl;
@@ -800,13 +830,20 @@ const safeUpdateReservationPdfRefs = async (
 
   for (const rid of ids) {
     let localPatch: Record<string, string> = { ...patch };
+    let updated = false;
     while (Object.keys(localPatch).length) {
       const upd = await supabaseAdmin.from(table).update(localPatch).eq("id", rid).select("id").maybeSingle();
-      if (!upd.error) break;
+      if (!upd.error) {
+        updated = true;
+        break;
+      }
       if (!isMissingColumnError(upd.error)) throw new Error(upd.error.message);
       const miss = extractMissingColumnName(upd.error);
       if (!miss || !Object.prototype.hasOwnProperty.call(localPatch, miss)) break;
       delete localPatch[miss];
+    }
+    if (!updated && displayPdfUrl) {
+      await safeUpdateReservationPdfNoteFallback(table, rid, displayPdfUrl);
     }
   }
 };

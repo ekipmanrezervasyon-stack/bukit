@@ -7634,25 +7634,52 @@ function tryGetAdminReservationHistoryFromSupabase_() {
     if (isNaN(d.getTime())) return '';
     return d.toISOString();
   }
-  var resRows = supabaseTrySelectFirstExisting_(_supaEquipmentReservationTableCandidates_(), { select: '*' }).rows || [];
+  function pdfFromNote_(note) {
+    var m = String(note || '').match(/\[BUKIT_CHECKOUT_PDF\]([\s\S]*?)\[\/BUKIT_CHECKOUT_PDF\]/);
+    return m ? String(m[1] || '').trim() : '';
+  }
+  var resRows = supabaseTrySelectFirstExisting_(['equipment_reservations'].concat(_supaEquipmentReservationTableCandidates_()), { select: '*' }).rows || [];
   var out = [];
   for (var i = 0; i < resRows.length; i++) {
     var r = resRows[i];
-    var eqId = String(supaRowPick_(r, ['equipment_id', 'item_id', 'eq_id'], '')).trim();
+    var eqId = String(supaRowPick_(r, ['equipment_item_id', 'equipment_id', 'item_id', 'eq_id'], '')).trim();
     if (!eqId) continue;
-    var handover = supaRowPick_(r, ['handover_date', 'start_dt', 'start_date'], '');
-    var ret = supaRowPick_(r, ['return_date', 'end_dt', 'end_date'], '');
+    var handover = supaRowPick_(r, ['start_at', 'handover_date', 'start_dt', 'start_date'], '');
+    var ret = supaRowPick_(r, ['end_at', 'return_date', 'end_dt', 'end_date'], '');
     out.push({
       eqId: eqId,
       eqName: String(supaRowPick_(r, ['equipment_name', 'item_name', 'name'], '')).trim(),
-      userId: String(supaRowPick_(r, ['student_id', 'user_id'], '')).trim(),
-      userName: String(supaRowPick_(r, ['student_name', 'user_name'], '')).trim(),
+      userId: String(supaRowPick_(r, ['requester_profile_id', 'student_id', 'user_id', 'requester_email'], '')).trim(),
+      userName: String(supaRowPick_(r, ['requester_name', 'requester_email', 'student_name', 'user_name'], '')).trim(),
       startDt: toIso_(handover),
       endDt: toIso_(ret),
       status: String(supaRowPick_(r, ['status'], '')).trim(),
-      resId: String(supaRowPick_(r, ['reservation_group_id', 'res_id', 'reservation_id', 'id'], '')).trim()
+      resId: String(supaRowPick_(r, ['id', 'reservation_group_id', 'res_id', 'reservation_id'], '')).trim(),
+      kind: 'equipment',
+      pdfUrl: String(supaRowPick_(r, ['archive_url', 'pdf_archive_url', 'checkout_pdf_url', 'pdf_url'], '') || pdfFromNote_(supaRowPick_(r, ['note'], ''))).trim()
     });
   }
+  try {
+    var stRows = supabaseTrySelectFirstExisting_(['studio_reservations'], { select: '*' }).rows || [];
+    for (var si = 0; si < stRows.length; si++) {
+      var sr = stRows[si];
+      var sid = String(supaRowPick_(sr, ['studio_id'], '')).trim();
+      var stStart = supaRowPick_(sr, ['start_at', 'start_dt', 'start_date'], '');
+      var stEnd = supaRowPick_(sr, ['end_at', 'end_dt', 'end_date'], '');
+      out.push({
+        eqId: sid ? ('STUDIO ' + sid) : 'STUDIO',
+        eqName: String(supaRowPick_(sr, ['studio_name', 'name', 'studio_id'], 'Studio')) + ' - Anahtar',
+        userId: String(supaRowPick_(sr, ['requester_profile_id', 'user_id', 'requester_email'], '')).trim(),
+        userName: String(supaRowPick_(sr, ['requester_name', 'requester_email', 'user_name'], '')).trim(),
+        startDt: toIso_(stStart),
+        endDt: toIso_(stEnd),
+        status: String(supaRowPick_(sr, ['status'], '')).trim(),
+        resId: String(supaRowPick_(sr, ['id'], '')).trim(),
+        kind: 'studio',
+        pdfUrl: String(supaRowPick_(sr, ['archive_url', 'pdf_archive_url', 'studio_usage_form_url', 'checkout_pdf_url', 'pdf_url'], '') || pdfFromNote_(supaRowPick_(sr, ['studio_handover_note'], ''))).trim()
+      });
+    }
+  } catch (_stHistErr) {}
   out.sort(function(a, b) {
     return new Date(b.startDt || 0) - new Date(a.startDt || 0);
   });
@@ -7667,7 +7694,7 @@ function getAdminReservationHistory(adminToken) {
   try {
     var adminUser = requireAdminWebUser_(adminToken);
     if (!adminUser) return [];
-    var kHist = _cacheKey_('adminResHistory', ['v1']);
+    var kHist = _cacheKey_('adminResHistory', ['v2']);
     var cHist = _cacheGetJson_(kHist);
     if (cHist) {
       _debugSourceLog_('getAdminReservationHistory', 'cache', t0Hist, { count: cHist.length || 0 });
