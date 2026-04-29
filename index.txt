@@ -209,7 +209,7 @@
         </div>
         <div id="otp-step-register-student" class="space-y-3 hidden">
           <label id="i18n-student-welcome" class="block text-xs font-bold text-gray-500 uppercase">Student Welcome</label>
-          <input type="text" id="reg-student-name" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Full name">
+          <input type="text" id="reg-student-name" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Full name" autocomplete="name" required minlength="2" aria-required="true">
           <input type="text" id="reg-student-no" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Student number">
           <input type="text" id="reg-student-phone" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none" placeholder="Phone (optional)">
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[10px] text-gray-600 space-y-2 leading-snug">

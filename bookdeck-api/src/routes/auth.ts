@@ -253,8 +253,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const parsed = z
       .object({
         token: z.string().min(20),
-        full_name: z.string().min(2).max(120),
-        student_number: z.string().min(4).max(32),
+        full_name: z.string().trim().min(2).max(120),
+        student_number: z.string().trim().min(4).max(32),
         department_code: z.string().min(1).max(20).optional().default(""),
         department_name: z.string().min(1).max(120).optional().default("")
       })
@@ -291,7 +291,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const parsed = z
       .object({
         token: z.string().min(20),
-        full_name: z.string().min(2).max(120),
+        full_name: z.string().trim().min(2).max(120),
         staff_type: z.enum(["academic", "administrative"]),
         faculty_name: z.string().min(1).max(120)
       })
