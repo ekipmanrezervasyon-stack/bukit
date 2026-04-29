@@ -2239,9 +2239,10 @@
         return isPickup ? 'Ekipman Teslim Kartı' : 'Ekipman İade Kartı';
       })();
       var ownerLine = escAdm(item.userName || '—') + ' - Student ID: ' + escAdm(item.studentId || '—');
+      var usageInfoLabel = (tKind === 'equipment' && !isPickup) ? 'Proje Açıklaması:' : 'Usage Type:';
       var usageTypeText = (tKind === 'studio')
         ? (String(studioMeta.usageType || '').trim() || '—')
-        : '—';
+        : ((tKind === 'equipment' && !isPickup) ? (String(item.purpose || '').trim() || '—') : '—');
       var trafSched = '<div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-100">' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">Teslim Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(handFmt || '—') + '</span></div></div>' +
         '<div><p class="text-sm font-medium text-gray-600 mb-1">İade Tarihi:</p><div class="flex items-center text-lg font-semibold text-gray-900">📅 <span class="ml-2">' + escAdm(retFmt || '—') + '</span></div></div>' +
@@ -2260,7 +2261,7 @@
           '</summary>' +
           '<div class="px-6 pb-6 pt-0 space-y-6">' +
             '<div>' + trafContact + studioKeyLine + studioPurposeLine + '</div>' +
-            '<div><p class="text-sm font-medium text-gray-600">Usage Type:</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words">' + escAdm(usageTypeText) + '</p></div>' +
+            '<div><p class="text-sm font-medium text-gray-600">' + escAdm(usageInfoLabel) + '</p><p class="text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">' + escAdm(usageTypeText) + '</p></div>' +
             trafSched +
             '<div class="flex items-center gap-2"><span class="text-[10px] font-bold uppercase px-2 py-1 rounded ' + badgeColor + '">' + flowBadge + '</span></div>' +
             '<div class="space-y-2" id="traffic-items-' + actId + '">' + itemsHtml + '</div>' +
