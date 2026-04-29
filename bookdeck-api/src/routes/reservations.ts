@@ -33,7 +33,8 @@ const equipmentCreateSchema = z.object({
 
 const decisionSchema = z.object({
   id: z.string().min(1),
-  note: z.string().max(500).optional()
+  note: z.string().max(500).optional(),
+  item_ids: z.array(z.string().min(1)).max(50).optional().default([])
 });
 const myBookingCancelSchema = z.object({
   id: z.string().min(1),
@@ -4236,16 +4237,20 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
 
     const { id, note } = parsed.data;
+    const selectedItemIds = dedupeTrimmedIds(parsed.data.item_ids || []);
     let nextNote: string | undefined = undefined;
+    const existing = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("*")
+      .eq("id", id)
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
+    if (!existing.data) return reply.code(404).send({ ok: false, error: "Reservation not found." });
+    const existingRow = existing.data as Record<string, unknown>;
+    const currentMeta = decodeEquipmentReservationNote(existingRow.note);
     if (typeof note === "string") {
-      const existing = await supabaseAdmin
-        .from("equipment_reservations")
-        .select("note")
-        .eq("id", id)
-        .limit(1)
-        .maybeSingle();
-      if (existing.error) return reply.code(500).send({ ok: false, error: existing.error.message });
-      const currentUsage = decodeEquipmentReservationNote((existing.data as Record<string, unknown> | null)?.note).usageScope;
+      const currentUsage = currentMeta.usageScope;
       nextNote = encodeEquipmentReservationNote(note, currentUsage);
     }
     const { data, error } = await supabaseAdmin
@@ -4261,12 +4266,71 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       .single();
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const updated = data as Record<string, unknown>;
+    const createdExtraIds: string[] = [];
+    const baseEqId = String(existingRow.equipment_item_id || updated.equipment_item_id || "").trim();
+    const extraItemIds = selectedItemIds.filter((itemId) => itemId && itemId !== baseEqId);
+    if (extraItemIds.length) {
+      const reservationStartAt = String(existingRow.start_at || updated.start_at || "");
+      const reservationEndAt = String(existingRow.end_at || updated.end_at || "");
+      const requesterEmail = String(existingRow.requester_email || updated.requester_email || "").trim().toLowerCase();
+      const requesterProfileId = String(existingRow.requester_profile_id || updated.requester_profile_id || "").trim();
+      const requesterName = String(existingRow.requester_name || updated.requester_name || requesterEmail || "");
+      const reservationGroupId = String(existingRow.reservation_group_id || updated.reservation_group_id || id).trim();
+      const extraItemsRes = await supabaseAdmin
+        .from("equipment_items")
+        .select("id,status,required_level")
+        .in("id", extraItemIds);
+      if (extraItemsRes.error) return reply.code(500).send({ ok: false, error: extraItemsRes.error.message });
+      const extraItemById = new Map(
+        ((extraItemsRes.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id || "").trim(), r])
+      );
+      for (const itemId of extraItemIds) {
+        const itemRow = extraItemById.get(itemId);
+        if (!itemRow) return reply.code(404).send({ ok: false, error: `Equipment item not found: ${itemId}` });
+        if (String(itemRow.status || "").toUpperCase() !== "AVAILABLE") {
+          return reply.code(409).send({ ok: false, error: `Equipment not available: ${itemId}` });
+        }
+        const overlap = await supabaseAdmin
+          .from("equipment_reservations")
+          .select("id")
+          .eq("equipment_item_id", itemId)
+          .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+          .lt("start_at", reservationEndAt)
+          .gt("end_at", reservationStartAt)
+          .limit(1);
+        if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
+        if ((overlap.data ?? []).length > 0) {
+          return reply.code(409).send({ ok: false, error: `Equipment has conflicting reservation: ${itemId}` });
+        }
+        const inserted = await supabaseAdmin
+          .from("equipment_reservations")
+          .insert({
+            equipment_item_id: itemId,
+            requester_profile_id: requesterProfileId || null,
+            requester_email: requesterEmail,
+            requester_name: requesterName,
+            reservation_group_id: reservationGroupId,
+            required_level: parseEquipmentLevel(itemRow.required_level),
+            status: "approved",
+            approval_required: false,
+            start_at: reservationStartAt,
+            end_at: reservationEndAt,
+            note: nextNote ?? String(existingRow.note || ""),
+            reviewed_by: actor.email,
+            reviewed_at: new Date().toISOString()
+          })
+          .select("id")
+          .single();
+        if (inserted.error) return reply.code(500).send({ ok: false, error: inserted.error.message });
+        createdExtraIds.push(String((inserted.data as Record<string, unknown>).id || ""));
+      }
+    }
     try {
       scheduleGroupedEquipmentLifecycleEmail(String(updated.id || id), "approved", String(note || "").trim());
     } catch (e) {
       req.log.error({ err: e, reservationId: String(updated.id || id) }, "schedule equipment reservation approved grouped mail failed");
     }
-    return { ok: true, data };
+    return { ok: true, data, created_extra_ids: createdExtraIds };
   });
 
   app.post("/admin/equipment-reservations/reject", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
@@ -5079,6 +5143,13 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const raw = String(parsed.data.query || "").trim();
     const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw);
+    const mapItem = (row: Record<string, unknown>) => ({
+      eqId: String(row.id || ""),
+      eqCode: String(row.equipment_id || ""),
+      name: String(row.name || row.equipment_id || row.id || ""),
+      eqType: String(row.category || row.type_desc || ""),
+      status: String(row.status || "")
+    });
     let result:
       | { data: Record<string, unknown> | null; error: { message: string } | null }
       | { data: null; error: null } = { data: null, error: null };
@@ -5097,20 +5168,30 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
     }
     if (!result.data) {
-      result = await supabaseAdmin.from("equipment_items").select("*").ilike("name", `%${raw}%`).limit(1).maybeSingle();
-      if (result.error) return reply.code(500).send({ ok: false, error: result.error.message });
+      const safeRaw = raw.replace(/[%,()]/g, " ").trim() || raw;
+      const rows = await supabaseAdmin
+        .from("equipment_items")
+        .select("*")
+        .or(
+          [
+            `equipment_id.ilike.%${safeRaw}%`,
+            `name.ilike.%${safeRaw}%`,
+            `category.ilike.%${safeRaw}%`,
+            `type_desc.ilike.%${safeRaw}%`
+          ].join(",")
+        )
+        .order("status", { ascending: true })
+        .order("name", { ascending: true })
+        .limit(12);
+      if (rows.error) return reply.code(500).send({ ok: false, error: rows.error.message });
+      const items = ((rows.data ?? []) as Record<string, unknown>[]).map(mapItem);
+      const availableFirst = items.find((it) => String(it.status || "").toUpperCase() === "AVAILABLE");
+      if (items.length) return { ok: true, item: availableFirst || items[0], items };
     }
     if (!result.data) return reply.code(404).send({ ok: false, error: "Equipment not found." });
     const row = result.data as Record<string, unknown>;
-    return {
-      ok: true,
-      item: {
-        eqId: String(row.id || ""),
-        name: String(row.name || row.id || ""),
-        eqType: String(row.category || row.type || ""),
-        status: String(row.status || "")
-      }
-    };
+    const item = mapItem(row);
+    return { ok: true, item, items: [item] };
   });
 
   app.post("/equipment-notify/subscribe", { preHandler: requireAuth }, async (req, reply) => {

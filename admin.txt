@@ -3448,14 +3448,18 @@
       ? row.reservationIds.slice()
       : [rid];
     var targetIds = rowReservationIds.slice();
+    var selectedEq = {};
+    checks.forEach(function(x) { selectedEq[String(x || '').trim().toUpperCase()] = true; });
+    var pendingExtras = (pendingExtraItemsByRes[rid] || []).filter(function(it) {
+      return selectedEq[String((it && it.eqId) || '').trim().toUpperCase()];
+    });
+    var extraItemIds = pendingExtras.map(function(it) { return String((it && it.eqId) || '').trim(); }).filter(Boolean);
     if (!isStudioPending && row && Array.isArray(row.items) && checks.length) {
-      var selected = {};
-      checks.forEach(function(x) { selected[String(x || '').trim().toUpperCase()] = true; });
       targetIds = row.items
-        .filter(function(it) { return selected[String((it && it.eqId) || '').trim().toUpperCase()]; })
+        .filter(function(it) { return selectedEq[String((it && it.eqId) || '').trim().toUpperCase()]; })
         .map(function(it) { return String((it && it.reservationId) || '').trim(); })
         .filter(Boolean);
-      if (!targetIds.length) targetIds = rowReservationIds.slice();
+      if (!targetIds.length && !extraItemIds.length) targetIds = rowReservationIds.slice();
     }
     var uniq = {};
     targetIds = targetIds.filter(function(x) {
@@ -3464,8 +3468,11 @@
       uniq[k] = true;
       return true;
     });
-    Promise.all(targetIds.map(function(oneId) {
-      return adminApiRequest(endpoint, { method: 'POST', body: { id: oneId } });
+    if (!targetIds.length && extraItemIds.length) targetIds = [rid];
+    Promise.all(targetIds.map(function(oneId, idx) {
+      var body = { id: oneId };
+      if (!isStudioPending && idx === 0 && extraItemIds.length) body.item_ids = extraItemIds;
+      return adminApiRequest(endpoint, { method: 'POST', body: body });
     })).then(function(results) {
       showToast("Onaylandı!");
       var result = (results && results[0]) || null;
@@ -3481,12 +3488,12 @@
   function pendingAddItemPrompt(resId) {
     openAdminUiDialog({
       title: 'Kalem Ekle',
-      desc: 'Equipment ID girin (örn: CAM12). Müsaitse bu bekleyen isteğe eklenir.',
+      desc: 'Ekipman adı, ekipman ID/kodu veya türü ile arayın. İlk müsait sonuç bu bekleyen isteğe eklenir.',
       tone: 'info',
       input: true,
       required: true,
-      requiredMessage: 'Equipment ID zorunlu.',
-      placeholder: 'Equipment ID',
+      requiredMessage: 'Arama metni zorunlu.',
+      placeholder: 'Örn: CAMERA, CAM001, tripod, Wireless Lavalier',
       okText: 'Ekle'
     }, function(eqIdRaw) {
       var eqId = String(eqIdRaw || '').trim();
@@ -3496,8 +3503,10 @@
         if (String(r.item.status || '').toUpperCase() !== 'AVAILABLE') { showToast('Ekipman müsait değil.', 'error'); return; }
         if (!pendingExtraItemsByRes[resId]) pendingExtraItemsByRes[resId] = [];
         var exists = pendingExtraItemsByRes[resId].some(function(x) { return String(x.eqId || '').toUpperCase() === String(r.item.eqId || '').toUpperCase(); });
-        if (!exists) pendingExtraItemsByRes[resId].push({ eqId: r.item.eqId, name: r.item.name || r.item.eqId, eqType: r.item.eqType || '' });
-        showToast('Kalem eklendi: ' + (r.item.eqId || ''), 'success');
+        if (!exists) pendingExtraItemsByRes[resId].push({ eqId: r.item.eqId, eqCode: r.item.eqCode || '', name: r.item.name || r.item.eqCode || r.item.eqId, eqType: r.item.eqType || '' });
+        var resultCount = (r.items && r.items.length) ? Number(r.items.length) : 1;
+        var suffix = resultCount > 1 ? ' (arama sonucu içinden ilk müsait kalem)' : '';
+        showToast('Kalem eklendi: ' + (r.item.eqCode || r.item.eqId || '') + suffix, 'success');
         filterPendingLocal();
       }).withFailureHandler(function(err) {
         showToast('Hata: ' + (err && err.message ? err.message : 'Unknown'), 'error');
