@@ -4352,6 +4352,31 @@
       return 'Preparing Your Cart <span class="checkout-loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
     }
     function checkOfficialHolidayClient(startIso, endIso, cb) {
+      function ymdFromIso_(iso) {
+        var raw = String(iso || '').trim();
+        var m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return m[1] + '-' + m[2] + '-' + m[3];
+        var d = new Date(raw);
+        if (isNaN(d.getTime())) return '';
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+      function normalizeHolidayResult_(r) {
+        var endpointSet = {};
+        var sYmd = ymdFromIso_(startIso);
+        var eYmd = ymdFromIso_(endIso);
+        if (sYmd) endpointSet[sYmd] = true;
+        if (eYmd) endpointSet[eYmd] = true;
+        var dates = ((r && r.dates) || []).map(function(x) { return String(x || '').trim(); }).filter(function(x) {
+          var m = x.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          var ymd = m ? x : '';
+          if (!ymd) {
+            var dm = x.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+            if (dm) ymd = dm[3] + '-' + dm[2] + '-' + dm[1];
+          }
+          return !!(ymd && endpointSet[ymd]);
+        });
+        return { blocked: dates.length > 0, dates: dates };
+      }
       if (typeof google === 'undefined' || !google.script || !google.script.run) {
         cb({ blocked: false, error: '' });
         return;
@@ -4361,7 +4386,7 @@
           cb({ blocked: false, error: (r && r.error) || '' });
           return;
         }
-        cb({ blocked: !!r.blocked, dates: r.dates || [] });
+        cb(normalizeHolidayResult_(r));
       }).withFailureHandler(function(err) {
         cb({ blocked: false, error: (err && err.message) || '' });
       }).checkOfficialHolidayBridge(startIso, endIso, currentTestToken);
