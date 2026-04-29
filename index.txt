@@ -4409,10 +4409,11 @@
         var queue = Promise.resolve([]);
         (ids || []).forEach(function(eqId) {
           queue = queue.then(function(results) {
+            var currentEqId = String(eqId || '');
             return apiRequest('/equipment-reservations', {
               method: 'POST',
               body: {
-                equipment_item_id: String(eqId || ''),
+                equipment_item_id: currentEqId,
                 start_at: s,
                 end_at: e,
                 note: pu || '',
@@ -4420,11 +4421,11 @@
               }
             })
               .then(function(res) {
-                results.push({ status: 'fulfilled', value: res });
+                results.push({ status: 'fulfilled', eqId: currentEqId, value: res });
                 return results;
               })
               .catch(function(err) {
-                results.push({ status: 'rejected', reason: err });
+                results.push({ status: 'rejected', eqId: currentEqId, reason: err });
                 return results;
               });
           });
@@ -4432,7 +4433,8 @@
         queue.then(function(results) {
           if(btn){btn.innerText=ot;btn.disabled=false;}if(mbtn){mbtn.innerText=mo||'Reserve selected';mbtn.disabled=false;}
           var okCount = results.filter(function(r) { return r.status === 'fulfilled'; }).length;
-          var fail = results.find(function(r) { return r.status === 'rejected'; });
+          var failedResults = results.filter(function(r) { return r.status === 'rejected'; });
+          var fail = failedResults[0];
           if (!okCount && fail && fail.status === 'rejected') {
             var msg0 = (fail.reason && fail.reason.message) || t('msgGenericFailed');
             if (isSessionExpiredMessage_(msg0)) {
@@ -4446,8 +4448,29 @@
             var msg1 = (fail.reason && fail.reason.message) || '';
             if (isSessionExpiredMessage_(msg1)) {
               showAlert(t('modalDeclined'), currentLang === 'tr' ? 'Oturum süresi dolmuş görünüyor. Lütfen tekrar giriş yapın.' : 'Your session appears to be expired. Please sign in again.', true);
+              return;
             } else {
-              showAlert(t('modalDeclined'), (currentLang==='tr' ? 'Bazı kalemler oluşturulamadı: ' : 'Some items failed: ') + msg1, true);
+              var failedIds = failedResults.map(function(r) { return String(r.eqId || '').trim(); }).filter(Boolean);
+              var failedIdSet = {};
+              failedIds.forEach(function(id) { failedIdSet[String(id).toUpperCase()] = 1; });
+              eqCart = eqCart.filter(function(cid) { return !!failedIdSet[String(cid || '').trim().toUpperCase()]; });
+              Object.keys(equipmentGroupSelection).forEach(function(gk) {
+                if (!failedIdSet[String(equipmentGroupSelection[gk] || '').trim().toUpperCase()]) delete equipmentGroupSelection[gk];
+              });
+              updateCartUI();
+              closeCheckoutConfirmModal();
+              if (eqCart.length > 0) openCheckoutConfirmModal();
+              equipmentCategoryCache = {};
+              loadEquipment(currentEquipmentCategory || DEFAULT_EQUIPMENT_CATEGORY);
+              var failedLabels = failedIds.map(function(fid) {
+                var row = findEquipGroupByCartId(fid);
+                return (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : fid;
+              }).slice(0, 4).join(', ');
+              var prefix = currentLang === 'tr'
+                ? (okCount + ' ürün oluşturuldu, ' + failedIds.length + ' ürün oluşturulamadı')
+                : (okCount + ' item(s) created, ' + failedIds.length + ' item(s) failed');
+              showAlert(t('modalDeclined'), prefix + (failedLabels ? ': ' + failedLabels : '') + (msg1 ? ' — ' + msg1 : ''), true);
+              return;
             }
           } else {
             showAlert(t('modalSuccess'),t('msgReservationPlaced')+' '+(currentLang==='tr'?'Onay bekleyen talebinizi Rezervasyonlarim sekmesinden gorebilirsiniz.':'You can track your pending request under My Bookings.'));
