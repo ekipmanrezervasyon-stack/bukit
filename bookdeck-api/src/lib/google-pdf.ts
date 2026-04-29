@@ -39,38 +39,38 @@ const DEFAULT_UNICODE_FONT_PATH = resolve(
   "../../node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf"
 );
 
+const parseStoredDateParts = (raw: string): { year: string; month: string; day: string; hour: string; minute: string } | null => {
+  const m = String(raw || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if (!m) return null;
+  return { year: m[1], month: m[2], day: m[3], hour: m[4], minute: m[5] };
+};
+
 const formatDate = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const tz = new Intl.DateTimeFormat("tr-TR", {
-    timeZone: "Europe/Istanbul",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false
-  }).format(d);
-  return tz;
+  const raw = String(iso || "").trim();
+  const parts = parseStoredDateParts(raw);
+  if (parts) return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} ${hh}:${mi}`;
 };
 
 const formatDdMmYyyyDashHm = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  try {
-    const parts = new Intl.DateTimeFormat("tr-TR", {
-      timeZone: "Europe/Istanbul",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    }).formatToParts(d);
-    const map: Record<string, string> = {};
-    parts.forEach((p) => {
-      map[p.type] = p.value;
-    });
-    return `${map.day || "00"}.${map.month || "00"}.${map.year || "0000"} - ${map.hour || "00"}:${map.minute || "00"}`;
-  } catch {
-    return iso;
-  }
+  const raw = String(iso || "").trim();
+  const parts = parseStoredDateParts(raw);
+  if (parts) return `${parts.day}.${parts.month}.${parts.year} - ${parts.hour}:${parts.minute}`;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} - ${hh}:${mi}`;
 };
 
 const formatKeyPickedUpStamp = (dateInput: Date): string => {

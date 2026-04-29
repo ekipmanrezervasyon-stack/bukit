@@ -1764,10 +1764,7 @@ const sendEquipmentAvailableNotifyEmail = async (
     throw new Error("Notify mail is not configured. Missing RESEND_API_KEY or OTP_EMAIL_FROM.");
   }
   const appName = String(env.OTP_APP_NAME || "BUKit").trim();
-  const ts = new Date(String(payload.availableAtIso || "")).getTime();
-  const availableAtLabel = Number.isNaN(ts)
-    ? String(payload.availableAtIso || "")
-    : new Date(ts).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", hour12: false });
+  const availableAtLabel = formatMailDateTimeTR(String(payload.availableAtIso || ""));
   const title = String(payload.name || payload.code || "Equipment").trim();
   const code = String(payload.code || "").trim();
   const subject = `[${appName}] Ekipman musait / Equipment available: ${title}`;
@@ -2348,24 +2345,18 @@ const formatMailDateTimeTR = (iso: string): string => {
 };
 
 const formatPdfFilenameDateToken = (iso: string): string => {
-  const ms = new Date(String(iso || "")).getTime();
+  const raw = String(iso || "").trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if (m) return `${m[3]}.${m[2]}.${m[1]}-${m[4]}.${m[5]}`;
+  const ms = new Date(raw).getTime();
   if (Number.isNaN(ms)) return "tarih_belirsiz";
-  try {
-    const parts = new Intl.DateTimeFormat("tr-TR", {
-      timeZone: "Europe/Istanbul",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    }).formatToParts(new Date(ms));
-    const map: Record<string, string> = {};
-    for (const p of parts) map[p.type] = p.value;
-    return `${map.day || "00"}.${map.month || "00"}.${map.year || "0000"}-${map.hour || "00"}.${map.minute || "00"}`;
-  } catch {
-    return "tarih_belirsiz";
-  }
+  const d = new Date(ms);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy}-${hh}.${mi}`;
 };
 
 const normalizePdfFileToken = (raw: string): string =>
