@@ -4972,6 +4972,26 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
     const id = String(parsed.data.id || "").trim();
 
+    const existingEq = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,status")
+      .eq("id", id)
+      .maybeSingle();
+    if (existingEq.error) return reply.code(500).send({ ok: false, error: existingEq.error.message });
+    if (existingEq.data && EQUIPMENT_ON_LOAN_RES_STATUSES.includes(String((existingEq.data as Record<string, unknown>).status || ""))) {
+      req.log.warn(
+        {
+          reservationId: id,
+          equipmentItemId: String((existingEq.data as Record<string, unknown>).equipment_item_id || ""),
+          reservationStatus: String((existingEq.data as Record<string, unknown>).status || ""),
+          actorRole: String(actor.role || ""),
+          actorId: String(actor.id || "")
+        },
+        "equipment reservation cancel blocked for on-loan reservation"
+      );
+      return reply.code(409).send({ ok: false, error: "Cannot cancel an equipment reservation that is already checked out/on loan." });
+    }
+
     const eq = await supabaseAdmin
       .from("equipment_reservations")
       .update({
