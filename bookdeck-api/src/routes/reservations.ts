@@ -3551,7 +3551,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         if (activeCategoryItemIds.length) {
           const activeCategoryItemsRes = await supabaseAdmin
             .from("equipment_items")
-            .select("id,name,category,type_desc,equipment_id")
+            .select("id,name,category,equipment_id")
             .in("id", activeCategoryItemIds);
           if (activeCategoryItemsRes.error) return reply.code(500).send({ ok: false, error: activeCategoryItemsRes.error.message });
           let sameCategoryActiveCount = 0;
