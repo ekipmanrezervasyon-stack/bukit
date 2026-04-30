@@ -475,6 +475,60 @@ const updateEquipmentReservationToReturned = async (
   };
 };
 
+type EquipmentOverlapRow = {
+  id?: string;
+  equipment_item_id?: string;
+  status?: string;
+  requester_profile_id?: string;
+  requester_email?: string;
+  start_at?: string;
+  end_at?: string;
+};
+
+const findEquipmentReservationOverlap = async (params: {
+  equipmentItemId: string;
+  startAt: string;
+  endAt: string;
+}): Promise<{ data: EquipmentOverlapRow | null; error: { message: string } | null }> => {
+  const overlap = await supabaseAdmin
+    .from("equipment_reservations")
+    .select("id,equipment_item_id,status,requester_profile_id,requester_email,start_at,end_at")
+    .eq("equipment_item_id", params.equipmentItemId)
+    .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+    .lt("start_at", params.endAt)
+    .gt("end_at", params.startAt)
+    .limit(1);
+  if (overlap.error) return { data: null, error: { message: overlap.error.message } };
+  return { data: ((overlap.data ?? [])[0] as EquipmentOverlapRow | undefined) || null, error: null };
+};
+
+const sameReservationInstant = (a: unknown, b: unknown): boolean => {
+  const ams = new Date(String(a || "")).getTime();
+  const bms = new Date(String(b || "")).getTime();
+  return Number.isFinite(ams) && Number.isFinite(bms) && ams === bms;
+};
+
+const isSameIntendedEquipmentReservation = (params: {
+  existing: EquipmentOverlapRow;
+  equipmentItemId: string;
+  requesterProfileId: string;
+  requesterEmail: string;
+  startAt: string;
+  endAt: string;
+}): boolean => {
+  const existing = params.existing;
+  const sameItem = String(existing.equipment_item_id || "").trim() === String(params.equipmentItemId || "").trim();
+  const sameUserById =
+    Boolean(String(params.requesterProfileId || "").trim()) &&
+    String(existing.requester_profile_id || "").trim() === String(params.requesterProfileId || "").trim();
+  const sameUserByEmail =
+    Boolean(String(params.requesterEmail || "").trim()) &&
+    String(existing.requester_email || "").trim().toLowerCase() === String(params.requesterEmail || "").trim().toLowerCase();
+  const sameWindow = sameReservationInstant(existing.start_at, params.startAt) && sameReservationInstant(existing.end_at, params.endAt);
+  const activeStatus = EQUIPMENT_ACTIVE_RES_STATUSES.includes(String(existing.status || ""));
+  return sameItem && (sameUserById || sameUserByEmail) && sameWindow && activeStatus;
+};
+
 const resolveEquipmentReservationGroupId = async (payload: {
   requesterProfileId?: string | null;
   requesterEmail?: string | null;
@@ -3610,30 +3664,51 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const overlap = await supabaseAdmin
-      .from("equipment_reservations")
-      .select("id,status,requester_profile_id,requester_email,start_at,end_at")
-      .eq("equipment_item_id", equipment_item_id)
-      .in("status", ["pending", "approved", EQUIPMENT_CHECKED_OUT_STATUS, "checked_out"])
-      .lt("start_at", end_at)
-      .gt("end_at", start_at)
-      .limit(1);
-    if (overlap.error) return reply.code(500).send({ ok: false, error: overlap.error.message });
-    if ((overlap.data ?? []).length > 0) {
-      const existing = overlap.data?.[0] as
-        | {
-            id?: string;
-            status?: string;
-            requester_profile_id?: string;
-            requester_email?: string;
-            start_at?: string;
-            end_at?: string;
-          }
-        | undefined;
-      const sameUserById = String(existing?.requester_profile_id || "") === String(profile.id || "");
-      const sameUserByEmail =
-        String(existing?.requester_email || "").toLowerCase() === String(profile.email || "").toLowerCase();
-      if (sameUserById || sameUserByEmail) {
+    const overlap = await findEquipmentReservationOverlap({ equipmentItemId: equipment_item_id, startAt: start_at, endAt: end_at });
+    if (overlap.error) {
+      req.log.error(
+        { err: overlap.error, event: "equipment_reservation_conflict_check_failed", phase: "initial", equipmentItemId: equipment_item_id },
+        "equipment reservation conflict check failed"
+      );
+      return reply.code(500).send({ ok: false, error: overlap.error.message });
+    }
+    req.log.info(
+      {
+        event: "equipment_reservation_conflict_check",
+        phase: "initial",
+        equipmentItemId: equipment_item_id,
+        requesterProfileId: String(profile.id || ""),
+        requesterRole: String(profile.role || ""),
+        startAt: start_at,
+        endAt: end_at,
+        conflictFound: Boolean(overlap.data),
+        conflictReservationId: String(overlap.data?.id || ""),
+        conflictStatus: String(overlap.data?.status || "")
+      },
+      "equipment reservation conflict check"
+    );
+    if (overlap.data) {
+      const existing = overlap.data;
+      if (
+        isSameIntendedEquipmentReservation({
+          existing,
+          equipmentItemId: equipment_item_id,
+          requesterProfileId: String(profile.id || ""),
+          requesterEmail: String(profile.email || ""),
+          startAt: start_at,
+          endAt: end_at
+        })
+      ) {
+        req.log.info(
+          {
+            event: "equipment_reservation_duplicate_detected",
+            phase: "initial",
+            equipmentItemId: equipment_item_id,
+            reservationId: String(existing?.id || ""),
+            requesterProfileId: String(profile.id || "")
+          },
+          "equipment reservation duplicate detected"
+        );
         return {
           ok: true,
           duplicate: true,
@@ -3646,6 +3721,16 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
           }
         };
       }
+      req.log.warn(
+        {
+          event: "equipment_reservation_overlap_blocked",
+          phase: "initial",
+          equipmentItemId: equipment_item_id,
+          conflictReservationId: String(existing?.id || ""),
+          conflictStatus: String(existing?.status || "")
+        },
+        "equipment reservation overlap blocked"
+      );
       return reply.code(409).send({ ok: false, error: "Equipment has conflicting reservation." });
     }
 
@@ -3667,6 +3752,76 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }),
       note: encodeEquipmentReservationNote(note, usage_scope)
     };
+
+    const finalOverlap = await findEquipmentReservationOverlap({ equipmentItemId: equipment_item_id, startAt: start_at, endAt: end_at });
+    if (finalOverlap.error) {
+      req.log.error(
+        { err: finalOverlap.error, event: "equipment_reservation_conflict_check_failed", phase: "final_pre_write", equipmentItemId: equipment_item_id },
+        "equipment reservation final conflict check failed"
+      );
+      return reply.code(500).send({ ok: false, error: finalOverlap.error.message });
+    }
+    req.log.info(
+      {
+        event: "equipment_reservation_conflict_check",
+        phase: "final_pre_write",
+        equipmentItemId: equipment_item_id,
+        requesterProfileId: String(profile.id || ""),
+        requesterRole: String(profile.role || ""),
+        startAt: start_at,
+        endAt: end_at,
+        conflictFound: Boolean(finalOverlap.data),
+        conflictReservationId: String(finalOverlap.data?.id || ""),
+        conflictStatus: String(finalOverlap.data?.status || "")
+      },
+      "equipment reservation final conflict check"
+    );
+    if (finalOverlap.data) {
+      const existing = finalOverlap.data;
+      if (
+        isSameIntendedEquipmentReservation({
+          existing,
+          equipmentItemId: equipment_item_id,
+          requesterProfileId: String(profile.id || ""),
+          requesterEmail: String(profile.email || ""),
+          startAt: start_at,
+          endAt: end_at
+        })
+      ) {
+        req.log.warn(
+          {
+            event: "equipment_reservation_duplicate_detected",
+            phase: "final_pre_write",
+            equipmentItemId: equipment_item_id,
+            reservationId: String(existing?.id || ""),
+            requesterProfileId: String(profile.id || "")
+          },
+          "equipment reservation duplicate detected during final check"
+        );
+        return {
+          ok: true,
+          duplicate: true,
+          data: {
+            id: String(existing?.id || ""),
+            status: String(existing?.status || "pending"),
+            equipment_item_id,
+            start_at: String(existing?.start_at || start_at),
+            end_at: String(existing?.end_at || end_at)
+          }
+        };
+      }
+      req.log.warn(
+        {
+          event: "equipment_reservation_overlap_blocked",
+          phase: "final_pre_write",
+          equipmentItemId: equipment_item_id,
+          conflictReservationId: String(existing?.id || ""),
+          conflictStatus: String(existing?.status || "")
+        },
+        "equipment reservation overlap blocked during final check"
+      );
+      return reply.code(409).send({ ok: false, error: "Equipment has conflicting reservation." });
+    }
 
     const { data, error } = await supabaseAdmin
       .from("equipment_reservations")
