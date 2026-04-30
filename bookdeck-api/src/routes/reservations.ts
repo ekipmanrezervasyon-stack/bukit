@@ -43,6 +43,7 @@ const myBookingCancelSchema = z.object({
 
 const ADMIN_ROLES: AppRole[] = ["super_admin", "technician", "iiw_instructor", "iiw_admin"];
 const EQUIPMENT_CHECKED_OUT_STATUS = "IN_USE";
+const EQUIPMENT_NOT_RETURNED_STATUS = "not_returned";
 const EQUIPMENT_USAGE_SCOPE_ON_CAMPUS = "on_campus";
 const EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS = "off_campus";
 type EquipmentUsageScope = typeof EQUIPMENT_USAGE_SCOPE_ON_CAMPUS | typeof EQUIPMENT_USAGE_SCOPE_OFF_CAMPUS;
@@ -4964,6 +4965,60 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       const msg = e instanceof Error ? e.message : String(e);
       return reply.code(500).send({ ok: false, error: msg, list: [] });
     }
+  });
+
+  app.post("/admin/traffic/not-returned", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
+    const actor = getAuthProfile(req);
+    const parsed = decisionSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: parsed.error.flatten() });
+    const id = String(parsed.data.id || "").trim();
+    const note = String(parsed.data.note || "").trim();
+    const nowIso = new Date().toISOString();
+
+    const existingEq = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("id,equipment_item_id,status,requester_profile_id,start_at,end_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (existingEq.error) return reply.code(500).send({ ok: false, error: existingEq.error.message });
+    if (!existingEq.data) return reply.code(404).send({ ok: false, error: "Equipment reservation not found." });
+
+    const existing = existingEq.data as Record<string, unknown>;
+    const currentStatus = String(existing.status || "");
+    if (!EQUIPMENT_ON_LOAN_RES_STATUSES.includes(currentStatus)) {
+      return reply.code(409).send({ ok: false, error: `Not-returned is only allowed for on-loan equipment reservations. Current status: ${currentStatus || "unknown"}` });
+    }
+
+    const updated = await supabaseAdmin
+      .from("equipment_reservations")
+      .update({
+        status: EQUIPMENT_NOT_RETURNED_STATUS,
+        reviewed_by: actor.email,
+        reviewed_at: nowIso
+      })
+      .eq("id", id)
+      .select("id,status")
+      .maybeSingle();
+    if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
+    if (!updated.data) return reply.code(404).send({ ok: false, error: "Equipment reservation not found." });
+
+    req.log.warn(
+      {
+        reservationId: id,
+        equipmentItemId: String(existing.equipment_item_id || ""),
+        previousStatus: currentStatus,
+        nextStatus: EQUIPMENT_NOT_RETURNED_STATUS,
+        requesterProfileId: String(existing.requester_profile_id || ""),
+        reservationStartAt: String(existing.start_at || ""),
+        reservationEndAt: String(existing.end_at || ""),
+        actorRole: String(actor.role || ""),
+        actorId: String(actor.id || ""),
+        hasNote: !!note
+      },
+      "equipment reservation marked not returned"
+    );
+
+    return { ok: true, success: true, id, status: EQUIPMENT_NOT_RETURNED_STATUS };
   });
 
   app.post("/admin/traffic/cancel", { preHandler: requireRoles(ADMIN_ROLES) }, async (req, reply) => {
