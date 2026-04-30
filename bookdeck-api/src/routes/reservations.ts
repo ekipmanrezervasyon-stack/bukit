@@ -5908,12 +5908,49 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       if (!eqId) continue;
       const itemMeta = await supabaseAdmin
         .from("equipment_items")
-        .select("id,required_level")
+        .select("id,required_level,status")
         .eq("id", eqId)
         .limit(1)
         .maybeSingle();
       if (itemMeta.error) return reply.code(500).send({ ok: false, error: itemMeta.error.message });
       if (!itemMeta.data) return reply.code(404).send({ ok: false, error: `Equipment item not found: ${eqId}` });
+      const itemStatus = String((itemMeta.data as Record<string, unknown>).status || "");
+      if (itemStatus !== "AVAILABLE") {
+        req.log.warn(
+          {
+            equipmentItemId: eqId,
+            status: itemStatus,
+            actorEmail: String(actor.email || ""),
+            requesterEmail: p.email.toLowerCase()
+          },
+          "quick checkout blocked for unavailable equipment item"
+        );
+        return reply.code(409).send({ ok: false, error: `Quick checkout blocked: equipment item is not AVAILABLE (${eqId}).` });
+      }
+      const activeReservation = await supabaseAdmin
+        .from("equipment_reservations")
+        .select("id,status,requester_email,start_at,end_at")
+        .eq("equipment_item_id", eqId)
+        .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+        .limit(1)
+        .maybeSingle();
+      if (activeReservation.error) return reply.code(500).send({ ok: false, error: activeReservation.error.message });
+      if (activeReservation.data) {
+        req.log.warn(
+          {
+            equipmentItemId: eqId,
+            reservationId: String((activeReservation.data as Record<string, unknown>).id || ""),
+            reservationStatus: String((activeReservation.data as Record<string, unknown>).status || ""),
+            reservationRequesterEmail: String((activeReservation.data as Record<string, unknown>).requester_email || ""),
+            reservationStartAt: String((activeReservation.data as Record<string, unknown>).start_at || ""),
+            reservationEndAt: String((activeReservation.data as Record<string, unknown>).end_at || ""),
+            actorEmail: String(actor.email || ""),
+            requesterEmail: p.email.toLowerCase()
+          },
+          "quick checkout blocked for equipment item with active reservation"
+        );
+        return reply.code(409).send({ ok: false, error: `Quick checkout blocked: equipment item has an unresolved reservation (${eqId}).` });
+      }
       const requiredLevel = parseEquipmentLevel((itemMeta.data as Record<string, unknown>).required_level);
       if (requiredLevel >= 5 && !canUseLevel5) {
         return reply.code(403).send({ ok: false, error: "Seviye 5 ekipman için yalnızca super_admin, technician veya senior kullanıcılar hızlı çıkış yapabilir." });
