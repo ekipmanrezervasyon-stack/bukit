@@ -5579,6 +5579,30 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
 
     const wasAvailable = String(item.status || "").trim().toUpperCase() === "AVAILABLE";
     const nowAvailable = incoming.status !== undefined && String(incoming.status || "").trim().toUpperCase() === "AVAILABLE";
+    if (nowAvailable) {
+      const activeReservation = await supabaseAdmin
+        .from("equipment_reservations")
+        .select("id,status,requester_email,start_at,end_at")
+        .eq("equipment_item_id", id)
+        .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+        .limit(1)
+        .maybeSingle();
+      if (activeReservation.error) return reply.code(500).send({ ok: false, error: activeReservation.error.message });
+      if (activeReservation.data) {
+        req.log.warn(
+          {
+            equipmentItemId: id,
+            reservationId: String((activeReservation.data as Record<string, unknown>).id || ""),
+            reservationStatus: String((activeReservation.data as Record<string, unknown>).status || ""),
+            reservationRequesterEmail: String((activeReservation.data as Record<string, unknown>).requester_email || ""),
+            reservationStartAt: String((activeReservation.data as Record<string, unknown>).start_at || ""),
+            reservationEndAt: String((activeReservation.data as Record<string, unknown>).end_at || "")
+          },
+          "manual equipment status update blocked for item with active reservation"
+        );
+        return reply.code(409).send({ ok: false, error: `Cannot mark equipment AVAILABLE while it has an unresolved reservation (${id}).` });
+      }
+    }
     const updated = await supabaseAdmin.from("equipment_items").update(patch).eq("id", id).select("id,equipment_id,name").single();
     if (updated.error) return reply.code(500).send({ ok: false, error: updated.error.message });
     let notify: { table: string | null; matched: number; sent: number; failed: number; keys: string[] } | null = null;
