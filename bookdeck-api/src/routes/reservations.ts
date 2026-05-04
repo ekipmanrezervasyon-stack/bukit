@@ -2367,6 +2367,11 @@ const parsePdfDataUrl = (raw: string): { mimeType: string; base64: string } | nu
   return { mimeType, base64 };
 };
 
+const isGoogleDriveCredentialsConfigError = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return msg.toLowerCase().includes("service account credentials are missing/invalid");
+};
+
 const formatMailDateTimeTR = (iso: string): string => {
   const raw = String(iso || "").trim();
   const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
@@ -3386,6 +3391,7 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (!targetProfileId || !targetEmail || !targetEmail.includes("@")) {
       return reply.code(400).send({ ok: false, error: "Valid requester profile/email is required." });
     }
+    let studioProjectPdfArchiveSkipped = false;
     if (studioProjectPdfDataUrl) {
       try {
         const studentNumber = await resolveProfileNumberLabel(targetProfileId, targetEmail);
@@ -3402,11 +3408,28 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
         studioProjectLink = uploadedProjectPdfUrl;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        req.log.error({ err: e, studioId: studio_id, requesterEmail: targetEmail }, "upload studio project pdf to drive failed");
-        return reply.code(500).send({ ok: false, error: `PROJECT_PDF_UPLOAD_FAILED: ${msg}` });
+        if (isGoogleDriveCredentialsConfigError(e)) {
+          studioProjectPdfArchiveSkipped = true;
+          req.log.warn(
+            {
+              err: e,
+              studioId: studio_id,
+              hasProjectPdfPayload: true,
+              hasStudioProjectFolderId: !!String(env.GOOGLE_STUDIO_PROJECT_PDF_FOLDER_ID || "").trim(),
+              hasFallbackFolderId: !!String(env.GOOGLE_PDF_FOLDER_ID || "").trim(),
+              hasServiceAccountJson: !!String(env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim(),
+              hasServiceAccountEmail: !!String(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
+              hasServiceAccountPrivateKey: !!String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim()
+            },
+            "studio project pdf drive upload skipped due to missing/invalid service account credentials"
+          );
+        } else {
+          req.log.error({ err: e, studioId: studio_id, requesterEmail: targetEmail }, "upload studio project pdf to drive failed");
+          return reply.code(500).send({ ok: false, error: `PROJECT_PDF_UPLOAD_FAILED: ${msg}` });
+        }
       }
     }
-    if (!studioProjectLink) {
+    if (!studioProjectLink && !studioProjectPdfArchiveSkipped) {
       return reply.code(400).send({ ok: false, error: "Project PDF link is required." });
     }
     const encodedStudioPurpose = encodeStudioReservationPurpose(studioPurpose, studioProjectLink, studioUsageType);
