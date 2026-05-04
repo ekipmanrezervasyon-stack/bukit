@@ -1176,9 +1176,7 @@
           meta.studioName,
           meta.name,
           meta.type,
-          meta.code,
-          (r && r.note),
-          (r && r.purpose)
+          meta.code
         ].join(' '));
         var isStudioKeyRow = Boolean(meta.isStudioKey) || looksLikeStudioKey_(meta.name, meta.type, meta.code) || Boolean(studioCanonical);
         var keyCode = studioKeyCodeFromCanonical_(studioCanonical);
