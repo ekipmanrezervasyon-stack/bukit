@@ -2197,6 +2197,10 @@ function _reservationRowCountsAsBlocking_(statusCell) {
   if (/beklemede|bekliyor|onay bekle|pending|onaylandi|onaylandı|approved|picked|teslim al|pick\s*up|aktif rez|in progress/.test(norm)) return true;
   return false;
 }
+function _equipmentReservationRowCountsAsBlockingForPrecheck_(statusCell) {
+  var s = String(statusCell || '').trim().toLowerCase();
+  return s === 'pending' || s === 'approved' || s === 'in_use' || s === 'checked_out' || s === 'picked_up' || s === 'key_out';
+}
 
 function _depotSlotKeyFromDate_(d) {
   var tz = Session.getScriptTimeZone() || 'Europe/Istanbul';
@@ -8684,11 +8688,11 @@ function checkEquipmentReservationConflictsBridge(itemIds, startDt, endDt, testT
     var resData = _supaSelectAllEquipmentReservationLines_().rows || [];
     for (var r = 0; r < resData.length; r++) {
       var row = resData[r];
-      var eqId = String(supaRowPick_(row, ['equipment_id', 'item_id', 'eq_id'], '')).trim().toUpperCase();
+      var eqId = String(supaRowPick_(row, ['equipment_item_id', 'equipment_id', 'item_id', 'eq_id'], '')).trim().toUpperCase();
       if (!eqId || !reqSet[eqId]) continue;
-      if (!_reservationRowCountsAsBlocking_(supaRowPick_(row, ['status'], ''))) continue;
-      var rs = new Date(supaRowPick_(row, ['handover_date', 'start_dt', 'start_date'], '')).getTime();
-      var re = new Date(supaRowPick_(row, ['return_date', 'end_dt', 'end_date'], '')).getTime();
+      if (!_equipmentReservationRowCountsAsBlockingForPrecheck_(supaRowPick_(row, ['status'], ''))) continue;
+      var rs = new Date(supaRowPick_(row, ['start_at', 'handover_date', 'start_dt', 'start_date'], '')).getTime();
+      var re = new Date(supaRowPick_(row, ['end_at', 'return_date', 'end_dt', 'end_date'], '')).getTime();
       if (isNaN(rs) || isNaN(re)) continue;
       if (startMs < re && endMs > rs) overlapByEq[eqId] = true;
     }

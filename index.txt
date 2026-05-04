@@ -973,6 +973,10 @@
         var st = String(s || '').trim().toLowerCase();
         return st === 'pending' || st === 'approved' || st === 'approved_by_admin' || st === 'in_use' || st === 'in use' || st === 'checked_out' || st === 'picked_up' || st === 'key_out' || st === 'key_picked';
       }
+      function isActiveEquipmentReservationStatus_(s) {
+        var st = String(s || '').trim().toLowerCase();
+        return st === 'pending' || st === 'approved' || st === 'in_use' || st === 'checked_out' || st === 'picked_up' || st === 'key_out';
+      }
       var methods = {
         getBookingLimits: function() {
           return Promise.resolve(bookingLimits || {
@@ -1062,7 +1066,7 @@
               rows.forEach(function(r) {
                 var id = String((r && r.equipment_item_id) || '').trim().toUpperCase();
                 if (!id || !ids.includes(id)) return;
-                if (!isActiveReservationStatus_(r && r.status)) return;
+                if (!isActiveEquipmentReservationStatus_(r && r.status)) return;
                 var rs = new Date(String((r && r.start_at) || '')).getTime();
                 var re = new Date(String((r && r.end_at) || '')).getTime();
                 if (isNaN(rs) || isNaN(re)) return;
@@ -4426,6 +4430,56 @@
       var usageScope=getSelectedEquipmentUsageScope();
       if(!usageScope){scrollToEquipmentPurposeField();highlightEquipmentUsageScopeField();showAlert(t('modalMissingData'),t('msgEquipmentUsageScopeRequired'),true);return;}
       var s=sD+"T"+sT,e=eD+"T"+eT;
+      function refreshCartConflictsBeforeSubmit_() {
+        return new Promise(function(resolve) {
+          var checkIds = (ids || []).map(function(x) { return String(x || '').trim(); }).filter(Boolean);
+          if (!checkIds.length) { resolve(checkIds); return; }
+          function blockForPrecheckError_(msg) {
+            showAlert(
+              t('modalError'),
+              msg || (currentLang === 'tr'
+                ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.'
+                : 'Availability check could not be completed. Please try again.'),
+              true
+            );
+            resolve(null);
+          }
+          if (typeof google === 'undefined' || !google.script || !google.script.run) { blockForPrecheckError_(); return; }
+          google.script.run.withSuccessHandler(function(pre) {
+            if (!pre || pre.error || !Array.isArray(pre.availableIds)) {
+              blockForPrecheckError_(pre && pre.error ? String(pre.error) : '');
+              return;
+            }
+            var availableSet = {};
+            pre.availableIds.forEach(function(idv) { availableSet[String(idv || '').trim().toUpperCase()] = 1; });
+            var safeIds = checkIds.filter(function(idv) { return !!availableSet[String(idv || '').trim().toUpperCase()]; });
+            var blockedIds = checkIds.filter(function(idv) { return !availableSet[String(idv || '').trim().toUpperCase()]; });
+            if (blockedIds.length) {
+              var blockedSet = {};
+              blockedIds.forEach(function(idv) { blockedSet[String(idv || '').trim().toUpperCase()] = 1; });
+              var blockedLabels = blockedIds.map(function(fid) {
+                var row = findEquipGroupByCartId(fid);
+                return (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : fid;
+              }).slice(0, 6).join(', ');
+              eqCart = eqCart.filter(function(cid) { return !blockedSet[String(cid || '').trim().toUpperCase()]; });
+              Object.keys(equipmentGroupSelection).forEach(function(gk) {
+                if (blockedSet[String(equipmentGroupSelection[gk] || '').trim().toUpperCase()]) delete equipmentGroupSelection[gk];
+              });
+              updateCartUI();
+              showAlert(
+                t('modalDeclined'),
+                currentLang === 'tr'
+                  ? ('Seçilen tarih aralığında artık müsait olmayan ürünler sepetten çıkarıldı: ' + blockedLabels)
+                  : ('These items are no longer available for the selected time and were removed from your cart: ' + blockedLabels),
+                true
+              );
+            }
+            resolve(safeIds);
+          }).withFailureHandler(function() {
+            blockForPrecheckError_();
+          }).checkEquipmentReservationConflictsBridge(checkIds, s, e, currentTestToken);
+        });
+      }
       var runCheckout = function() {
       var prepH = checkoutPreparingButtonHtml();
       var btn=document.getElementById('checkout-btn');var ot=btn?btn.innerText:'';if(btn){btn.innerHTML=prepH;btn.disabled=true;}
@@ -4524,14 +4578,28 @@
           openConfirmUiModal(
             t('msgAddToExistingReservationTitle'),
             t('msgAddToExistingReservationBody'),
-            function(){ runCheckout(); },
+            function(){
+              refreshCartConflictsBeforeSubmit_().then(function(safeIds) {
+                ids = safeIds;
+                if (!ids || !ids.length) return;
+                runCheckout();
+              });
+            },
             'warning'
           );
           return;
         }
-        runCheckout();
+        refreshCartConflictsBeforeSubmit_().then(function(safeIds) {
+          ids = safeIds;
+          if (!ids || !ids.length) return;
+          runCheckout();
+        });
       }).catch(function(){
-        runCheckout();
+        refreshCartConflictsBeforeSubmit_().then(function(safeIds) {
+          ids = safeIds;
+          if (!ids || !ids.length) return;
+          runCheckout();
+        });
       });
     }
     window.submitCheckoutFromModal=function(){
