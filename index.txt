@@ -765,6 +765,9 @@
     // ═══════════════════════════════════════
     var currentTestToken = null;
     var currentUser = null;
+    var CLOSED_DEPOT_DATE = "2026-05-25";
+    var SPECIAL_PICKUP_DATE = "2026-05-22";
+    var SPECIAL_RETURN_DATE = "2026-06-01";
     function readEquipmentDeepLinkFromUrl_() {
       var keys = ['eq', 'equipment', 'equipment_id', 'equipment_name', 'item', 'model'];
       function pickFromParams_(sp) {
@@ -2786,6 +2789,7 @@
       var b=new Date(eD+'T'+eT+':00').getTime();
       if(isNaN(a)||isNaN(b))return {ok:true};
       if(b<=a)return {ok:false,msg:(currentLang==='tr'?'İade tarihi ve saati, çıkıştan sonra olmalıdır.':'Return date/time must be after pickup.')};
+      if(sD===CLOSED_DEPOT_DATE||eD===CLOSED_DEPOT_DATE)return {ok:false,msg:(currentLang==='tr'?'25.05.2026 tarihinde ekipman teslim/iade alınmayacaktır.':'Equipment pickup/return is not available on 2026-05-25.')};
       return {ok:true};
     }
     function updateCheckoutModalDateWarning(){
@@ -2838,6 +2842,10 @@
     function onEquipmentDatesChanged(){
       var sD=document.getElementById('pickup-date').value,sT=document.getElementById('pickup-time-select').value;
       var eD=document.getElementById('return-date').value,eT=document.getElementById('return-time-select').value;
+      if (sD === SPECIAL_PICKUP_DATE && eD !== SPECIAL_RETURN_DATE && fpReturnDate && typeof fpReturnDate.setDate === 'function') {
+        fpReturnDate.setDate(SPECIAL_RETURN_DATE, false);
+        eD = SPECIAL_RETURN_DATE;
+      }
       equipmentDatesArmed = !!(sD && sT && eD && eT && (new Date(sD+'T'+sT+':00').getTime() <= new Date(eD+'T'+eT+':00').getTime()));
       validateEquipmentBookingRange();
       if(allEquipmentData&&allEquipmentData.length){scheduleEquipmentUiRefresh_('dates-changed');}
@@ -2845,7 +2853,7 @@
       if(ccm&&!ccm.classList.contains('hidden')){updateCheckoutModalDateWarning();}
       refreshEquipmentTimeOptions_();
     }
-    var eqCfg={dateFormat:"Y-m-d",minDate:"today",locale:{firstDayOfWeek:1},disableMobile:true,disable:[function(d){return(d.getDay()===0||d.getDay()===6)||safeIsPublicHoliday(d);}],onChange:function(){onEquipmentDatesChanged();}};
+    var eqCfg={dateFormat:"Y-m-d",minDate:"today",locale:{firstDayOfWeek:1},disableMobile:true,disable:[function(d){var ymd=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');return ymd===CLOSED_DEPOT_DATE||(d.getDay()===0||d.getDay()===6)||safeIsPublicHoliday(d);}],onChange:function(){onEquipmentDatesChanged();}};
     fpPickupDate = flatpickr("#pickup-date",eqCfg);
     fpReturnDate = flatpickr("#return-date",eqCfg);
     ['pickup-time-select','return-time-select'].forEach(function(selId){
@@ -3352,6 +3360,12 @@
       var sD = document.getElementById('pickup-date').value, sT = document.getElementById('pickup-time-select').value;
       var eD = document.getElementById('return-date').value, eT = document.getElementById('return-time-select').value;
       if (!sD || !sT || !eD || !eT) { el.classList.add('hidden'); return; }
+      if (sD === CLOSED_DEPOT_DATE || eD === CLOSED_DEPOT_DATE) {
+        txt.textContent = currentLang==='tr'?'25.05.2026 tarihinde ekipman teslim/iade alınmayacaktır.':'Equipment pickup/return is not available on 2026-05-25.';
+        el.classList.remove('hidden');
+        return;
+      }
+      if (sD === SPECIAL_PICKUP_DATE && eD === SPECIAL_RETURN_DATE) { el.classList.add('hidden'); return; }
       var blockedDates = equipmentHolidayDatesInRange_(sD + 'T' + sT, eD + 'T' + eT);
       if (blockedDates.length) {
         // Tatil aralığına denk gelen rezervasyonlar artık desteklenir; sadece pickup/return günü tatil olamaz.

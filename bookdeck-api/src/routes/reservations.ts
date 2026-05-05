@@ -1448,6 +1448,9 @@ const TR_RELIGIOUS_HOLIDAYS_BY_YEAR: Record<string, string[]> = {
   "2026": ["2026-03-19", "2026-03-20", "2026-03-21", "2026-03-22", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30"],
   "2027": ["2027-03-08", "2027-03-09", "2027-03-10", "2027-03-11", "2027-05-16", "2027-05-17", "2027-05-18", "2027-05-19"]
 };
+const CLOSED_DEPOT_DATE = "2026-05-25";
+const SPECIAL_PICKUP_DATE = "2026-05-22";
+const SPECIAL_RETURN_DATE = "2026-06-01";
 const DEPOT_SLOT_DEFAULT_MAX_BOOKINGS = 4;
 const DEPOT_SLOT_CONFIG_KEY = "depot_slot_max_bookings";
 const DEPOT_SLOT_CONFIG_CACHE_MS = 60_000;
@@ -1485,6 +1488,17 @@ const hasPublicHolidayAtEndpoints = (startAt: string, endAt: string): boolean =>
   const e = new Date(String(endAt || ""));
   if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return false;
   return isTurkeyPublicHoliday(s) || isTurkeyPublicHoliday(e);
+};
+
+const assertEquipmentDepotEndpointOpen = (startAt: string, endAt: string): void => {
+  const s = new Date(String(startAt || ""));
+  const e = new Date(String(endAt || ""));
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return;
+  const isSpecialBridgeReturn = toIsoDayLocal(s) === SPECIAL_PICKUP_DATE && toIsoDayLocal(e) === SPECIAL_RETURN_DATE;
+  if (isSpecialBridgeReturn) return;
+  if (toIsoDayLocal(s) === CLOSED_DEPOT_DATE || toIsoDayLocal(e) === CLOSED_DEPOT_DATE) {
+    throw new Error("Equipment pickup/return is not available on 2026-05-25 due to depot closure.");
+  }
 };
 
 const resolveDepotSlotMaxBookings = async (): Promise<number> => {
@@ -3516,6 +3530,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     if (e <= s) return reply.code(400).send({ ok: false, error: "end_at must be after start_at." });
     if (hasPublicHolidayAtEndpoints(start_at, end_at)) {
       return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
+    }
+    try {
+      assertEquipmentDepotEndpointOpen(start_at, end_at);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(409).send({ ok: false, error: msg });
     }
     try {
       await assertDepotSlotCapacity({ startAt: start_at, endAt: end_at });
@@ -5964,6 +5984,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
     }
     try {
+      assertEquipmentDepotEndpointOpen(String(existing.data.start_at || ""), String(payload.new_end_at || ""));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(409).send({ ok: false, error: msg });
+    }
+    try {
       await assertDepotSlotCapacity({
         startAt: String(existing.data.start_at || ""),
         endAt: String(payload.new_end_at || ""),
@@ -6013,6 +6039,12 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
     const quickStoredNote = encodeEquipmentReservationNote(p.project_purpose || "Hızlı Çıkış", quickUsageScope);
     if (hasPublicHolidayAtEndpoints(startAt, endAt)) {
       return reply.code(409).send({ ok: false, error: "Pickup/return cannot be set on official public holidays." });
+    }
+    try {
+      assertEquipmentDepotEndpointOpen(startAt, endAt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(409).send({ ok: false, error: msg });
     }
     try {
       await assertDepotSlotCapacity({ startAt, endAt });
