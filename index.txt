@@ -4161,11 +4161,19 @@
         var fid=freeCandidates[0];
         var fidUp=String(fid).toUpperCase();
         if(eqCart.some(function(x){return String(x).toUpperCase()===fidUp;})) return;
-        if(!safeEqCartPush(fid)) return;
-        equipmentGroupSelection[groupKey]=fid;
-        btn.innerText=(currentLang==='tr'?'Cikar':'Remove');
-        btn.className="px-2 md:px-4 py-1.5 md:py-2 rounded-md md:rounded-lg text-[9px] md:text-xs font-bold transition bg-gray-800 text-white hover:bg-gray-900";
-        updateCartUI();scheduleEquipmentUiRefresh_('toggleCartByGroup-fast-add');
+        btn.setAttribute('data-cart-busy','1');
+        pickReservableFromCandidates([fid], function(availableId, conflictsMsg){
+          btn.removeAttribute('data-cart-busy');
+          if(!availableId){
+            showAlert(t('modalDeclined'), conflictsMsg || t('msgNoReservableLeft'), true);
+            return;
+          }
+          if(!safeEqCartPush(availableId)) return;
+          equipmentGroupSelection[groupKey]=availableId;
+          btn.innerText=(currentLang==='tr'?'Cikar':'Remove');
+          btn.className="px-2 md:px-4 py-1.5 md:py-2 rounded-md md:rounded-lg text-[9px] md:text-xs font-bold transition bg-gray-800 text-white hover:bg-gray-900";
+          updateCartUI();scheduleEquipmentUiRefresh_('toggleCartByGroup-fast-add');
+        }, btn);
         return;
       }
       btn.setAttribute('data-cart-busy','1');
@@ -4225,10 +4233,28 @@
         done('', t('msgSelectDatesBeforeCart'));
         return;
       }
-      // Supabase-only UI: pick a candidate directly.
-      // Final conflict checks happen on API reservation create.
-      releaseBtn();
-      done(ids[0], '');
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        releaseBtn();
+        done('', currentLang === 'tr' ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.' : 'Availability check could not be completed. Please try again.');
+        return;
+      }
+      __pickReservableBusy = true;
+      google.script.run.withSuccessHandler(function(pre) {
+        __pickReservableBusy = false;
+        releaseBtn();
+        if (!pre || pre.error || !Array.isArray(pre.availableIds)) {
+          done('', (pre && pre.error) ? String(pre.error) : (currentLang === 'tr' ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.' : 'Availability check could not be completed. Please try again.'));
+          return;
+        }
+        var availableSet = {};
+        pre.availableIds.forEach(function(idv) { availableSet[String(idv || '').trim().toUpperCase()] = 1; });
+        var selected = ids.find(function(idv) { return !!availableSet[String(idv || '').trim().toUpperCase()]; }) || '';
+        done(selected, selected ? '' : (currentLang === 'tr' ? 'Seçilen tarih ve saat aralığında bu ekipman müsait değil.' : 'This equipment is not available for the selected date and time.'));
+      }).withFailureHandler(function() {
+        __pickReservableBusy = false;
+        releaseBtn();
+        done('', currentLang === 'tr' ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.' : 'Availability check could not be completed. Please try again.');
+      }).checkEquipmentReservationConflictsBridge(ids, range.start, range.end, currentTestToken);
     }
     function updateCartUI(){
       var cb=document.getElementById('cart-bar');
