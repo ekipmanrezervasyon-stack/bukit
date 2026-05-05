@@ -8,7 +8,7 @@ import { equipmentRoutes } from "./routes/equipment.js";
 import { authRoutes } from "./routes/auth.js";
 import { reservationRoutes } from "./routes/reservations.js";
 
-const app = Fastify({ logger: true, bodyLimit: 1_000_000 });
+const app = Fastify({ logger: true, bodyLimit: 16 * 1024 * 1024 });
 
 const allowedOrigins = String(env.CORS_ORIGIN || "")
   .split(",")
