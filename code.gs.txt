@@ -8685,6 +8685,7 @@ function checkEquipmentReservationConflictsBridge(itemIds, startDt, endDt, testT
 
     // 2) Reservation overlap index from Supabase.
     var overlapByEq = {};
+    var overlapEndByEq = {};
     var resData = _supaSelectAllEquipmentReservationLines_().rows || [];
     for (var r = 0; r < resData.length; r++) {
       var row = resData[r];
@@ -8692,9 +8693,15 @@ function checkEquipmentReservationConflictsBridge(itemIds, startDt, endDt, testT
       if (!eqId || !reqSet[eqId]) continue;
       if (!_equipmentReservationRowCountsAsBlockingForPrecheck_(supaRowPick_(row, ['status'], ''))) continue;
       var rs = new Date(supaRowPick_(row, ['start_at', 'handover_date', 'start_dt', 'start_date'], '')).getTime();
-      var re = new Date(supaRowPick_(row, ['end_at', 'return_date', 'end_dt', 'end_date'], '')).getTime();
+      var endRaw = supaRowPick_(row, ['end_at', 'return_date', 'end_dt', 'end_date'], '');
+      var re = new Date(endRaw).getTime();
       if (isNaN(rs) || isNaN(re)) continue;
-      if (startMs < re && endMs > rs) overlapByEq[eqId] = true;
+      if (startMs < re && endMs > rs) {
+        overlapByEq[eqId] = true;
+        if (!overlapEndByEq[eqId] || re > overlapEndByEq[eqId].ms) {
+          overlapEndByEq[eqId] = { ms: re, iso: String(endRaw || '') };
+        }
+      }
     }
 
     var conflicts = [];
@@ -8712,7 +8719,7 @@ function checkEquipmentReservationConflictsBridge(itemIds, startDt, endDt, testT
         return;
       }
       if (overlapByEq[cid]) {
-        conflicts.push({ id: cid, name: inv.name || cid, reason: 'SCHEDULING_CONFLICT' });
+        conflicts.push({ id: cid, name: inv.name || cid, reason: 'SCHEDULING_CONFLICT', nextAvailableAt: overlapEndByEq[cid] && overlapEndByEq[cid].iso });
         return;
       }
       available.push(cid);
