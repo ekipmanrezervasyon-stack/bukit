@@ -1066,6 +1066,7 @@
               var sMs = new Date(String(startIso || '')).getTime();
               var eMs = new Date(String(endIso || '')).getTime();
               var busy = {};
+              var busyEndById = {};
               rows.forEach(function(r) {
                 var id = String((r && r.equipment_item_id) || '').trim().toUpperCase();
                 if (!id || !ids.includes(id)) return;
@@ -1073,9 +1074,19 @@
                 var rs = new Date(String((r && r.start_at) || '')).getTime();
                 var re = new Date(String((r && r.end_at) || '')).getTime();
                 if (isNaN(rs) || isNaN(re)) return;
-                if (rs < eMs && re > sMs) busy[id] = 1;
+                if (rs < eMs && re > sMs) {
+                  busy[id] = 1;
+                  if (!busyEndById[id] || re > busyEndById[id].ms) {
+                    busyEndById[id] = { ms: re, iso: String((r && r.end_at) || '') };
+                  }
+                }
               });
-              return { availableIds: ids.filter(function(id) { return !busy[id]; }) };
+              return {
+                availableIds: ids.filter(function(id) { return !busy[id]; }),
+                conflicts: ids.filter(function(id) { return !!busy[id]; }).map(function(id) {
+                  return { id: id, nextAvailableAt: busyEndById[id] && busyEndById[id].iso };
+                })
+              };
             })
             .catch(function() {
               return { availableIds: ids };
@@ -4221,6 +4232,47 @@
       _selectedRangeMemo={key:k,value:v};
       return v;
     }
+    function ymdFromDateish_(value) {
+      var raw = String(value || '').trim();
+      var m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return m[1] + '-' + m[2] + '-' + m[3];
+      var d = new Date(raw);
+      if (isNaN(d.getTime())) return '';
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function timeFromDateishSameDay_(value, selectedStartIso) {
+      var raw = String(value || '').trim();
+      if (!raw || ymdFromDateish_(raw) !== ymdFromDateish_(selectedStartIso)) return '';
+      var m = raw.match(/[T\s](\d{2}):(\d{2})/);
+      if (m) return m[1] + ':' + m[2];
+      var d = new Date(raw);
+      if (isNaN(d.getTime())) return '';
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+    function buildCartConflictMessage_(blockedIds, pre, selectedStartIso) {
+      var conflictById = {};
+      ((pre && pre.conflicts) || []).forEach(function(c) {
+        var id = String((c && c.id) || '').trim().toUpperCase();
+        if (id) conflictById[id] = c;
+      });
+      var lines = (blockedIds || []).slice(0, 8).map(function(fid) {
+        var key = String(fid || '').trim().toUpperCase();
+        var row = findEquipGroupByCartId(fid);
+        var conflict = conflictById[key] || {};
+        var label = (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : String(conflict.name || fid);
+        var time = timeFromDateishSameDay_(conflict.nextAvailableAt, selectedStartIso);
+        return '- ' + label + (time
+          ? (currentLang === 'tr' ? ' — en erken müsait saat: ' + time : ' — earliest available: ' + time)
+          : (currentLang === 'tr' ? ' — bugün uygun görünmüyor' : ' — not available today'));
+      });
+      var more = (blockedIds || []).length > 8
+        ? '\n- +' + ((blockedIds || []).length - 8) + (currentLang === 'tr' ? ' ekipman daha' : ' more item(s)')
+        : '';
+      if (currentLang === 'tr') {
+        return 'Seçtiğiniz saat aralığında bazı ekipmanlar artık müsait değil:\n' + lines.join('\n') + more + '\n\nMüsait olan ekipmanlar sepetinizde bırakıldı.';
+      }
+      return 'Some items are no longer available for the selected time range:\n' + lines.join('\n') + more + '\n\nAvailable items were kept in your cart.';
+    }
     function pickReservableFromCandidates(candidates, done, actionBtn){
       if (__pickReservableBusy) {
         done('', currentLang === 'tr' ? 'Kontrol sürüyor, lütfen bekleyin.' : 'A check is in progress. Please wait.');
@@ -4497,10 +4549,6 @@
             if (blockedIds.length) {
               var blockedSet = {};
               blockedIds.forEach(function(idv) { blockedSet[String(idv || '').trim().toUpperCase()] = 1; });
-              var blockedLabels = blockedIds.map(function(fid) {
-                var row = findEquipGroupByCartId(fid);
-                return (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : fid;
-              }).slice(0, 6).join(', ');
               eqCart = eqCart.filter(function(cid) { return !blockedSet[String(cid || '').trim().toUpperCase()]; });
               Object.keys(equipmentGroupSelection).forEach(function(gk) {
                 if (blockedSet[String(equipmentGroupSelection[gk] || '').trim().toUpperCase()]) delete equipmentGroupSelection[gk];
@@ -4508,9 +4556,7 @@
               updateCartUI();
               showAlert(
                 t('modalDeclined'),
-                currentLang === 'tr'
-                  ? ('Seçilen tarih aralığında artık müsait olmayan ürünler sepetten çıkarıldı: ' + blockedLabels)
-                  : ('These items are no longer available for the selected time and were removed from your cart: ' + blockedLabels),
+                buildCartConflictMessage_(blockedIds, pre, s),
                 true
               );
             }
