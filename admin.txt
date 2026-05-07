@@ -2609,6 +2609,9 @@
     // Ağır yükleri ilk açılışta çağırma; sekmeye girince lazy-load.
     checkNewReservations();
     setInterval(checkNewReservations, 60000);
+    if (document.getElementById('page-traffic') && document.getElementById('page-traffic').classList.contains('active')) {
+      loadTraffic();
+    }
     var uq = document.getElementById('user-lookup-q');
     if (uq) {
       uq.addEventListener('keydown', function(ev) {
