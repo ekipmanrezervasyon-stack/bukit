@@ -1066,7 +1066,6 @@
               var sMs = new Date(String(startIso || '')).getTime();
               var eMs = new Date(String(endIso || '')).getTime();
               var busy = {};
-              var busyEndById = {};
               rows.forEach(function(r) {
                 var id = String((r && r.equipment_item_id) || '').trim().toUpperCase();
                 if (!id || !ids.includes(id)) return;
@@ -1076,15 +1075,12 @@
                 if (isNaN(rs) || isNaN(re)) return;
                 if (rs < eMs && re > sMs) {
                   busy[id] = 1;
-                  if (!busyEndById[id] || re > busyEndById[id].ms) {
-                    busyEndById[id] = { ms: re, iso: String((r && r.end_at) || '') };
-                  }
                 }
               });
               return {
                 availableIds: ids.filter(function(id) { return !busy[id]; }),
                 conflicts: ids.filter(function(id) { return !!busy[id]; }).map(function(id) {
-                  return { id: id, nextAvailableAt: busyEndById[id] && busyEndById[id].iso };
+                  return { id: id };
                 })
               };
             })
@@ -4249,18 +4245,22 @@
       if (isNaN(d.getTime())) return '';
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     }
+    function knownCartReturnTimeForSelectedDay_(cartId, selectedStartIso) {
+      var row = findEquipGroupByCartId(cartId);
+      var key = String(cartId || '').trim().toUpperCase();
+      var details = row && Array.isArray(row.details) ? row.details : [];
+      for (var i = 0; i < details.length; i++) {
+        var d = details[i] || {};
+        if (String(d.equipment_id || '').trim().toUpperCase() !== key) continue;
+        return timeFromDateishSameDay_(d.returnDate, selectedStartIso);
+      }
+      return '';
+    }
     function buildCartConflictMessage_(blockedIds, pre, selectedStartIso) {
-      var conflictById = {};
-      ((pre && pre.conflicts) || []).forEach(function(c) {
-        var id = String((c && c.id) || '').trim().toUpperCase();
-        if (id) conflictById[id] = c;
-      });
       var lines = (blockedIds || []).slice(0, 8).map(function(fid) {
-        var key = String(fid || '').trim().toUpperCase();
         var row = findEquipGroupByCartId(fid);
-        var conflict = conflictById[key] || {};
-        var label = (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : String(conflict.name || fid);
-        var time = timeFromDateishSameDay_(conflict.nextAvailableAt, selectedStartIso);
+        var label = (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : String(fid);
+        var time = knownCartReturnTimeForSelectedDay_(fid, selectedStartIso);
         return '- ' + label + (time
           ? (currentLang === 'tr' ? ' — en erken müsait saat: ' + time : ' — earliest available: ' + time)
           : (currentLang === 'tr' ? ' — bugün uygun görünmüyor' : ' — not available today'));
