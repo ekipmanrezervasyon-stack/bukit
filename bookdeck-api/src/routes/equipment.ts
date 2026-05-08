@@ -199,10 +199,19 @@ export const equipmentRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/equipment-reservations", { preHandler: requireAuth }, async (req, reply) => {
-    const q = req.query as { status?: string; requester_email?: string };
+    const q = req.query as { status?: string; requester_email?: string; from?: string; to?: string };
     let query = supabaseAdmin.from("equipment_reservations").select("*").order("start_at", { ascending: false });
     if (q.status) query = query.eq("status", q.status);
     if (q.requester_email) query = query.eq("requester_email", q.requester_email);
+    const from = String(q.from || "").trim();
+    const to = String(q.to || "").trim();
+    if (from && to) {
+      query = query.lt("start_at", to).gt("end_at", from);
+    } else if (from) {
+      query = query.gt("end_at", from);
+    } else if (to) {
+      query = query.lt("start_at", to);
+    }
     const { data, error } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const enriched = await enrichRowsWithRequesterStudentIds((data ?? []) as Record<string, unknown>[]);
