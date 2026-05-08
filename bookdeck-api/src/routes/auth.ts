@@ -124,9 +124,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         });
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      req.log.error({ err: e }, "otp gate check failed");
-      return reply.code(500).send({ ok: false, error: message });
+      req.log.warn({ err: e }, "otp gate check failed; failing open");
     }
 
     const email = parsed.data.email;

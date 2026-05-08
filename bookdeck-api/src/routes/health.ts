@@ -31,13 +31,20 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       admin_message: "Admin paneli geçici olarak bakım modunda. Lütfen kısa süre sonra tekrar deneyin.",
       ts: new Date().toISOString()
     };
-    const q = await supabaseAdmin
-      .from("app_config")
-      .select("key,value")
-      .in("key", ["maintenance_mode", "maintenance_admin_mode", "maintenance_message", "maintenance_admin_message"]);
+    let q;
+    try {
+      q = await supabaseAdmin
+        .from("app_config")
+        .select("key,value")
+        .in("key", ["maintenance_mode", "maintenance_admin_mode", "maintenance_message", "maintenance_admin_message"]);
+    } catch (e) {
+      _req.log.warn({ err: e }, "maintenance config check failed; returning safe default");
+      return defaults;
+    }
     if (q.error) {
       if (isMissingSchemaError(q.error)) return defaults;
-      return reply.code(500).send({ ok: false, error: q.error.message });
+      _req.log.warn({ err: q.error }, "maintenance config check failed; returning safe default");
+      return defaults;
     }
     const map = new Map<string, string>();
     for (const r of (q.data ?? []) as Array<Record<string, unknown>>) {
