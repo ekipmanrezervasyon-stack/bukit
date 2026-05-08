@@ -13,33 +13,30 @@ const profileDisplayStudentId = (profile: Record<string, unknown> | undefined): 
 const enrichRowsWithRequesterStudentIds = async (rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> => {
   const profileIds = Array.from(new Set(rows.map((r) => String(r.requester_profile_id || "").trim()).filter(Boolean)));
   const emails = Array.from(new Set(rows.map((r) => String(r.requester_email || "").trim().toLowerCase()).filter(Boolean)));
-  const byId = new Map<string, Record<string, unknown>>();
-  const byEmail = new Map<string, Record<string, unknown>>();
-  if (profileIds.length) {
-    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("id", profileIds);
-    if (!q.error) {
-      for (const p of (q.data ?? []) as Record<string, unknown>[]) {
-        byId.set(String(p.id || ""), p);
-        const email = String(p.email || "").trim().toLowerCase();
-        if (email) byEmail.set(email, p);
-      }
+  const lookup = new Map<string, Record<string, unknown>>();
+  if (profileIds.length || emails.length) {
+    let q = supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id");
+    if (profileIds.length && emails.length) {
+      q = q.or(`id.in.(${profileIds.join(",")}),email.in.(${emails.join(",")})`);
+    } else if (profileIds.length) {
+      q = q.in("id", profileIds);
+    } else {
+      q = q.in("email", emails);
     }
-  }
-  const missingEmails = emails.filter((email) => !byEmail.has(email));
-  if (missingEmails.length) {
-    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("email", missingEmails);
-    if (!q.error) {
-      for (const p of (q.data ?? []) as Record<string, unknown>[]) {
-        byId.set(String(p.id || ""), p);
+    const { data, error } = await q;
+    if (!error) {
+      for (const p of (data ?? []) as Record<string, unknown>[]) {
+        const id = String(p.id || "").trim();
         const email = String(p.email || "").trim().toLowerCase();
-        if (email) byEmail.set(email, p);
+        if (id) lookup.set(`id:${id}`, p);
+        if (email) lookup.set(`email:${email}`, p);
       }
     }
   }
   return rows.map((row) => {
     const profile =
-      byId.get(String(row.requester_profile_id || "").trim()) ||
-      byEmail.get(String(row.requester_email || "").trim().toLowerCase());
+      lookup.get(`id:${String(row.requester_profile_id || "").trim()}`) ||
+      lookup.get(`email:${String(row.requester_email || "").trim().toLowerCase()}`);
     const studentId = profileDisplayStudentId(profile);
     return studentId ? { ...row, student_number: studentId, student_id: studentId } : row;
   });
@@ -192,7 +189,7 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     const profile = getAuthProfile(req);
     const { data, error } = await supabaseAdmin
       .from("studios")
-      .select("*")
+      .select("id,name,code,studio_id,access_level,weekendOk,weekend_ok,weekend_allowed,special_access,special_access_until")
       .order("name", { ascending: true });
     if (error) return reply.code(500).send({ ok: false, error: error.message });
 
@@ -212,8 +209,14 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/studio-reservations", { preHandler: requireAuth }, async (req, reply) => {
-    const q = req.query as { status?: string; requester_email?: string; from?: string; to?: string };
-    let query = supabaseAdmin.from("studio_reservations").select("*").order("start_at", { ascending: true });
+    const q = req.query as { status?: string; requester_email?: string; from?: string; to?: string; limit?: string; offset?: string };
+    const limit = Math.min(Math.max(1, parseInt(q.limit ?? "50", 10) || 50), 200);
+    const offset = Math.max(0, parseInt(q.offset ?? "0", 10) || 0);
+    let query = supabaseAdmin
+      .from("studio_reservations")
+      .select("*", { count: "exact" })
+      .order("start_at", { ascending: true })
+      .range(offset, offset + limit - 1);
     if (q.status) query = query.eq("status", q.status);
     if (q.requester_email) query = query.eq("requester_email", q.requester_email);
     const from = String(q.from || "").trim();
@@ -227,7 +230,7 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
     } else if (to) {
       query = query.lt("start_at", to);
     }
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const enriched = await enrichRowsWithRequesterStudentIds((data ?? []) as Record<string, unknown>[]);
     const out = enriched.map((row) => {
@@ -238,6 +241,6 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
         project_link: decoded.projectLink
       };
     });
-    return { ok: true, data: out };
+    return { ok: true, data: out, pagination: { limit, offset, total: count ?? 0 } };
   });
 };

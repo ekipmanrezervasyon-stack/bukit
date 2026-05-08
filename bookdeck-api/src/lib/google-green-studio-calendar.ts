@@ -17,6 +17,10 @@ const CAL_SCOPE = ["https://www.googleapis.com/auth/calendar"];
 const RESERVATION_EXT_KEY = "bookdeck_reservation_id";
 let greenStudioIdCache: string | null | undefined;
 
+type CacheEntry = { items: unknown[]; expiresAt: number };
+const listEventsCache = new Map<string, CacheEntry>();
+const LIST_EVENTS_TTL_MS = 30_000; // 30-second TTL
+
 const normalize = (v: unknown): string => String(v ?? "").trim();
 
 const parseServiceAccountCredentials = (): { client_email: string; private_key: string } | null => {
@@ -144,14 +148,31 @@ const buildEventTitle = (p: StudioSyncPayload): string => {
 const listEventsByReservation = async (calendarId: string, reservationId: string) => {
   const cal = getCalendarClient();
   if (!cal) return [];
-  const res = await cal.events.list({
-    calendarId,
-    privateExtendedProperty: [`${RESERVATION_EXT_KEY}=${reservationId}`],
-    maxResults: 10,
-    singleEvents: true,
-    showDeleted: false
-  });
-  return Array.isArray(res.data.items) ? res.data.items : [];
+
+  const cacheKey = `${calendarId}::${reservationId}`;
+  const cached = listEventsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.items as Awaited<ReturnType<typeof cal.events.list>>["data"]["items"];
+  }
+
+  const allItems: NonNullable<Awaited<ReturnType<typeof cal.events.list>>["data"]["items"]> = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await cal.events.list({
+      calendarId,
+      privateExtendedProperty: [`${RESERVATION_EXT_KEY}=${reservationId}`],
+      maxResults: 50,
+      singleEvents: true,
+      showDeleted: false,
+      ...(pageToken ? { pageToken } : {})
+    });
+    const items = Array.isArray(res.data.items) ? res.data.items : [];
+    allItems.push(...items);
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  listEventsCache.set(cacheKey, { items: allItems, expiresAt: Date.now() + LIST_EVENTS_TTL_MS });
+  return allItems;
 };
 
 export const upsertApprovedGreenStudioToGoogleCalendar = async (payload: StudioSyncPayload): Promise<{ ok: boolean; skipped?: string; eventId?: string }> => {
@@ -184,6 +205,7 @@ export const upsertApprovedGreenStudioToGoogleCalendar = async (payload: StudioS
 
   const existing = await listEventsByReservation(calendarId, reservationId);
   const current = existing.find((x: { id?: string | null }) => normalize(x.id));
+  listEventsCache.delete(`${calendarId}::${reservationId}`);
   if (current && normalize(current.id)) {
     const patched = await cal.events.patch({
       calendarId,
@@ -214,6 +236,7 @@ export const deleteGreenStudioFromGoogleCalendar = async (payload: { reservation
   if (!cal) return { ok: false, skipped: "missing_service_account" };
 
   const existing = await listEventsByReservation(calendarId, reservationId);
+  listEventsCache.delete(`${calendarId}::${reservationId}`);
   let deleted = 0;
   for (const ev of existing) {
     const eventId = normalize(ev.id);
