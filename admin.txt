@@ -1620,7 +1620,9 @@
             if (canonical) studioMetaById[canonical] = metaSt;
           });
           return buildTrafficRows_(eqRows, stRows, itemMetaById, studioMetaById, dayIso, '');
-        }).catch(function() { return []; });
+        }).catch(function(err) {
+          throw new Error((err && err.message) || 'Trafik verisi alınamadı.');
+        });
       },
       getTrafficDataByNameOrStudent: function(q) {
         var qNorm = String(q || '').trim().toLowerCase();
@@ -1668,7 +1670,9 @@
             if (canonical) studioMetaById[canonical] = metaSt;
           });
           return buildTrafficRows_(eqRows, stRows, itemMetaById, studioMetaById, '', qNorm);
-        }).catch(function() { return []; });
+        }).catch(function(err) {
+          throw new Error((err && err.message) || 'Trafik araması alınamadı.');
+        });
       },
       adminProcessPartialCheckout: function(resId, checks, studioHandoverNote, checkoutConditionMap) {
         return adminApiRequest('/admin/traffic/checkout', {
