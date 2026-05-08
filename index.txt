@@ -4315,7 +4315,7 @@
         var availableSet = {};
         pre.availableIds.forEach(function(idv) { availableSet[String(idv || '').trim().toUpperCase()] = 1; });
         var selected = ids.find(function(idv) { return !!availableSet[String(idv || '').trim().toUpperCase()]; }) || '';
-        done(selected, selected ? '' : (currentLang === 'tr' ? 'Seçilen tarih ve saat aralığında bu ekipman müsait değil.' : 'This equipment is not available for the selected date and time.'));
+        done(selected, selected ? '' : buildCartConflictMessage_(ids, pre, range.start));
       }).withFailureHandler(function() {
         __pickReservableBusy = false;
         releaseBtn();
