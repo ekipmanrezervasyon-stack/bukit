@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabaseAdmin } from "../lib/supabase.js";
 
+const CONFIG_CHECK_TIMEOUT_MS = 2500;
+
 const parseBoolLike = (raw: unknown): boolean => {
   if (typeof raw === "boolean") return raw;
   const s = String(raw || "").trim().toLowerCase();
@@ -33,10 +35,14 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     };
     let q;
     try {
-      q = await supabaseAdmin
+      const query = supabaseAdmin
         .from("app_config")
         .select("key,value")
         .in("key", ["maintenance_mode", "maintenance_admin_mode", "maintenance_message", "maintenance_admin_message"]);
+      q = await Promise.race([
+        query,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Maintenance config check timed out")), CONFIG_CHECK_TIMEOUT_MS))
+      ]);
     } catch (e) {
       _req.log.warn({ err: e }, "maintenance config check failed; returning safe default");
       return defaults;

@@ -13,6 +13,7 @@ const OtpCodeSchema = z.string().regex(/^\d{6}$/);
 const OTP_REQUESTS_ENABLED_KEY = "otp_requests_enabled";
 const OTP_REQUESTS_DISABLED_MESSAGE_KEY = "otp_requests_disabled_message";
 const DEFAULT_OTP_DISABLED_MESSAGE = "Yeni girişler geçici olarak durduruldu. Lütfen daha sonra tekrar deneyin.";
+const CONFIG_CHECK_TIMEOUT_MS = 2500;
 const STUDENT_DEPT_BY_CODE: Record<string, { abbr: string }> = {
   "31": { abbr: "MED" },
   "32": { abbr: "ADV" },
@@ -57,10 +58,14 @@ const isMissingConfigTableError = (err: unknown): boolean => {
 };
 
 const resolveOtpRequestGate = async (): Promise<{ enabled: boolean; message: string }> => {
-  const q = await supabaseAdmin
+  const query = supabaseAdmin
     .from("app_config")
     .select("key,value")
     .in("key", [OTP_REQUESTS_ENABLED_KEY, OTP_REQUESTS_DISABLED_MESSAGE_KEY]);
+  const q = await Promise.race([
+    query,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("OTP gate config check timed out")), CONFIG_CHECK_TIMEOUT_MS))
+  ]);
   if (q.error) {
     if (isMissingConfigTableError(q.error)) {
       return { enabled: true, message: DEFAULT_OTP_DISABLED_MESSAGE };
