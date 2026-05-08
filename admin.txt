@@ -1084,6 +1084,25 @@
         isSuperAdmin: role === 'super_admin'
       };
     }
+    function fetchAdminTrafficEquipmentReservations_(rangeQuery) {
+      var statuses = ['pending', 'approved', 'IN_USE', 'in_use', 'checked_out', 'picked_up', 'key_out', 'key_picked'];
+      return Promise.all(statuses.map(function(status) {
+        var sep = rangeQuery ? '&' : '?';
+        return adminApiRequest('/equipment-reservations' + (rangeQuery || '') + sep + 'status=' + encodeURIComponent(status), { method: 'GET' });
+      })).then(function(results) {
+        var seen = {};
+        var rows = [];
+        (results || []).forEach(function(res) {
+          ((res && res.data) || []).forEach(function(row) {
+            var id = String((row && row.id) || '').trim();
+            if (id && seen[id]) return;
+            if (id) seen[id] = true;
+            rows.push(row);
+          });
+        });
+        return { ok: true, data: rows };
+      });
+    }
     function toIsoDateLocal_(raw) {
       var d = raw instanceof Date ? new Date(raw.getTime()) : new Date(String(raw || ''));
       if (isNaN(d.getTime())) return '';
@@ -1584,7 +1603,7 @@
         var toIso = toIsoDateLocal_(next) + 'T00:00:00';
         var rangeQuery = (fromIso && toIso) ? ('?from=' + encodeURIComponent(fromIso) + '&to=' + encodeURIComponent(toIso)) : '';
         return Promise.all([
-          adminApiRequest('/equipment-reservations' + rangeQuery, { method: 'GET' }),
+          fetchAdminTrafficEquipmentReservations_(rangeQuery),
           adminApiRequest('/studio-reservations' + rangeQuery, { method: 'GET' }),
           adminApiRequest('/equipment-items', { method: 'GET' }),
           adminApiRequest('/studios', { method: 'GET' })
@@ -1634,7 +1653,7 @@
         var qNorm = String(q || '').trim().toLowerCase();
         if (!qNorm) return Promise.resolve([]);
         return Promise.all([
-          adminApiRequest('/equipment-reservations', { method: 'GET' }),
+          fetchAdminTrafficEquipmentReservations_(''),
           adminApiRequest('/studio-reservations', { method: 'GET' }),
           adminApiRequest('/equipment-items', { method: 'GET' }),
           adminApiRequest('/studios', { method: 'GET' })
