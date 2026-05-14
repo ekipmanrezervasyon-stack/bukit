@@ -11,12 +11,18 @@ const profileDisplayStudentId = (profile: Record<string, unknown> | undefined): 
 };
 
 const enrichRowsWithRequesterStudentIds = async (rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> => {
-  const profileIds = Array.from(new Set(rows.map((r) => String(r.requester_profile_id || "").trim()).filter(Boolean)));
-  const emails = Array.from(new Set(rows.map((r) => String(r.requester_email || "").trim().toLowerCase()).filter(Boolean)));
+  const profileIds = new Set<string>();
+  const emails = new Set<string>();
+  for (const row of rows) {
+    const profileId = String(row.requester_profile_id || "").trim();
+    if (profileId) profileIds.add(profileId);
+    const email = String(row.requester_email || "").trim().toLowerCase();
+    if (email) emails.add(email);
+  }
   const byId = new Map<string, Record<string, unknown>>();
   const byEmail = new Map<string, Record<string, unknown>>();
-  if (profileIds.length) {
-    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("id", profileIds);
+  if (profileIds.size) {
+    const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("id", Array.from(profileIds));
     if (!q.error) {
       for (const p of (q.data ?? []) as Record<string, unknown>[]) {
         byId.set(String(p.id || ""), p);
@@ -25,7 +31,10 @@ const enrichRowsWithRequesterStudentIds = async (rows: Record<string, unknown>[]
       }
     }
   }
-  const missingEmails = emails.filter((email) => !byEmail.has(email));
+  const missingEmails: string[] = [];
+  for (const email of emails) {
+    if (!byEmail.has(email)) missingEmails.push(email);
+  }
   if (missingEmails.length) {
     const q = await supabaseAdmin.from("profiles").select("id,email,student_number,staff_auto_id").in("email", missingEmails);
     if (!q.error) {
