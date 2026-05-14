@@ -1606,10 +1606,13 @@
           adminApiRequest('/equipment-items', { method: 'GET' }),
           adminApiRequest('/studios', { method: 'GET' })
         ]).then(function(arr) {
-          var eqRows = (arr[0] && arr[0].data) || [];
-          var stRows = (arr[1] && arr[1].data) || [];
-          var invRows = (arr[2] && arr[2].data) || [];
-          var studioRows = (arr[3] && arr[3].data) || [];
+          if (!arr[0] || !Array.isArray(arr[0].data) || !arr[1] || !Array.isArray(arr[1].data) || !arr[2] || !Array.isArray(arr[2].data) || !arr[3] || !Array.isArray(arr[3].data)) {
+            throw new Error('Invalid traffic data response.');
+          }
+          var eqRows = arr[0].data;
+          var stRows = arr[1].data;
+          var invRows = arr[2].data;
+          var studioRows = arr[3].data;
           var itemMetaById = {};
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
@@ -1656,10 +1659,13 @@
           adminApiRequest('/equipment-items', { method: 'GET' }),
           adminApiRequest('/studios', { method: 'GET' })
         ]).then(function(arr) {
-          var eqRows = (arr[0] && arr[0].data) || [];
-          var stRows = (arr[1] && arr[1].data) || [];
-          var invRows = (arr[2] && arr[2].data) || [];
-          var studioRows = (arr[3] && arr[3].data) || [];
+          if (!arr[0] || !Array.isArray(arr[0].data) || !arr[1] || !Array.isArray(arr[1].data) || !arr[2] || !Array.isArray(arr[2].data) || !arr[3] || !Array.isArray(arr[3].data)) {
+            throw new Error('Invalid traffic data response.');
+          }
+          var eqRows = arr[0].data;
+          var stRows = arr[1].data;
+          var invRows = arr[2].data;
+          var studioRows = arr[3].data;
           var itemMetaById = {};
           (invRows || []).forEach(function(it) {
             var iid = String((it && it.id) || '').trim();
@@ -3835,6 +3841,10 @@
     return before !== (trafficAllRows || []).length;
   }
 
+  function trafficLoadErrorText_() {
+    return currentLang === 'en' ? 'Data could not be loaded. Please try again.' : 'Veri alınamadı. Lütfen tekrar deneyin.';
+  }
+
   function loadTraffic() {
     var date = document.getElementById('traffic-date').value;
     var container = document.getElementById('traffic-container');
@@ -3846,7 +3856,7 @@
       trafficAllRows = groupTrafficRows_(data || []);
       renderTrafficFromCache();
     }).withFailureHandler(function(err) {
-      container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">Veri alınamadı: ' + escAdm((err && err.message) || 'Bilinmeyen hata') + '</div>';
+      container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">' + escAdm(trafficLoadErrorText_()) + '</div>';
     }).getTrafficData(date, currentAuthToken);
   }
 
@@ -3863,7 +3873,7 @@
         trafficAllRows = groupTrafficRows_(data || []);
         renderTrafficFromCache();
       }).withFailureHandler(function() {
-        container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">Arama sırasında hata oluştu.</div>';
+        container.innerHTML = '<div class="col-span-2 text-center py-10 text-red-500">' + escAdm(trafficLoadErrorText_()) + '</div>';
       }).getTrafficDataByNameOrStudent(qNorm, currentAuthToken);
     }, 220);
   }
