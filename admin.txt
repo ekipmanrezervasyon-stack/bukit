@@ -963,9 +963,7 @@
         var data = {};
         try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { error: txt || 'JSON parse error' }; }
         var msg = (data && data.error) || ('HTTP ' + res.status);
-        var msgLower = String(msg || '').toLowerCase();
-        var tokenErr = /unauthorized|invalid token|jwt|token expired|session expired/.test(msgLower);
-        if (res.status === 401 || tokenErr) {
+        if (res.status === 401) {
           try { localStorage.removeItem('bookdeck_auth_token'); } catch (e3) {}
           try { sessionStorage.removeItem('bookdeck_auth_token'); } catch (e4) {}
           currentAuthToken = '';
@@ -1878,14 +1876,15 @@
 
   function openAdminStudentPdfView(url) {
     var u = String(url || '').trim();
-    if (!u) { showToast('PDF bağlantısı yok.', 'error'); return; }
+    if (!u) { showToast('PDF bağlantısı yok.', 'error'); return false; }
     var ok = u.indexOf('http') === 0 || u.indexOf('data:application/pdf') === 0 || u.indexOf('data:') === 0;
-    if (!ok) { showToast('PDF bağlantısı geçersiz.', 'error'); return; }
+    if (!ok) { showToast('PDF bağlantısı geçersiz.', 'error'); return false; }
     var f = document.getElementById('pdf-view-frame');
     var m = document.getElementById('pdf-view-modal');
-    if (!f || !m) return;
+    if (!f || !m) { showToast('PDF görüntüleyici açılamadı.', 'error'); return false; }
     f.src = u;
     m.classList.remove('hidden');
+    return true;
   }
 
   function printAdminPdfIframe(iframeId) {
@@ -4011,15 +4010,19 @@
     container.innerHTML = '<div class="text-center p-3 text-xs font-bold text-blue-600 animate-pulse">PDF Hazırlanıyor...</div>';
     google.script.run.withSuccessHandler(function(r) {
       if (r.success) {
+        if (!r.url) {
+          container.innerHTML = oldContent;
+          showToast('PDF oluşturuldu ancak bağlantı alınamadı. Kart korunuyor; lütfen tekrar deneyin.', 'error');
+          return;
+        }
+        if (!openAdminStudentPdfView(r.url)) {
+          container.innerHTML = oldContent;
+          return;
+        }
         showToast(trafficPickedUpToastText_(resId));
         trafficDropPickedUpRows_(resId);
         renderTrafficFromCache();
-        if (r.url) {
-          openAdminStudentPdfView(r.url);
-          setTimeout(function() { loadTraffic(); }, 500);
-        } else {
-          loadTraffic();
-        }
+        setTimeout(function() { loadTraffic(); }, 500);
         refreshInventoryData();
       } else { container.innerHTML = oldContent; showToast("Hata: " + r.error, "error"); }
     }).withFailureHandler(function(err) { container.innerHTML = oldContent; showToast("Sistem Hatası: " + err.message, "error"); }).adminProcessPartialCheckout(primaryId, checks, studioHandoverNote, trafficCheckoutConditionOutMap(resId, checks), currentAuthToken);
