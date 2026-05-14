@@ -1,4 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
+import { EQUIPMENT_ACTIVE_RES_STATUSES } from "../lib/reservation-statuses.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { getAuthProfile, requireAuth } from "../modules/auth/guards.js";
 
@@ -155,6 +157,12 @@ const canOperateLevel5Equipment = (profile: Record<string, unknown>): boolean =>
 
 const EQUIPMENT_ON_LOAN_RES_STATUSES = ["IN_USE", "in_use", "checked_out", "picked_up", "key_out"];
 
+const equipmentAvailabilityCheckSchema = z.object({
+  equipment_item_ids: z.array(z.string().min(1)).min(1).max(200),
+  start_at: z.string().min(1),
+  end_at: z.string().min(1)
+});
+
 export const equipmentRoutes: FastifyPluginAsync = async (app) => {
   app.get("/equipment-items", { preHandler: requireAuth }, async (req, reply) => {
     const profile = getAuthProfile(req) as unknown as Record<string, unknown>;
@@ -225,5 +233,83 @@ export const equipmentRoutes: FastifyPluginAsync = async (app) => {
     if (error) return reply.code(500).send({ ok: false, error: error.message });
     const enriched = await enrichRowsWithRequesterStudentIds((data ?? []) as Record<string, unknown>[]);
     return { ok: true, data: enriched };
+  });
+
+  app.post("/equipment-availability/check", { preHandler: requireAuth }, async (req, reply) => {
+    const parsed = equipmentAvailabilityCheckSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "Invalid availability check request." });
+    }
+
+    const startAt = parsed.data.start_at;
+    const endAt = parsed.data.end_at;
+    const startMs = new Date(startAt).getTime();
+    const endMs = new Date(endAt).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      return reply.code(400).send({ ok: false, error: "Invalid availability check range." });
+    }
+
+    const itemIds = Array.from(
+      new Set(parsed.data.equipment_item_ids.map((id) => String(id || "").trim()).filter(Boolean))
+    );
+    if (!itemIds.length) {
+      return reply.code(400).send({ ok: false, error: "No equipment items supplied." });
+    }
+
+    const itemStatusQuery = await supabaseAdmin
+      .from("equipment_items")
+      .select("id,status")
+      .in("id", itemIds);
+    if (itemStatusQuery.error) return reply.code(500).send({ ok: false, error: itemStatusQuery.error.message });
+
+    const statusByItemId = new Map<string, string>();
+    for (const row of (itemStatusQuery.data ?? []) as Record<string, unknown>[]) {
+      const itemId = String(row.id || "").trim();
+      if (itemId) statusByItemId.set(itemId, String(row.status || "").trim());
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("equipment_reservations")
+      .select("equipment_item_id,start_at,end_at,status")
+      .in("equipment_item_id", itemIds)
+      .in("status", EQUIPMENT_ACTIVE_RES_STATUSES)
+      .lt("start_at", endAt)
+      .gt("end_at", startAt);
+
+    if (error) return reply.code(500).send({ ok: false, error: error.message });
+
+    const busyEndByItemId = new Map<string, { iso: string; ms: number }>();
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      const itemId = String(row.equipment_item_id || "").trim();
+      const rowStartAt = String(row.start_at || "").trim();
+      const rowEndAt = String(row.end_at || "").trim();
+      const rowStartMs = new Date(rowStartAt).getTime();
+      const rowEndMs = new Date(rowEndAt).getTime();
+      if (!itemId || !rowEndAt || !Number.isFinite(rowStartMs) || !Number.isFinite(rowEndMs)) continue;
+      if (!(rowStartMs < endMs && rowEndMs > startMs)) continue;
+      const current = busyEndByItemId.get(itemId);
+      if (!current || rowEndMs > current.ms) {
+        busyEndByItemId.set(itemId, { iso: rowEndAt, ms: rowEndMs });
+      }
+    }
+
+    const isItemAvailable = (id: string) => statusByItemId.get(id) === "AVAILABLE";
+    const blockedItemIds = itemIds.filter((id) => !isItemAvailable(id) || busyEndByItemId.has(id));
+
+    return {
+      ok: true,
+      available_ids: itemIds.filter((id) => isItemAvailable(id) && !busyEndByItemId.has(id)),
+      conflicts: blockedItemIds
+        .map((id) => {
+          const end = busyEndByItemId.get(id)?.iso || "";
+          return {
+            equipment_item_id: id,
+            equipment_status: statusByItemId.get(id) || "UNKNOWN",
+            reason: busyEndByItemId.has(id) ? "reservation_overlap" : "item_unavailable",
+            blocking_end_at: end,
+            earliest_available_at: end
+          };
+        })
+    };
   });
 };
