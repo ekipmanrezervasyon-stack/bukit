@@ -731,7 +731,7 @@
         <h3 id="confirm-ui-title" class="text-base md:text-lg font-bold text-gray-900 mb-2">Confirm</h3>
       </div>
       <p id="confirm-ui-desc" class="text-gray-600 text-xs md:text-sm mb-5 md:mb-6"></p>
-      <div class="flex gap-2">
+      <div id="confirm-ui-actions" class="flex gap-2">
         <button type="button" onclick="closeConfirmUiModal()" class="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
         <button type="button" id="confirm-ui-ok" class="flex-1 bg-[#e30613] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-red-700 transition">Confirm</button>
       </div>
@@ -1058,38 +1058,37 @@
           });
         },
         checkEquipmentReservationConflictsBridge: function(itemIds, startIso, endIso) {
-          var ids = (Array.isArray(itemIds) ? itemIds : []).map(function(x) { return String(x || '').trim().toUpperCase(); }).filter(Boolean);
+          var seenIds = {};
+          var ids = (Array.isArray(itemIds) ? itemIds : []).map(function(x) { return String(x || '').trim(); }).filter(Boolean).filter(function(id) {
+            var key = id.toUpperCase();
+            if (seenIds[key]) return false;
+            seenIds[key] = true;
+            return true;
+          });
           if (!ids.length) return Promise.resolve({ availableIds: [] });
-          return apiRequest('/equipment-reservations', { method: 'GET' })
+          return apiRequest('/equipment-availability/check', {
+            method: 'POST',
+            body: {
+              equipment_item_ids: ids,
+              start_at: String(startIso || ''),
+              end_at: String(endIso || '')
+            }
+          })
             .then(function(res) {
-              var rows = (res && res.data) || [];
-              var sMs = new Date(String(startIso || '')).getTime();
-              var eMs = new Date(String(endIso || '')).getTime();
-              var busy = {};
-              var busyEndById = {};
-              rows.forEach(function(r) {
-                var id = String((r && r.equipment_item_id) || '').trim().toUpperCase();
-                if (!id || !ids.includes(id)) return;
-                if (!isActiveEquipmentReservationStatus_(r && r.status)) return;
-                var rs = new Date(String((r && r.start_at) || '')).getTime();
-                var re = new Date(String((r && r.end_at) || '')).getTime();
-                if (isNaN(rs) || isNaN(re)) return;
-                if (rs < eMs && re > sMs) {
-                  busy[id] = 1;
-                  if (!busyEndById[id] || re > busyEndById[id].ms) {
-                    busyEndById[id] = { ms: re, iso: String((r && r.end_at) || '') };
-                  }
-                }
-              });
               return {
-                availableIds: ids.filter(function(id) { return !busy[id]; }),
-                conflicts: ids.filter(function(id) { return !!busy[id]; }).map(function(id) {
-                  return { id: id, nextAvailableAt: busyEndById[id] && busyEndById[id].iso };
+                availableIds: Array.isArray(res && res.available_ids) ? res.available_ids : [],
+                conflicts: ((res && res.conflicts) || []).map(function(c) {
+                  return {
+                    id: String((c && c.equipment_item_id) || '').trim(),
+                    reason: String((c && c.reason) || ''),
+                    equipmentStatus: String((c && c.equipment_status) || ''),
+                    nextAvailableAt: String((c && (c.earliest_available_at || c.blocking_end_at)) || '')
+                  };
                 })
               };
             })
-            .catch(function() {
-              return { availableIds: ids };
+            .catch(function(err) {
+              return { error: (err && err.message) || 'Availability check failed.', availableIds: [] };
             });
         },
         checkOfficialHolidayBridge: function() {
@@ -2743,6 +2742,11 @@
       document.getElementById('confirm-ui-desc').innerText = desc || '';
       var iconEl = document.getElementById('confirm-ui-icon');
       var titleEl = document.getElementById('confirm-ui-title');
+      var actionsEl = document.getElementById('confirm-ui-actions');
+      if (actionsEl && !document.getElementById('confirm-ui-ok')) {
+        actionsEl.className = 'flex gap-2';
+        actionsEl.innerHTML = '<button type="button" onclick="closeConfirmUiModal()" class="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-gray-200 transition">Cancel</button><button type="button" id="confirm-ui-ok" class="flex-1 bg-[#e30613] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-red-700 transition">Confirm</button>';
+      }
       var okEl = document.getElementById('confirm-ui-ok');
       var iconMap = { info: 'ℹ️', warning: '⚠️', danger: '🗑️', success: '✅' };
       var titleClass = { info: 'text-gray-900', warning: 'text-amber-700', danger: 'text-red-700', success: 'text-green-700' };
@@ -4076,6 +4080,20 @@
     // CART
     // ═══════════════════════════════════════
     var __pickReservableBusy = false;
+    function checkEquipmentReservationConflictsPromise_(ids, startIso, endIso) {
+      return new Promise(function(resolve, reject) {
+        if (typeof google === 'undefined' || !google.script || !google.script.run) {
+          reject(new Error(currentLang === 'tr' ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.' : 'Availability check could not be completed. Please try again.'));
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(function(err) {
+            reject(err || new Error('Availability check failed.'));
+          })
+          .checkEquipmentReservationConflictsBridge(ids, startIso, endIso, currentTestToken);
+      });
+    }
     function eqCartIndexOfId(id) {
       var u = String(id == null ? '' : id).trim().toUpperCase();
       if (!u) return -1;
@@ -4119,6 +4137,128 @@
       Object.keys(equipmentGroupSelection).forEach(function(gk) {
         if (String(equipmentGroupSelection[gk] || '').toUpperCase() === u) delete equipmentGroupSelection[gk];
       });
+    }
+    function equipmentCartLabel_(id) {
+      var row = findEquipGroupByCartId(id);
+      return (row && (row.typeLabel || row.name)) ? String(row.typeLabel || row.name) : String(id || '');
+    }
+    function conflictsByEquipmentId_(pre) {
+      var out = {};
+      ((pre && pre.conflicts) || []).forEach(function(c) {
+        var id = String((c && c.id) || '').trim().toUpperCase();
+        if (id) out[id] = c;
+      });
+      return out;
+    }
+    function selectedPickupTimeOptionExists_(time) {
+      var el = document.getElementById('pickup-time-select');
+      if (!el || !time) return false;
+      return !!el.querySelector('option[value="' + String(time).replace(/"/g, '\\"') + '"]');
+    }
+    function minutesFromTime_(time) {
+      var m = String(time || '').match(/^(\d{2}):(\d{2})$/);
+      if (!m) return NaN;
+      return Number(m[1]) * 60 + Number(m[2]);
+    }
+    function suggestedPickupFromConflicts_(blockedIds, pre, range) {
+      var conflictById = conflictsByEquipmentId_(pre);
+      var pickupYmd = ymdFromDateish_(range && range.start);
+      var returnYmd = ymdFromDateish_(range && range.end);
+      var returnTime = timeFromDateishSameDay_(range && range.end, range && range.end);
+      var returnMin = minutesFromTime_(returnTime);
+      var latestMin = -1;
+      var latestTime = '';
+      if (!pickupYmd) return null;
+      for (var i = 0; i < (blockedIds || []).length; i++) {
+        var id = String(blockedIds[i] || '').trim().toUpperCase();
+        var next = String((conflictById[id] && conflictById[id].nextAvailableAt) || '').trim();
+        if (!next || ymdFromDateish_(next) !== pickupYmd) return null;
+        var time = timeFromDateishSameDay_(next, range.start);
+        var min = minutesFromTime_(time);
+        if (!Number.isFinite(min)) return null;
+        if (min > latestMin) {
+          latestMin = min;
+          latestTime = time;
+        }
+      }
+      if (!latestTime) return null;
+      if (returnYmd === pickupYmd && (!Number.isFinite(returnMin) || latestMin >= returnMin)) return null;
+      if (!selectedPickupTimeOptionExists_(latestTime)) return null;
+      return { iso: pickupYmd + 'T' + latestTime, time: latestTime };
+    }
+    function buildAvailabilityChoiceMessage_(blockedIds, pre, selectedStartIso, suggestedTime) {
+      var conflictById = conflictsByEquipmentId_(pre);
+      var lines = (blockedIds || []).slice(0, 8).map(function(fid) {
+        var key = String(fid || '').trim().toUpperCase();
+        var conflict = conflictById[key] || {};
+        var label = equipmentCartLabel_(fid);
+        var time = timeFromDateishSameDay_(conflict.nextAvailableAt, selectedStartIso);
+        return '- ' + label + (time
+          ? (currentLang === 'tr' ? ' — en erken müsait saat: ' + time : ' — earliest available: ' + time)
+          : (currentLang === 'tr' ? ' — bugün uygun görünmüyor' : ' — not available today'));
+      });
+      var more = (blockedIds || []).length > 8
+        ? '\n- +' + ((blockedIds || []).length - 8) + (currentLang === 'tr' ? ' ekipman daha' : ' more item(s)')
+        : '';
+      if (currentLang === 'tr') {
+        return 'Seçtiğiniz saat aralığında bazı ekipmanlar müsait değil:\n' + lines.join('\n') + more +
+          (suggestedTime ? '\n\nDilerseniz teslim alma saatini ' + suggestedTime + ' olarak güncelleyerek tüm ekipmanları tek seferde rezerve edebilirsiniz.' : '');
+      }
+      return 'Some items are not available for the selected time range:\n' + lines.join('\n') + more +
+        (suggestedTime ? '\n\nYou can update the pickup time to ' + suggestedTime + ' and reserve all items together.' : '');
+    }
+    function openCartAvailabilityChoiceModal_(message, suggestedTime, hasAvailableNow, onUseSuggested, onAddAvailable, onCancel) {
+      var modal = document.getElementById('confirm-ui-modal');
+      var titleEl = document.getElementById('confirm-ui-title');
+      var descEl = document.getElementById('confirm-ui-desc');
+      var iconEl = document.getElementById('confirm-ui-icon');
+      var actions = document.getElementById('confirm-ui-actions');
+      if (!modal || !titleEl || !descEl || !actions) {
+        showAlert(t('modalDeclined'), message, true);
+        if (typeof onCancel === 'function') onCancel();
+        return;
+      }
+      titleEl.innerText = t('modalUnavailable');
+      titleEl.className = 'text-base md:text-lg font-bold mb-2 text-amber-700';
+      if (iconEl) iconEl.innerText = '!';
+      descEl.innerText = message || '';
+      descEl.className = 'text-gray-600 text-xs md:text-sm mb-5 md:mb-6 whitespace-pre-line';
+      actions.className = 'flex flex-col gap-2';
+      actions.innerHTML = '';
+      function addButton(label, cls, cb, disabled) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = label;
+        b.disabled = !!disabled;
+        b.className = cls + (disabled ? ' opacity-50 cursor-not-allowed' : '');
+        b.onclick = function() {
+          if (b.disabled) return;
+          closeConfirmUiModal();
+          if (typeof cb === 'function') cb();
+        };
+        actions.appendChild(b);
+      }
+      if (suggestedTime) {
+        addButton(
+          currentLang === 'tr' ? 'Saati ' + suggestedTime + ' yap ve tümünü sepete ekle' : 'Update to ' + suggestedTime + ' and add all',
+          'w-full bg-[#e30613] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-red-700 transition',
+          onUseSuggested,
+          false
+        );
+      }
+      addButton(
+        currentLang === 'tr' ? 'Uygun olanları şimdi ekle' : 'Add available items only',
+        'w-full bg-gray-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-black transition',
+        onAddAvailable,
+        !hasAvailableNow
+      );
+      addButton(
+        currentLang === 'tr' ? 'İptal' : 'Cancel',
+        'w-full bg-gray-100 text-gray-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-gray-200 transition',
+        onCancel,
+        false
+      );
+      modal.classList.remove('hidden');
     }
     window.toggleCart=function(id,btn){
       var idx=eqCartIndexOfId(id);
@@ -4305,7 +4445,7 @@
         return;
       }
       __pickReservableBusy = true;
-      google.script.run.withSuccessHandler(function(pre) {
+      checkEquipmentReservationConflictsPromise_(ids, range.start, range.end).then(function(pre) {
         __pickReservableBusy = false;
         releaseBtn();
         if (!pre || pre.error || !Array.isArray(pre.availableIds)) {
@@ -4315,12 +4455,16 @@
         var availableSet = {};
         pre.availableIds.forEach(function(idv) { availableSet[String(idv || '').trim().toUpperCase()] = 1; });
         var selected = ids.find(function(idv) { return !!availableSet[String(idv || '').trim().toUpperCase()]; }) || '';
-        done(selected, selected ? '' : (currentLang === 'tr' ? 'Seçilen tarih ve saat aralığında bu ekipman müsait değil.' : 'This equipment is not available for the selected date and time.'));
-      }).withFailureHandler(function() {
+        if (selected) {
+          done(selected, '');
+          return;
+        }
+        done('', buildCartConflictMessage_(ids, pre, range.start) || (currentLang === 'tr' ? 'Seçilen tarih ve saat aralığında bu ekipman müsait değil.' : 'This equipment is not available for the selected date and time.'));
+      }).catch(function() {
         __pickReservableBusy = false;
         releaseBtn();
         done('', currentLang === 'tr' ? 'Müsaitlik kontrolü tamamlanamadı. Lütfen tekrar deneyin.' : 'Availability check could not be completed. Please try again.');
-      }).checkEquipmentReservationConflictsBridge(ids, range.start, range.end, currentTestToken);
+      });
     }
     function updateCartUI(){
       var cb=document.getElementById('cart-bar');
@@ -4536,8 +4680,71 @@
             );
             resolve(null);
           }
-          if (typeof google === 'undefined' || !google.script || !google.script.run) { blockForPrecheckError_(); return; }
-          google.script.run.withSuccessHandler(function(pre) {
+          function removeBlockedFromCart_(blockedIds) {
+            var blockedSet = {};
+            blockedIds.forEach(function(idv) { blockedSet[String(idv || '').trim().toUpperCase()] = 1; });
+            eqCart = eqCart.filter(function(cid) { return !blockedSet[String(cid || '').trim().toUpperCase()]; });
+            Object.keys(equipmentGroupSelection).forEach(function(gk) {
+              if (blockedSet[String(equipmentGroupSelection[gk] || '').trim().toUpperCase()]) delete equipmentGroupSelection[gk];
+            });
+            updateCartUI();
+          }
+          function resolveAvailableOnly_(safeIds, blockedIds) {
+            removeBlockedFromCart_(blockedIds);
+            resolve(safeIds);
+          }
+          function handleBlockedItems_(pre, safeIds, blockedIds) {
+            var range = { start: s, end: e };
+            var suggested = suggestedPickupFromConflicts_(blockedIds, pre, range);
+            var hasAvailableNow = safeIds.length > 0;
+            function openFallbackChoice_() {
+              openCartAvailabilityChoiceModal_(
+                buildAvailabilityChoiceMessage_(blockedIds, pre, s, ''),
+                '',
+                hasAvailableNow,
+                null,
+                function() { resolveAvailableOnly_(safeIds, blockedIds); },
+                function() { resolve(null); }
+              );
+            }
+            if (!suggested) {
+              openFallbackChoice_();
+              return;
+            }
+            checkEquipmentReservationConflictsPromise_(checkIds, suggested.iso, e).then(function(nextPre) {
+              if (!nextPre || nextPre.error || !Array.isArray(nextPre.availableIds)) {
+                openFallbackChoice_();
+                return;
+              }
+              var nextAvailableSet = {};
+              nextPre.availableIds.forEach(function(idv) { nextAvailableSet[String(idv || '').trim().toUpperCase()] = 1; });
+              var allAvailableAtSuggested = checkIds.every(function(idv) {
+                return !!nextAvailableSet[String(idv || '').trim().toUpperCase()];
+              });
+              if (!allAvailableAtSuggested) {
+                openFallbackChoice_();
+                return;
+              }
+              openCartAvailabilityChoiceModal_(
+                buildAvailabilityChoiceMessage_(blockedIds, pre, s, suggested.time),
+                suggested.time,
+                hasAvailableNow,
+                function() {
+                  var pickupTimeEl = document.getElementById('pickup-time-select');
+                  if (pickupTimeEl) pickupTimeEl.value = suggested.time;
+                  _selectedRangeMemo = { key: '', value: null };
+                  s = suggested.iso;
+                  onEquipmentDatesChanged();
+                  resolve(checkIds);
+                },
+                function() { resolveAvailableOnly_(safeIds, blockedIds); },
+                function() { resolve(null); }
+              );
+            }).catch(function() {
+              openFallbackChoice_();
+            });
+          }
+          checkEquipmentReservationConflictsPromise_(checkIds, s, e).then(function(pre) {
             if (!pre || pre.error || !Array.isArray(pre.availableIds)) {
               blockForPrecheckError_(pre && pre.error ? String(pre.error) : '');
               return;
@@ -4547,23 +4754,13 @@
             var safeIds = checkIds.filter(function(idv) { return !!availableSet[String(idv || '').trim().toUpperCase()]; });
             var blockedIds = checkIds.filter(function(idv) { return !availableSet[String(idv || '').trim().toUpperCase()]; });
             if (blockedIds.length) {
-              var blockedSet = {};
-              blockedIds.forEach(function(idv) { blockedSet[String(idv || '').trim().toUpperCase()] = 1; });
-              eqCart = eqCart.filter(function(cid) { return !blockedSet[String(cid || '').trim().toUpperCase()]; });
-              Object.keys(equipmentGroupSelection).forEach(function(gk) {
-                if (blockedSet[String(equipmentGroupSelection[gk] || '').trim().toUpperCase()]) delete equipmentGroupSelection[gk];
-              });
-              updateCartUI();
-              showAlert(
-                t('modalDeclined'),
-                buildCartConflictMessage_(blockedIds, pre, s),
-                true
-              );
+              handleBlockedItems_(pre, safeIds, blockedIds);
+              return;
             }
             resolve(safeIds);
-          }).withFailureHandler(function() {
+          }).catch(function() {
             blockForPrecheckError_();
-          }).checkEquipmentReservationConflictsBridge(checkIds, s, e, currentTestToken);
+          });
         });
       }
       var runCheckout = function() {
